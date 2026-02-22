@@ -1,0 +1,35 @@
+# FastAPI core
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic[email]==2.10.4      # Includes email field validation for user registration
+pydantic-settings==2.7.1
+
+# Auth & Security
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
+pyotp==2.9.0
+qrcode[pil]==8.0
+python-multipart==0.0.20
+
+# Azure Key Vault
+azure-identity==1.19.0
+azure-keyvault-secrets==4.9.0
+
+# HTTP client (for Tradier/Schwab API calls)
+httpx==0.28.1
+
+# Database
+sqlalchemy==2.0.36
+aiosqlite==0.20.0
+greenlet                     # Required by SQLAlchemy async (aiosqlite)
+
+# Environment / Config
+python-dotenv==1.0.1
+
+# Testing
+pytest==8.3.4
+pytest-asyncio==0.25.0
+
+# Dev utilities
+rich==13.9.4
