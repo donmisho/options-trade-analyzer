@@ -1,0 +1,14 @@
+.app-layout {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  grid-template-rows: 56px 1fr;
+  min-height: 100vh;
+}
+
+.main-content {
+  padding: 24px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}

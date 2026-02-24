@@ -1,0 +1,81 @@
+/*
+ * Options Analyzer — Design Tokens & Base Styles
+ *
+ * WHY CSS variables instead of hardcoded values?
+ * Every color, font, and spacing value is defined once here.
+ * Components reference these tokens (e.g., var(--accent-cyan))
+ * so if you ever want to tweak a color, you change ONE line
+ * and it updates everywhere. This is the same approach used
+ * by professional design systems like Tailwind and Chakra UI.
+ */
+
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=DM+Sans:wght@400;500;600;700&display=swap');
+
+:root {
+  /* ── Backgrounds ── */
+  --bg-primary: #0f1923;
+  --bg-card: #1a2736;
+  --bg-input: #0d1520;
+  --bg-hover: #223344;
+
+  /* ── Borders ── */
+  --border: #2a3a4a;
+  --border-accent: #3a4f63;
+
+  /* ── Text ── */
+  --text-primary: #e8edf2;
+  --text-secondary: #8a9bb0;
+  --text-muted: #5a6f82;
+
+  /* ── Accent Colors ── */
+  --accent-blue: #3b82f6;
+  --accent-green: #22c55e;
+  --accent-red: #ef4444;
+  --accent-yellow: #eab308;
+  --accent-orange: #f97316;
+  --accent-cyan: #06b6d4;
+  --accent-purple: #a855f7;
+
+  /* ── Fonts ── */
+  --font-body: 'DM Sans', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+/* ── Reset ── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.5;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* ── Utility Classes ── */
+.mono { font-family: var(--font-mono); }
+.text-green { color: var(--accent-green); }
+.text-red { color: var(--accent-red); }
+.text-cyan { color: var(--accent-cyan); }
+.text-yellow { color: var(--accent-yellow); }
+.text-muted { color: var(--text-muted); }
+.text-secondary { color: var(--text-secondary); }
+
+/* ── Scrollbar (dark theme friendly) ── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--bg-primary); }
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--border-accent); }

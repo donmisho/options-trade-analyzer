@@ -1,0 +1,24 @@
+.star-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 16px;
+  color: var(--text-muted);
+  transition: all 0.2s;
+  padding: 2px 4px;
+  line-height: 1;
+}
+
+.star-btn:hover {
+  color: var(--accent-yellow);
+  transform: scale(1.2);
+}
+
+.star-btn.favorited {
+  color: var(--accent-yellow);
+  text-shadow: 0 0 8px rgba(234, 179, 8, 0.4);
+}
+
+.star-btn.favorited:hover {
+  color: var(--text-muted);
+}
