@@ -119,7 +119,7 @@ export default function LongCallsPage() {
                   <td className="mono text-green">{c.delta.toFixed(2)}</td>
                   <td className="mono text-red">−${c.theta_per_day_dollars.toFixed(2)}</td>
                   <td className="mono">{c.theta_runway_days.toFixed(0)}d</td>
-                  <td className="mono">{(c.iv * 100).toFixed(1)}%</td>
+                  <td className="mono">{c.iv.toFixed(1)}%</td>
                   <td className="mono">${c.breakeven.toFixed(2)}</td>
                   <td><ScoreBar score={c.composite_score} /></td>
                 </tr>

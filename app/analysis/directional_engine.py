@@ -223,43 +223,40 @@ class DirectionalEngine:
                 long_mid = ((long_leg.get("bid", 0) or 0) + (long_leg.get("ask", 0) or 0)) / 2
                 short_mid = ((short_leg.get("bid", 0) or 0) + (short_leg.get("ask", 0) or 0)) / 2
                 debit = long_mid - short_mid
-                if debit <= 0:
+                if debit <= 0.05:
                     continue
                 
-                cost_per = debit * 100
-                qty = max(1, int(budget / cost_per))
-                total_cost = cost_per * qty
+                # 1 contract = 100 shares
+                cost_one = round(debit * 100, 2)
+                max_profit_one = round((width - debit) * 100, 2)
                 
-                if total_cost > budget * 1.1:  # 10% buffer
-                    qty = max(1, qty - 1)
-                    total_cost = cost_per * qty
+                if cost_one > budget:
+                    continue
                 
-                max_profit = (width - debit) * 100 * qty
                 breakeven = long_leg["strike"] + debit
                 req_move = ((breakeven - price) / price) * 100
                 prob = 1 - abs(short_leg.get("delta", 0.3) or 0.3)
                 
-                # Simple scoring: EV / cost
-                ev = (prob * max_profit) - ((1 - prob) * total_cost)
-                score = ev / total_cost if total_cost > 0 else 0
+                ev = (prob * max_profit_one) - ((1 - prob) * cost_one)
+                score = ev / cost_one if cost_one > 0 else 0
                 
-                if score > best_score and total_cost <= budget * 1.1:
+                if score > best_score:
                     best_score = score
                     best = StrategyCandidate(
-                        strategy_name=f"Bull Call {long_leg['strike']}/{short_leg['strike']}",
+                        strategy_name=f"Bull Call {long_leg['strike']:g}/{short_leg['strike']:g}",
                         strategy_type="vertical_spread",
-                        cost=round(total_cost, 2),
-                        max_profit=round(max_profit, 2),
-                        max_profit_str=f"${max_profit:,.0f}",
-                        max_loss=round(total_cost, 2),
+                        cost=cost_one,
+                        max_profit=max_profit_one,
+                        max_profit_str=f"${max_profit_one:,.2f}",
+                        max_loss=cost_one,
                         breakeven=round(breakeven, 2),
                         required_move_pct=round(req_move, 2),
                         prob_of_profit=round(prob, 4),
-                        fits_budget=total_cost <= budget,
-                        buffer_pct=0,  # Calculated later
-                        contracts=qty,
+                        fits_budget=True,
+                        buffer_pct=0,
+                        contracts=1,
                         expiration=long_leg["expiration"],
-                        strikes=f"{long_leg['strike']}/{short_leg['strike']}",
+                        strikes=f"{long_leg['strike']:g}/{short_leg['strike']:g}",
                         option_type="call",
                     )
         
@@ -282,42 +279,40 @@ class DirectionalEngine:
                 long_mid = ((long_leg.get("bid", 0) or 0) + (long_leg.get("ask", 0) or 0)) / 2
                 short_mid = ((short_leg.get("bid", 0) or 0) + (short_leg.get("ask", 0) or 0)) / 2
                 debit = long_mid - short_mid
-                if debit <= 0:
+                if debit <= 0.05:
                     continue
                 
-                cost_per = debit * 100
-                qty = max(1, int(budget / cost_per))
-                total_cost = cost_per * qty
+                # 1 contract = 100 shares
+                cost_one = round(debit * 100, 2)
+                max_profit_one = round((width - debit) * 100, 2)
                 
-                if total_cost > budget * 1.1:
-                    qty = max(1, qty - 1)
-                    total_cost = cost_per * qty
+                if cost_one > budget:
+                    continue
                 
-                max_profit = (width - debit) * 100 * qty
                 breakeven = long_leg["strike"] - debit
                 req_move = ((price - breakeven) / price) * 100
                 prob = 1 - abs(short_leg.get("delta", 0.3) or 0.3)
                 
-                ev = (prob * max_profit) - ((1 - prob) * total_cost)
-                score = ev / total_cost if total_cost > 0 else 0
+                ev = (prob * max_profit_one) - ((1 - prob) * cost_one)
+                score = ev / cost_one if cost_one > 0 else 0
                 
-                if score > best_score and total_cost <= budget * 1.1:
+                if score > best_score:
                     best_score = score
                     best = StrategyCandidate(
-                        strategy_name=f"Bear Put {long_leg['strike']}/{short_leg['strike']}",
+                        strategy_name=f"Bear Put {long_leg['strike']:g}/{short_leg['strike']:g}",
                         strategy_type="vertical_spread",
-                        cost=round(total_cost, 2),
-                        max_profit=round(max_profit, 2),
-                        max_profit_str=f"${max_profit:,.0f}",
-                        max_loss=round(total_cost, 2),
+                        cost=cost_one,
+                        max_profit=max_profit_one,
+                        max_profit_str=f"${max_profit_one:,.2f}",
+                        max_loss=cost_one,
                         breakeven=round(breakeven, 2),
                         required_move_pct=round(req_move, 2),
                         prob_of_profit=round(prob, 4),
-                        fits_budget=total_cost <= budget,
+                        fits_budget=True,
                         buffer_pct=0,
-                        contracts=qty,
+                        contracts=1,
                         expiration=long_leg["expiration"],
-                        strikes=f"{long_leg['strike']}/{short_leg['strike']}",
+                        strikes=f"{long_leg['strike']:g}/{short_leg['strike']:g}",
                         option_type="put",
                     )
         

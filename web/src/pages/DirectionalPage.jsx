@@ -208,15 +208,15 @@ export default function DirectionalPage() {
                   <td><StarButton trade={buildFavTrade(s)} /></td>
                   <td className="mono">
                     {s.is_recommended && <span className="text-yellow">★ </span>}
-                    {s.strategy_name}
+                    {s.strategy_name.replace(/\.0(?=\/|$)/g, '')}
                   </td>
                   <td className="mono text-muted">{s.expiration}</td>
-                  <td className="mono">${s.cost.toFixed(0)}</td>
+                  <td className="mono">${s.cost.toFixed(2)}</td>
                   <td className={`mono ${s.max_profit_str === 'Unlimited' ? 'text-cyan' : 'text-green'}`}>
                     {s.max_profit_str === 'Unlimited' ? (
                       <em>Unlimited</em>
                     ) : (
-                      `$${s.max_profit.toFixed(0)}`
+                      s.max_profit_str
                     )}
                   </td>
                   <td className="mono">${s.breakeven.toFixed(2)}</td>

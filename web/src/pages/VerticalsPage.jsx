@@ -167,7 +167,7 @@ export default function VerticalsPage() {
                     <td className="mono">${s.breakeven.toFixed(2)}</td>
                     <td className="mono">{(s.prob_of_profit * 100).toFixed(0)}%</td>
                     <td className={`mono ${s.ev_raw >= 0 ? 'text-green' : 'text-red'}`}>
-                      ${s.ev_raw.toFixed(0)}
+                      ${s.ev_raw.toFixed(2)}
                     </td>
                     <td>
                       <ScoreBar score={s.composite_score} />

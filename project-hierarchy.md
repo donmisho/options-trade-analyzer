@@ -139,6 +139,13 @@ uvicorn app.main:app --reload
 
 **Terminal 2 — React (port 5173):**
 ```powershell
-cd "C:\Users\DonMishory\OneDrive - jmholistic.com\VS Code Projects\Options Analyzer\web"
+cd "C:\Users\DonMishory\OneDrive - jmholistic.com\VS Code Projects\Options Analyzer\options-analyzer\web"
 npm run dev
+```
+
+
+
+### Future Enhancements:
+```
+** Config Screen (future): Build a UI config screen for all analysis parameters. Vertical spread filters are in UserConfig in models.py (already DB-backed). Long call filters are hardcoded in LongCallFilters in app/analysis/long_call_engine.py and need to be wired into the user config system first. **
 ```
