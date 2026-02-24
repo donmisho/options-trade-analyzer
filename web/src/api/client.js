@@ -52,17 +52,17 @@ export default api;
 // ─── Convenience methods for each endpoint ───
 
 export async function analyzeVerticals(params) {
-  const { data } = await api.post('/verticals', params);
+  const { data } = await api.post('/analyze/verticals', params);
   return data;
 }
 
 export async function analyzeLongCalls(params) {
-  const { data } = await api.post('/long-calls', params);
+  const { data } = await api.post('/analyze/long-calls', params);
   return data;
 }
 
 export async function analyzeDirectional(params) {
-  const { data } = await api.post('/directional', params);
+  const { data } = await api.post('/analyze/directional', params);
   return data;
 }
 
