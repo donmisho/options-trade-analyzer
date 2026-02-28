@@ -70,3 +70,22 @@ export async function getQuote(symbol) {
   const { data } = await api.get(`/market/quote/${symbol}`);
   return data;
 }
+
+/**
+ * Fetch quotes for multiple symbols in parallel.
+ * Returns a map of { symbol: quoteData }.
+ * Failed quotes are silently skipped (returns null for that symbol).
+ */
+export async function getQuotes(symbols) {
+  const results = {};
+  const promises = symbols.map(async (symbol) => {
+    try {
+      const data = await getQuote(symbol);
+      results[symbol] = data;
+    } catch {
+      results[symbol] = null;
+    }
+  });
+  await Promise.all(promises);
+  return results;
+}

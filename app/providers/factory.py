@@ -17,6 +17,7 @@ from typing import Optional
 
 from app.providers.base import MarketDataProvider, AccountProvider, TradingProvider
 from app.providers.tradier import TradierMarketData
+from app.providers.schwab import SchwabMarketData
 from app.core.secrets import SecretsManager
 from app.core.config import settings
 
@@ -37,11 +38,10 @@ PROVIDER_REGISTRY = {
         # "account": lambda secrets, user_id, env: TradierAccount(...),
         # "trading": lambda secrets, user_id, env: TradierTrading(...),
     },
-    # "schwab" will be added in Phase 3
-    # "schwab": {
-    #     "capabilities": ["market_data", "account", "trading"],
-    #     "market_data": lambda secrets, user_id, env: SchwabMarketData(...),
-    # },
+    "schwab": {
+        "capabilities": ["market_data"],
+        "market_data": None,  # Set at runtime by init — needs token_manager
+    },
 }
 
 
@@ -60,6 +60,27 @@ class ProviderFactory:
     def __init__(self, secrets_manager: SecretsManager):
         self.secrets = secrets_manager
         self._cache: dict[str, object] = {}
+
+    def init_schwab(self, token_manager):
+        """
+        Initialize the Schwab provider with its token manager.
+
+        WHY separate init: The Schwab adapter needs the SchwabTokenManager,
+        which is created in main.py at startup. Unlike Tradier where we can
+        create the adapter from just a token string, Schwab needs the full
+        token manager for auto-refresh. So we register the factory function
+        here after the token manager exists.
+        """
+        from app.providers.schwab import SchwabMarketData
+
+        self._schwab_token_manager = token_manager
+
+        # Now update the registry with a real factory function
+        if "schwab" in PROVIDER_REGISTRY:
+            PROVIDER_REGISTRY["schwab"]["market_data"] = (
+                lambda secrets, user_id, env: SchwabMarketData(token_manager)
+            )
+            logger.info("ProviderFactory: Schwab market data adapter registered")
 
     def get_market_data(
         self,

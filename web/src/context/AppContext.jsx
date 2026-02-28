@@ -14,7 +14,8 @@
  * endpoint, but localStorage is perfect for now.
  */
 
-import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import { getQuotes } from '../api/client';
 
 const AppContext = createContext(null);
 
@@ -64,6 +65,52 @@ export function AppProvider({ children }) {
 
   // Watchlist with live prices (prices fetched separately)
   const [watchlist] = useState(DEFAULT_WATCHLIST);
+
+  // Live prices keyed by symbol: { SPY: { price: 598.12, change: -2.31, change_pct: -0.38 }, ... }
+  const [prices, setPrices] = useState({});
+  const [pricesLoading, setPricesLoading] = useState(false);
+
+  // Ref to prevent duplicate fetches if component re-renders during load
+  const fetchingRef = useRef(false);
+
+  /**
+   * Fetch live quotes for all watchlist symbols.
+   *
+   * WHY parallel fetch instead of one-by-one?
+   * Calling getQuote for 6 symbols sequentially would take ~6 seconds
+   * (each call waits for the previous). Promise.all fires them all at
+   * once, so it takes as long as the slowest single call (~1 second).
+   */
+  const fetchPrices = useCallback(async () => {
+    if (fetchingRef.current) return;
+    fetchingRef.current = true;
+    setPricesLoading(true);
+    try {
+      const symbols = DEFAULT_WATCHLIST.map(w => w.symbol);
+      const quotes = await getQuotes(symbols);
+      const newPrices = {};
+      for (const [symbol, q] of Object.entries(quotes)) {
+        if (q) {
+          newPrices[symbol] = {
+            price: q.price,
+            change: q.change,
+            change_pct: q.change_pct,
+          };
+        }
+      }
+      setPrices(newPrices);
+    } catch {
+      // Silently fail — stale prices are better than crashing
+    } finally {
+      setPricesLoading(false);
+      fetchingRef.current = false;
+    }
+  }, []);
+
+  // Fetch prices on initial load
+  useEffect(() => {
+    fetchPrices();
+  }, [fetchPrices]);
 
   // Favorites
   const [favorites, setFavorites] = useState(loadFavorites);
@@ -131,6 +178,11 @@ export function AppProvider({ children }) {
     activeSymbol,
     setActiveSymbol,
     watchlist,
+
+    // Prices
+    prices,
+    pricesLoading,
+    fetchPrices,
 
     // Favorites
     favorites,

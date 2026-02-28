@@ -51,6 +51,17 @@ class Settings(BaseSettings):
     # --- Tradier (non-secret settings) ---
     tradier_environment: str = "sandbox"  # "sandbox" or "production"
 
+    # --- Schwab (non-secret settings) ---
+    # App key and secret can also come from SecretsManager / Key Vault
+    # These .env values are the fallback for local dev
+    schwab_app_key: Optional[str] = None
+    schwab_app_secret: Optional[str] = None
+    schwab_callback_url: str = "https://127.0.0.1:8000/api/v1/auth/schwab/callback"
+
+    # --- SSL for local HTTPS (Schwab OAuth requires it) ---
+    ssl_certfile: Optional[str] = None
+    ssl_keyfile: Optional[str] = None
+
     # --- Rate Limiting ---
     login_max_attempts: int = 5
     login_lockout_minutes: int = 15

@@ -31,6 +31,8 @@ from app.api.auth_routes import router as auth_router
 from app.api.market_routes import router as market_router, init_market_routes
 from app.api.config_routes import router as config_router
 from app.api.analysis_routes import router as analysis_router, init_analysis_routes
+from app.api.schwab_auth_routes import router as schwab_auth_router, init_schwab_auth_routes
+from app.providers.schwab_token_manager import SchwabTokenManager
 
 
 # Configure logging
@@ -69,6 +71,13 @@ async def lifespan(app: FastAPI):
     provider_factory = ProviderFactory(secrets_manager)
     init_market_routes(provider_factory)
     init_analysis_routes(provider_factory)
+
+    # 5. Initialize Schwab OAuth token manager
+    schwab_token_manager = SchwabTokenManager(secrets_manager)
+    init_schwab_auth_routes(schwab_token_manager)
+    provider_factory.init_schwab(schwab_token_manager)
+    logger.info("Schwab OAuth token manager initialized")
+
     logger.info(f"Provider factory initialized. Available: {provider_factory.list_providers()}")
 
     logger.info(f"{settings.app_name} ready at http://{settings.host}:{settings.port}")
@@ -94,7 +103,11 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=[
+        "http://localhost:5173",
+        "https://localhost:5173",
+        "https://127.0.0.1:5173",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -107,6 +120,7 @@ app.include_router(auth_router, prefix="/api/v1")
 app.include_router(market_router, prefix="/api/v1")
 app.include_router(config_router, prefix="/api/v1")
 app.include_router(analysis_router, prefix="/api/v1")
+app.include_router(schwab_auth_router, prefix="/api/v1")
 
 
 # --- Health Check ---
