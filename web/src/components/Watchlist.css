@@ -3,6 +3,7 @@
   border-right: 1px solid var(--border);
   padding: 16px 12px;
   overflow-y: auto;
+  grid-area: watchlist;
 }
 
 .watchlist-title {

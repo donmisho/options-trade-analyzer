@@ -121,6 +121,10 @@ class Quote(BaseModel):
     day_high: float
     day_low: float
     previous_close: float
+    week_52_high: Optional[float] = None
+    week_52_low: Optional[float] = None
+    avg_volume: Optional[int] = None
+    volume_ratio: Optional[float] = None   # today's volume / avg volume
     timestamp: datetime
 
 

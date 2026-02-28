@@ -12,6 +12,7 @@ import { useApp } from '../context/AppContext';
 import { analyzeLongCalls } from '../api/client';
 import StarButton from '../components/StarButton';
 import ScoreBar from '../components/ScoreBar';
+import QuoteBar from '../components/QuoteBar';
 import './PageShared.css';
 import './VerticalsPage.css';
 
@@ -63,13 +64,7 @@ export default function LongCallsPage() {
 
   return (
     <div className="page-card">
-      <h2 className="page-title">
-        Long Call Analysis —{' '}
-        <span className="symbol-highlight">{activeSymbol}</span>
-        {underlyingPrice > 0 && (
-          <span className="underlying-price">${underlyingPrice.toFixed(2)}</span>
-        )}
-      </h2>
+      <QuoteBar title="Vertical Spread Analysis" />
 
       {!loading && !error && calls.length > 0 && (
         <p className="page-subtitle">

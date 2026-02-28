@@ -23,6 +23,7 @@ import StarButton from '../components/StarButton';
 import ScoreBar from '../components/ScoreBar';
 import './PageShared.css';
 import './VerticalsPage.css';
+import QuoteBar from '../components/QuoteBar';
 
 export default function VerticalsPage() {
   const { activeSymbol } = useApp();
@@ -91,13 +92,7 @@ export default function VerticalsPage() {
 
   return (
     <div className="page-card">
-      <h2 className="page-title">
-        Vertical Spread Analysis —{' '}
-        <span className="symbol-highlight">{activeSymbol}</span>
-        {underlyingPrice > 0 && (
-          <span className="underlying-price">${underlyingPrice.toFixed(2)}</span>
-        )}
-      </h2>
+      <QuoteBar title="Vertical Spread Analysis" />
 
       {/* Status bar */}
       {!loading && !error && spreads.length > 0 && (

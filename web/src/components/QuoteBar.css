@@ -1,0 +1,135 @@
+/* QuoteBar — Enhanced analysis page header */
+
+.quote-bar {
+  margin-bottom: 16px;
+}
+
+/* Row 1: Title + Symbol Input */
+.qb-title-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.qb-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary, #e0e0e0);
+  margin: 0;
+  white-space: nowrap;
+}
+
+/* Row 2: Data strip */
+.qb-data-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  background: var(--bg-primary, #0f0f1a);
+  border: 1px solid var(--border-color, #1e1e30);
+  border-radius: 6px;
+  font-size: 12px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  flex-wrap: wrap;
+}
+
+/* Price + Change */
+.qb-price-group {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.qb-price {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary, #e0e0e0);
+}
+
+.qb-change {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.qb-change.up {
+  color: var(--accent-green, #00e676);
+}
+
+.qb-change.down {
+  color: #ff5252;
+}
+
+/* Divider */
+.qb-divider {
+  color: var(--border-color, #2a2a3e);
+  font-weight: 300;
+  opacity: 0.5;
+}
+
+/* Range groups (Day, 52W, Vol) */
+.qb-range-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.qb-range-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted, #666);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.qb-range-values {
+  font-size: 12px;
+  color: var(--text-secondary, #aaa);
+}
+
+/* Activity Indicator */
+.qb-activity {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: help;
+}
+
+.qb-activity-icon {
+  font-size: 12px;
+}
+
+.qb-activity-label {
+  letter-spacing: 0.3px;
+}
+
+.qb-activity-extreme {
+  color: #ff5252;
+  background: rgba(255, 82, 82, 0.12);
+}
+
+.qb-activity-high {
+  color: #ffab40;
+  background: rgba(255, 171, 64, 0.10);
+}
+
+.qb-activity-normal {
+  color: var(--text-muted, #666);
+  background: transparent;
+}
+
+.qb-activity-low {
+  color: var(--text-muted, #555);
+  background: rgba(136, 136, 136, 0.08);
+}
+
+/* Loading */
+.qb-loading {
+  color: var(--text-muted, #666);
+  font-style: italic;
+  font-size: 12px;
+}

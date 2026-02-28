@@ -13,6 +13,7 @@ import { useApp } from '../context/AppContext';
 import { analyzeDirectional } from '../api/client';
 import StarButton from '../components/StarButton';
 import ScoreBar from '../components/ScoreBar';
+import QuoteBar from '../components/QuoteBar';
 import './PageShared.css';
 import './VerticalsPage.css'; // Reuse shared styles
 import './DirectionalPage.css';
@@ -84,10 +85,7 @@ export default function DirectionalPage() {
 
   return (
     <div className="page-card">
-      <h2 className="page-title">
-        Directional Compare —{' '}
-        <span className="symbol-highlight">{activeSymbol}</span>
-      </h2>
+      <QuoteBar title="Vertical Spread Analysis" />
 
       {/* ═══ Thesis Form ═══ */}
       <form className="thesis-form" onSubmit={handleSubmit}>

@@ -11,6 +11,7 @@ from typing import Optional
 from app.models.schemas import Quote, OptionChainResponse
 from app.auth.dependencies import require_read
 from app.providers.factory import ProviderFactory
+from app.core.config import settings
 
 router = APIRouter(prefix="/market", tags=["Market Data"])
 
@@ -44,7 +45,10 @@ async def get_quote(
     factory = _get_factory()
     # TODO: look up user's provider preference from DB
     # For now, use Tradier
-    provider = factory.get_market_data("tradier", user_id=user.get("sub"))
+    provider = factory.get_market_data(
+        settings.default_market_data_provider,
+        user_id=user.get("sub"),
+    )
 
     try:
         data = await provider.get_quote(symbol.upper())
@@ -74,7 +78,10 @@ async def get_option_chain(
     Query params override config defaults for this request.
     """
     factory = _get_factory()
-    provider = factory.get_market_data("tradier", user_id=user.get("sub"))
+    provider = factory.get_market_data(
+        settings.default_market_data_provider,
+        user_id=user.get("sub"),
+    )
 
     try:
         data = await provider.get_chain(
@@ -96,7 +103,10 @@ async def get_expirations(
 ):
     """List available expiration dates for a symbol."""
     factory = _get_factory()
-    provider = factory.get_market_data("tradier", user_id=user.get("sub"))
+    provider = factory.get_market_data(
+        settings.default_market_data_provider,
+        user_id=user.get("sub"),
+    )
 
     try:
         expirations = await provider.get_expirations(symbol.upper())
@@ -113,7 +123,10 @@ async def get_strikes(
 ):
     """List available strike prices for a specific expiration."""
     factory = _get_factory()
-    provider = factory.get_market_data("tradier", user_id=user.get("sub"))
+    provider = factory.get_market_data(
+        settings.default_market_data_provider,
+        user_id=user.get("sub"),
+    )
 
     try:
         strikes = await provider.get_strikes(symbol.upper(), expiration)

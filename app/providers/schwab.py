@@ -91,7 +91,7 @@ class SchwabMarketData(MarketDataProvider):
         resp = await self._client.get(
             f"/{symbol}/quotes",
             headers=headers,
-            params={"fields": "quote,reference"},
+            params={"fields": "quote,fundamental"},
         )
         resp.raise_for_status()
         data = resp.json()
@@ -101,15 +101,24 @@ class SchwabMarketData(MarketDataProvider):
         symbol_data = data.get(symbol.upper(), {})
         quote = symbol_data.get("quote", {})
 
+        fundamental = symbol_data.get("fundamental", {})
+        total_volume = quote.get("totalVolume", 0) or 0
+        avg_volume = fundamental.get("avg1YearVolume", 0) or 0
+        volume_ratio = round(total_volume / avg_volume, 2) if avg_volume > 0 else None
+
         return {
             "symbol": symbol_data.get("symbol", symbol.upper()),
             "price": quote.get("lastPrice", 0),
             "change": quote.get("netChange", 0),
             "change_pct": quote.get("netPercentChange", 0),
-            "volume": quote.get("totalVolume", 0),
+            "volume": total_volume,
             "day_high": quote.get("highPrice", 0),
             "day_low": quote.get("lowPrice", 0),
             "previous_close": quote.get("closePrice", 0),
+            "week_52_high": quote.get("52WeekHigh"),
+            "week_52_low": quote.get("52WeekLow"),
+            "avg_volume": avg_volume if avg_volume > 0 else None,
+            "volume_ratio": volume_ratio,
             "timestamp": datetime.now(timezone.utc),
         }
 

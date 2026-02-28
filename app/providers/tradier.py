@@ -75,6 +75,13 @@ class TradierMarketData(MarketDataProvider):
             "day_high": quote.get("high", 0),
             "day_low": quote.get("low", 0),
             "previous_close": quote.get("prevclose", 0),
+            "week_52_high": quote.get("week_52_high"),
+            "week_52_low": quote.get("week_52_low"),
+            "avg_volume": quote.get("average_volume"),
+            "volume_ratio": (
+                round(quote.get("volume", 0) / quote.get("average_volume", 1), 2)
+                if quote.get("average_volume", 0) > 0 else None
+            ),
             "timestamp": datetime.now(timezone.utc),
         }
 

@@ -1,11 +1,15 @@
 .app-layout {
   display: grid;
+  grid-template-areas:
+    "header header"
+    "watchlist main";
   grid-template-columns: 160px 1fr;
-  grid-template-rows: 56px 1fr;
+  grid-template-rows: 48px 1fr;
   min-height: 100vh;
 }
 
 .main-content {
+  grid-area: main;
   padding: 24px;
   overflow-y: auto;
   display: flex;

@@ -1,0 +1,52 @@
+/* SymbolInput — inline symbol entry on analysis pages */
+
+.symbol-input-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 12px;
+  vertical-align: middle;
+}
+
+.symbol-input {
+  width: 80px;
+  padding: 4px 8px;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--text-primary, #e0e0e0);
+  background: var(--bg-primary, #1a1a2e);
+  border: 1px solid var(--border-color, #2a2a3e);
+  border-radius: 4px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.symbol-input:focus {
+  border-color: var(--accent-cyan, #00d2ff);
+}
+
+.symbol-input::placeholder {
+  color: var(--text-muted, #666);
+  font-weight: 400;
+}
+
+.symbol-go-btn {
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary, #e0e0e0);
+  background: var(--bg-secondary, #252540);
+  border: 1px solid var(--border-color, #2a2a3e);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.symbol-go-btn:hover {
+  background: var(--accent-cyan, #00d2ff);
+  color: #000;
+  border-color: var(--accent-cyan, #00d2ff);
+}

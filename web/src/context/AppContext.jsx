@@ -1,5 +1,5 @@
 /**
- * AppContext — Shared state for symbol selection and favorites.
+ * AppContext — Shared state for symbol selection, watchlist, and favorites.
  *
  * WHY React Context instead of prop drilling?
  * The active symbol needs to be visible to: the Header (shows it),
@@ -7,11 +7,10 @@
  * Passing it as props through 4+ levels of components would be messy.
  * Context makes it available to any component that needs it via useApp().
  *
- * WHY localStorage for favorites?
- * Favorites need to survive page refreshes and browser restarts.
+ * WHY localStorage for favorites and watchlist?
+ * Both need to survive page refreshes and browser restarts.
  * localStorage is the simplest persistence layer for client-side data.
- * In a future phase, we could sync favorites to the database via an API
- * endpoint, but localStorage is perfect for now.
+ * In a future phase, we could sync to the database via an API endpoint.
  */
 
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
@@ -43,10 +42,10 @@ function saveFavorites(favs) {
 }
 
 // ─── Watchlist data ─────────────────────────────────────────
-// Static for now — in a future phase this comes from the DB
-// via the user config endpoint.
+// The starter symbols — used on first ever load when there's
+// nothing saved in localStorage yet.
 
-const DEFAULT_WATCHLIST = [
+const STARTER_WATCHLIST = [
   { symbol: 'SPY', name: 'S&P 500 ETF' },
   { symbol: 'QQQ', name: 'Nasdaq 100' },
   { symbol: 'MSFT', name: 'Microsoft' },
@@ -54,6 +53,41 @@ const DEFAULT_WATCHLIST = [
   { symbol: 'T', name: 'AT&T' },
   { symbol: 'GEV', name: 'GE Vernova' },
 ];
+
+// Known names for common symbols — used to show a friendly name
+// in the watchlist sidebar. If a symbol isn't here, we just show
+// the ticker with no subtitle.
+const SYMBOL_NAMES = {
+  SPY: 'S&P 500 ETF', QQQ: 'Nasdaq 100', MSFT: 'Microsoft',
+  GLD: 'Gold ETF', T: 'AT&T', GEV: 'GE Vernova',
+  AAPL: 'Apple', AMZN: 'Amazon', GOOG: 'Alphabet',
+  GOOGL: 'Alphabet', META: 'Meta', NVDA: 'NVIDIA',
+  TSLA: 'Tesla', AMD: 'AMD', NFLX: 'Netflix',
+  JPM: 'JPMorgan', BAC: 'Bank of America', V: 'Visa',
+  MA: 'Mastercard', DIS: 'Disney', INTC: 'Intel',
+  CRM: 'Salesforce', PYPL: 'PayPal', COIN: 'Coinbase',
+  PLTR: 'Palantir', SOFI: 'SoFi', RIVN: 'Rivian',
+  IWM: 'Russell 2000 ETF', TLT: 'Treasury Bond ETF',
+  XLF: 'Financial ETF', XLE: 'Energy ETF', SLV: 'Silver ETF',
+};
+
+const WL_KEY = 'optionsAnalyzer_watchlist';
+
+function loadWatchlist() {
+  try {
+    const raw = localStorage.getItem(WL_KEY);
+    if (!raw) return STARTER_WATCHLIST;
+    const saved = JSON.parse(raw);
+    if (!Array.isArray(saved) || saved.length === 0) return STARTER_WATCHLIST;
+    return saved;
+  } catch {
+    return STARTER_WATCHLIST;
+  }
+}
+
+function saveWatchlist(list) {
+  localStorage.setItem(WL_KEY, JSON.stringify(list));
+}
 
 // ─── Provider ───────────────────────────────────────────────
 
@@ -63,8 +97,8 @@ export function AppProvider({ children }) {
     return localStorage.getItem('optionsAnalyzer_symbol') || 'SPY';
   });
 
-  // Watchlist with live prices (prices fetched separately)
-  const [watchlist] = useState(DEFAULT_WATCHLIST);
+  // Dynamic watchlist — persisted in localStorage, reordered by most recent
+  const [watchlist, setWatchlist] = useState(loadWatchlist);
 
   // Live prices keyed by symbol: { SPY: { price: 598.12, change: -2.31, change_pct: -0.38 }, ... }
   const [prices, setPrices] = useState({});
@@ -81,31 +115,62 @@ export function AppProvider({ children }) {
    * (each call waits for the previous). Promise.all fires them all at
    * once, so it takes as long as the slowest single call (~1 second).
    */
-  const fetchPrices = useCallback(async () => {
+  const fetchPrices = useCallback(async (symbolList) => {
     if (fetchingRef.current) return;
     fetchingRef.current = true;
     setPricesLoading(true);
     try {
-      const symbols = DEFAULT_WATCHLIST.map(w => w.symbol);
+      const symbols = symbolList || watchlist.map(w => w.symbol);
       const quotes = await getQuotes(symbols);
-      const newPrices = {};
-      for (const [symbol, q] of Object.entries(quotes)) {
-        if (q) {
-          newPrices[symbol] = {
-            price: q.price,
-            change: q.change,
-            change_pct: q.change_pct,
-          };
+      setPrices(prev => {
+        const updated = { ...prev };
+        for (const [symbol, q] of Object.entries(quotes)) {
+          if (q) {
+            updated[symbol] = {
+              price: q.price,
+              change: q.change,
+              change_pct: q.change_pct,
+            };
+          }
         }
-      }
-      setPrices(newPrices);
+        return updated;
+      });
     } catch {
       // Silently fail — stale prices are better than crashing
     } finally {
       setPricesLoading(false);
       fetchingRef.current = false;
     }
-  }, []);
+  }, [watchlist]);
+
+  /**
+   * Add a symbol to the watchlist (or move it to the top if already there).
+   *
+   * WHY move-to-top: The most recently searched symbol is the one you're
+   * actively thinking about. Putting it at the top keeps it one click away.
+   */
+  const addToWatchlist = useCallback((symbol) => {
+    const sym = symbol.toUpperCase();
+    setWatchlist(prev => {
+      const filtered = prev.filter(w => w.symbol !== sym);
+      const entry = { symbol: sym, name: SYMBOL_NAMES[sym] || '' };
+      const updated = [entry, ...filtered];
+      saveWatchlist(updated);
+      return updated;
+    });
+    // Fetch price for the new symbol if we don't have it yet
+    if (!prices[sym]) {
+      getQuotes([sym]).then(quotes => {
+        const q = quotes[sym];
+        if (q) {
+          setPrices(prev => ({
+            ...prev,
+            [sym]: { price: q.price, change: q.change, change_pct: q.change_pct },
+          }));
+        }
+      });
+    }
+  }, [prices]);
 
   // Fetch prices on initial load
   useEffect(() => {
@@ -117,6 +182,11 @@ export function AppProvider({ children }) {
 
   // Toast notification
   const [toast, setToast] = useState(null);
+
+  // Persist watchlist whenever it changes
+  useEffect(() => {
+    saveWatchlist(watchlist);
+  }, [watchlist]);
 
   // Persist active symbol
   useEffect(() => {
@@ -173,10 +243,16 @@ export function AppProvider({ children }) {
     return favorites.some(f => f.id === id);
   }, [favorites]);
 
+  // Wrap setActiveSymbol to also update the watchlist
+  const handleSetActiveSymbol = useCallback((symbol) => {
+    setActiveSymbol(symbol);
+    addToWatchlist(symbol);
+  }, [addToWatchlist]);
+
   const value = {
     // Symbol
     activeSymbol,
-    setActiveSymbol,
+    setActiveSymbol: handleSetActiveSymbol,
     watchlist,
 
     // Prices

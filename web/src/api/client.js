@@ -89,3 +89,12 @@ export async function getQuotes(symbols) {
   await Promise.all(promises);
   return results;
 }
+
+export async function getSchwabStatus() {
+  try {
+    const { data } = await api.get('/auth/schwab/status');
+    return data;
+  } catch {
+    return { connected: false };
+  }
+}
