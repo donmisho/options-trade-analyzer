@@ -33,6 +33,8 @@ from app.api.config_routes import router as config_router
 from app.api.analysis_routes import router as analysis_router, init_analysis_routes
 from app.api.schwab_auth_routes import router as schwab_auth_router, init_schwab_auth_routes
 from app.providers.schwab_token_manager import SchwabTokenManager
+from app.api.evaluation_routes import router as evaluation_router, init_evaluation_routes
+from app.providers.ai import AnthropicAdapter, FoundryAdapter
 
 
 # Configure logging
@@ -80,6 +82,29 @@ async def lifespan(app: FastAPI):
 
     logger.info(f"Provider factory initialized. Available: {provider_factory.list_providers()}")
 
+    # 6. Initialize AI provider (for trade evaluations)
+    if settings.ai_provider == "foundry":
+        ai_provider = FoundryAdapter(
+            resource=settings.foundry_resource,
+            deployment=settings.foundry_deployment,
+            api_key=settings.foundry_api_key,
+        )
+        logger.info(f"AI provider: Azure Foundry ({settings.foundry_resource})")
+    else:
+        api_key = (
+            settings.anthropic_api_key
+            or secrets_manager.get("anthropic-api-key")
+        )
+        if not api_key:
+            logger.warning("AI provider: No API key found — trade evaluation disabled")
+            ai_provider = None
+        else:
+            ai_provider = AnthropicAdapter(api_key=api_key)
+            logger.info("AI provider: Anthropic (direct)")
+
+    if ai_provider:
+        init_evaluation_routes(ai_provider)
+
     logger.info(f"{settings.app_name} ready at http://{settings.host}:{settings.port}")
 
     yield  # App runs here
@@ -121,6 +146,7 @@ app.include_router(market_router, prefix="/api/v1")
 app.include_router(config_router, prefix="/api/v1")
 app.include_router(analysis_router, prefix="/api/v1")
 app.include_router(schwab_auth_router, prefix="/api/v1")
+app.include_router(evaluation_router, prefix="/api/v1")
 
 
 # --- Health Check ---

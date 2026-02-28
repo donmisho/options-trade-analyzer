@@ -69,6 +69,19 @@ class Settings(BaseSettings):
     # --- CORS ---
     cors_origins: list[str] = ["http://localhost:3000", "http://localhost:5173"]
 
+    # --- AI Provider ---
+    # "anthropic" = direct to Anthropic API (uses ANTHROPIC_API_KEY)
+    # "foundry"   = Azure Foundry (uses FOUNDRY_RESOURCE + Entra ID)
+    ai_provider: str = "anthropic"
+
+    # --- Anthropic Direct ---
+    anthropic_api_key: Optional[str] = None
+
+    # --- Azure Foundry ---
+    foundry_resource: Optional[str] = None
+    foundry_deployment: str = "claude-sonnet-4-6"
+    foundry_api_key: Optional[str] = None
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",
