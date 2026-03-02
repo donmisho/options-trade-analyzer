@@ -9,12 +9,18 @@
  *
  * SCHWAB STATUS INDICATOR:
  * Shows a small colored dot + label in the header that tells you
- * whether you're connected to Schwab. If disconnected, clicking
- * it takes you to the Schwab login flow. This saves you from
- * seeing "Network Error" and wondering why — the status is always
- * visible at a glance.
+ * whether you're connected to Schwab's market data API.
+ *
+ * - "Connected" (green) = Schwab OAuth tokens are valid, live data flows
+ * - "Disconnected" (red) = tokens expired or missing — click to log in
+ * - "..." (gray) = checking status on first load
+ *
+ * WHY open in a popup instead of navigating away?
+ * The Schwab OAuth flow redirects through Schwab's login page and back
+ * to our callback URL. If we navigated in the same tab, the user would
+ * lose whatever analysis they had open. A popup keeps their work intact
+ * and auto-detects when login completes by polling the status endpoint.
  */
-
 import { useState, useEffect, useCallback } from 'react';
 import { NavLink } from 'react-router-dom';
 import Logo from '../assets/Logo';
@@ -23,11 +29,11 @@ import { getSchwabStatus } from '../api/client';
 import './Header.css';
 
 export default function Header() {
-  const { favorites } = useApp();
+  const { favorites, fetchPrices } = useApp();
   const favCount = favorites.length;
 
-  // Schwab connection state
-  const [schwabConnected, setSchwabConnected] = useState(null); // null = checking
+  // Schwab connection state: null = checking, true = connected, false = disconnected
+  const [schwabConnected, setSchwabConnected] = useState(null);
 
   const checkSchwabStatus = useCallback(async () => {
     try {
@@ -45,14 +51,57 @@ export default function Header() {
     return () => clearInterval(interval);
   }, [checkSchwabStatus]);
 
+  /**
+   * WHY a popup + polling pattern?
+   *
+   * 1. We open Schwab's OAuth login in a small popup window
+   * 2. The user logs in on Schwab's site
+   * 3. Schwab redirects back to our backend callback URL, which stores tokens
+   * 4. Meanwhile, we poll /auth/schwab/status every 2 seconds
+   * 5. Once it returns connected=true, we update the indicator and close the popup
+   *
+   * This avoids navigating away from the app and losing the user's current work.
+   */
   const handleSchwabClick = () => {
-    if (!schwabConnected) {
-      // Open the Schwab OAuth login flow
-      // WHY window.open? The OAuth flow redirects through Schwab's site
-      // and back to our callback URL. Opening in the same tab would
-      // lose the user's current analysis state.
-      window.location.href = '/api/v1/auth/schwab/login';
-    }
+    if (schwabConnected) return; // Already connected, nothing to do
+
+    // Open the Schwab login in a popup window.
+    // WHY https://127.0.0.1:8000 (backend) instead of relative URL?
+    // The OAuth callback URL registered with Schwab points to the backend directly.
+    // The Vite dev server (port 5173) can't handle the OAuth redirect.
+    const popup = window.open(
+      'https://127.0.0.1:8000/api/v1/auth/schwab/login',
+      'schwab-login',
+      'width=600,height=700,menubar=no,toolbar=no'
+    );
+
+    // Poll for connection status every 2 seconds while popup is open
+    const pollInterval = setInterval(async () => {
+      try {
+        // Check if user closed the popup manually
+        if (popup && popup.closed) {
+          clearInterval(pollInterval);
+          // Do one final check — they might have completed login before closing
+          await checkSchwabStatus();
+          return;
+        }
+        const status = await getSchwabStatus();
+        if (status.connected) {
+          setSchwabConnected(true);
+          clearInterval(pollInterval);
+          // Auto-close the popup since login succeeded
+          if (popup && !popup.closed) popup.close();
+          // Refresh watchlist prices now that we have a valid token
+          fetchPrices();
+        }
+      } catch {
+        // Keep polling — network hiccups during OAuth are normal
+      }
+    }, 2000);
+
+    // Safety net: stop polling after 5 minutes no matter what
+    // (prevents runaway intervals if something goes wrong)
+    setTimeout(() => clearInterval(pollInterval), 5 * 60 * 1000);
   };
 
   return (
@@ -81,16 +130,17 @@ export default function Header() {
             schwabConnected ? 'connected' : 'disconnected'
           }`}
           onClick={handleSchwabClick}
+          style={{ cursor: schwabConnected ? 'default' : 'pointer' }}
           title={
             schwabConnected === null ? 'Checking Schwab connection...' :
-            schwabConnected ? 'Connected to Schwab' :
+            schwabConnected ? 'Connected to Schwab — live market data active' :
             'Click to connect to Schwab'
           }
         >
           <span className="schwab-dot" />
           <span className="schwab-label">
             {schwabConnected === null ? '...' :
-             schwabConnected ? 'Schwab' : 'Disconnected'}
+             schwabConnected ? 'Connected' : 'Disconnected'}
           </span>
         </div>
       </nav>

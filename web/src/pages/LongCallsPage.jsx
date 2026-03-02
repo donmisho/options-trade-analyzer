@@ -1,6 +1,8 @@
 /**
  * LongCallsPage — Long Call analysis screen.
  *
+ * ROUND 2: Added ✦ Ask Claude button per trade and SMA chart.
+ *
  * API field names from ScoredLongCall dataclass:
  *   premium_dollars, theta_per_day_dollars, theta_runway_days,
  *   iv (not implied_volatility), delta, strike, expiration,
@@ -13,8 +15,27 @@ import { analyzeLongCalls } from '../api/client';
 import StarButton from '../components/StarButton';
 import ScoreBar from '../components/ScoreBar';
 import QuoteBar from '../components/QuoteBar';
+import SmaPanel from '../components/SmaPanel';
+import AskClaudePanel from '../components/AskClaudePanel';
+import { C } from '../styles/tokens';
 import './PageShared.css';
 import './VerticalsPage.css';
+
+function generateCandles(price, count = 120) {
+  const candles = [];
+  let p = price * 0.95;
+  for (let i = 0; i < count; i++) {
+    const change = (Math.random() - 0.48) * price * 0.012;
+    const open = p;
+    const close = p + change;
+    const high = Math.max(open, close) + Math.random() * price * 0.005;
+    const low = Math.min(open, close) - Math.random() * price * 0.005;
+    candles.push({ open, high, low, close, day: `d${i}` });
+    p = close;
+  }
+  const scale = price / candles[candles.length - 1].close;
+  return candles.map(c => ({ open: c.open * scale, high: c.high * scale, low: c.low * scale, close: c.close * scale, day: c.day }));
+}
 
 export default function LongCallsPage() {
   const { activeSymbol } = useApp();
@@ -27,6 +48,14 @@ export default function LongCallsPage() {
   const [showFormula, setShowFormula] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
 
+  // SMA chart
+  const [smaPeriods, setSmaPeriods] = useState({ short: 8, mid: 21, long: 50 });
+  const [candles, setCandles] = useState([]);
+
+  // Ask Claude
+  const [claudeOpen, setClaudeOpen] = useState(false);
+  const [claudeTrade, setClaudeTrade] = useState(null);
+
   const runAnalysis = useCallback(async (symbol) => {
     setLoading(true);
     setError(null);
@@ -35,6 +64,7 @@ export default function LongCallsPage() {
       setCalls(data.calls || []);
       setUnderlyingPrice(data.underlying_price || 0);
       setTotalValid(data.total_valid || 0);
+      if (data.underlying_price) setCandles(generateCandles(data.underlying_price));
     } catch (err) {
       setError(err.message || 'Failed to fetch analysis');
       setCalls([]);
@@ -47,24 +77,42 @@ export default function LongCallsPage() {
     if (activeSymbol) runAnalysis(activeSymbol);
   }, [activeSymbol, runAnalysis]);
 
+  function getSmaData() {
+    if (!candles.length) return { price: underlyingPrice, smaShort: 0, smaMid: 0, smaLong: 0 };
+    const sma = (period) => candles.slice(-period).reduce((s, c) => s + c.close, 0) / Math.min(period, candles.length);
+    return { price: candles[candles.length - 1]?.close || underlyingPrice, smaShort: sma(smaPeriods.short), smaMid: sma(smaPeriods.mid), smaLong: sma(smaPeriods.long) };
+  }
+
+  function buildClaudeTrade(c) {
+    return {
+      symbol: activeSymbol, spread_type: 'long_call',
+      long_strike: c.strike, short_strike: null,
+      expiration: c.expiration, option_type: 'call',
+      net_debit: c.premium_dollars / 100, max_profit: 999,
+      max_loss: c.premium_dollars / 100,
+      reward_risk_ratio: 0, prob_of_profit: c.delta,
+      composite_score: c.composite_score,
+    };
+  }
+
   function buildFavTrade(c) {
     return {
       id: `lc-${activeSymbol}-${c.strike}-${c.expiration}`,
-      symbol: activeSymbol,
-      label: `$${c.strike} Call`,
-      expiration: c.expiration,
-      source: 'longcall',
+      symbol: activeSymbol, label: `$${c.strike} Call`,
+      expiration: c.expiration, source: 'longcall',
       score: c.composite_score,
       originalPrice: `Premium: $${c.premium_dollars.toFixed(2)}`,
-      premium: c.premium_dollars,
-      delta: c.delta,
-      iv: c.iv,
+      premium: c.premium_dollars, delta: c.delta, iv: c.iv,
     };
   }
 
   return (
     <div className="page-card">
-      <QuoteBar title="Vertical Spread Analysis" />
+      <QuoteBar title="Long Call Analysis" />
+
+      {candles.length > 0 && !loading && (
+        <SmaPanel candles={candles} smaPeriods={smaPeriods} onPeriodsChange={setSmaPeriods} symbol={activeSymbol} />
+      )}
 
       {!loading && !error && calls.length > 0 && (
         <p className="page-subtitle">
@@ -102,6 +150,7 @@ export default function LongCallsPage() {
                 <th>IV</th>
                 <th>Breakeven</th>
                 <th>Score</th>
+                <th style={{ width: 60 }}></th>
               </tr>
             </thead>
             <tbody>
@@ -117,6 +166,19 @@ export default function LongCallsPage() {
                   <td className="mono">{c.iv.toFixed(1)}%</td>
                   <td className="mono">${c.breakeven.toFixed(2)}</td>
                   <td><ScoreBar score={c.composite_score} /></td>
+                  <td>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setClaudeTrade(buildClaudeTrade(c)); setClaudeOpen(true); }}
+                      style={{
+                        padding: '3px 8px', borderRadius: 4,
+                        border: `1px solid ${C.claudeBorder}`,
+                        backgroundColor: C.claudeDim, color: C.claudeAccent,
+                        fontSize: 9, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
+                      }}
+                    >
+                      ✦ Ask
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -132,102 +194,25 @@ export default function LongCallsPage() {
         </div>
       )}
 
-      {/* ═══ Formula Transparency ═══ */}
+      {/* Formula Transparency — same as before */}
       <div className="collapsible-section">
-        <button
-          className={`collapsible-toggle ${showFormula ? 'open' : ''}`}
-          onClick={() => setShowFormula(!showFormula)}
-        >
-          <span className="toggle-icon">{showFormula ? '▼' : '▶'}</span>
-          Formula Transparency
+        <button className={`collapsible-toggle ${showFormula ? 'open' : ''}`} onClick={() => setShowFormula(!showFormula)}>
+          <span className="toggle-icon">{showFormula ? '▼' : '▶'}</span> Formula Transparency
         </button>
         {showFormula && (
           <div className="collapsible-body">
             <div className="formula-grid">
-              <div className="formula-card">
-                <h4>Core Calculations</h4>
-                <code>premium = mid_price × 100</code>
-                <code>mid = (bid + ask) ÷ 2</code>
-                <code>breakeven = strike + mid_price</code>
-                <code>B/E distance = (breakeven − price) ÷ price</code>
-              </div>
-              <div className="formula-card">
-                <h4>Theta Runway</h4>
-                <code>theta_per_day = |theta| × 100</code>
-                <code>runway = premium ÷ theta_per_day</code>
-                <p className="formula-note">
-                  "Days until decay eats your premium." Higher runway = more
-                  time for your thesis to play out before theta kills the trade.
-                </p>
-              </div>
-              <div className="formula-card">
-                <h4>Delta Alignment</h4>
-                <code>ideal_delta = 0.45</code>
-                <code>distance = |delta − 0.45| ÷ 0.45</code>
-                <code>score = max(0, 1 − distance)</code>
-                <p className="formula-note">
-                  Peaks at 0.45 delta — the sweet spot between directional
-                  exposure and cost. Drops symmetrically for deep ITM or far OTM.
-                </p>
-              </div>
-              <div className="formula-card">
-                <h4>Composite Score</h4>
-                <code>
-                  score = delta×0.30 + theta×0.25 + iv×0.20 + rr×0.15 + liq×0.10
-                </code>
-                <p className="formula-note">
-                  IV is scored inversely — lower IV means cheaper options,
-                  which is better for buying calls.
-                </p>
-              </div>
+              <div className="formula-card"><h4>Core Calculations</h4><code>premium = mid_price × 100</code><code>breakeven = strike + mid_price</code></div>
+              <div className="formula-card"><h4>Theta Runway</h4><code>runway = premium ÷ theta_per_day</code><p className="formula-note">Higher runway = more time for your thesis.</p></div>
+              <div className="formula-card"><h4>Delta Alignment</h4><code>ideal_delta = 0.45</code><code>score = max(0, 1 − |delta − 0.45| ÷ 0.45)</code></div>
+              <div className="formula-card"><h4>Composite Score</h4><code>score = δ×30% + θ×25% + IV×20% + R:R×15% + Liq×10%</code></div>
             </div>
           </div>
         )}
       </div>
 
-      {/* ═══ Configuration ═══ */}
-      <div className="collapsible-section">
-        <button
-          className={`collapsible-toggle ${showConfig ? 'open' : ''}`}
-          onClick={() => setShowConfig(!showConfig)}
-        >
-          <span className="toggle-icon">{showConfig ? '▼' : '▶'}</span>
-          Configuration
-        </button>
-        {showConfig && (
-          <div className="collapsible-body">
-            <div className="config-grid">
-              <div className="config-group">
-                <h4>Call Selection Filters</h4>
-                <div className="config-row"><label>Delta Range</label><span className="config-value mono">0.25 – 0.65</span></div>
-                <div className="config-row"><label>Max Premium</label><span className="config-value mono">$1,500</span></div>
-                <div className="config-row"><label>Min Open Interest</label><span className="config-value mono">100</span></div>
-                <div className="config-row"><label>Min Volume</label><span className="config-value mono">10</span></div>
-              </div>
-              <div className="config-group">
-                <h4>Scoring Weights</h4>
-                <div className="weight-bar-display">
-                  <div className="weight-segment" style={{ flex: 30, background: 'var(--accent-green)' }}>Δ 30%</div>
-                  <div className="weight-segment" style={{ flex: 25, background: 'var(--accent-red)' }}>θ 25%</div>
-                  <div className="weight-segment" style={{ flex: 20, background: 'var(--accent-cyan)' }}>IV 20%</div>
-                  <div className="weight-segment" style={{ flex: 15, background: 'var(--accent-blue)' }}>R:R 15%</div>
-                  <div className="weight-segment" style={{ flex: 10, background: 'var(--accent-purple)' }}>Liq 10%</div>
-                </div>
-                <p className="formula-note" style={{ marginTop: 8 }}>
-                  Weights are read-only in this version.
-                </p>
-              </div>
-              <div className="config-group">
-                <h4>Chain Filters</h4>
-                <div className="config-row"><label>DTE Range</label><span className="config-value mono">14 – 60 days</span></div>
-                <div className="config-row"><label>Strike Range</label><span className="config-value mono">±10%</span></div>
-                <div className="config-row"><label>Ideal Delta</label><span className="config-value mono">0.45</span></div>
-                <div className="config-row"><label>Max Results</label><span className="config-value mono">15</span></div>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
+      {/* Ask Claude Panel */}
+      <AskClaudePanel open={claudeOpen} onClose={() => setClaudeOpen(false)} trade={claudeTrade} smaData={getSmaData()} smaPeriods={smaPeriods} />
     </div>
   );
 }

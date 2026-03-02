@@ -1,100 +1,178 @@
 /**
- * API Client — All backend communication goes through here.
+ * API Client — Talks to the FastAPI backend.
  *
- * WHY a centralized client?
- * Every API call needs the same base URL, auth token, and error
- * handling. Instead of repeating that in every component, we
- * configure it once here. If the base URL changes (local → Azure),
- * you update ONE line.
+ * WHY this file exists: The React components should never know the URL structure
+ * or HTTP details of the backend. They call functions like `evaluateTrade(data)`
+ * and get clean responses back. If the backend URL or auth scheme changes, only
+ * this file needs updating.
  *
- * WHY axios?
- * It auto-parses JSON, supports interceptors for auth tokens,
- * and has cleaner error handling than raw fetch(). The request/
- * response interceptors below will be important when we add
- * JWT auth tokens in a later phase.
+ * NOTE: The backend runs on HTTPS with a self-signed cert (https://127.0.0.1:8000).
+ * During development, your browser needs to have accepted that cert. Visit
+ * https://127.0.0.1:8000/docs once and click "proceed" to trust it.
  */
 
-import axios from 'axios';
+// ─── Base URL ─────────────────────────────────────────────────────
+const API_BASE = "/api/v1";
 
-const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1',
-  timeout: 30000, // 30s — option chains can be large
-  headers: {
-    'Content-Type': 'application/json',
-  },
-});
+// ─── Helper: Make authenticated requests ──────────────────────────
+async function apiFetch(path, options = {}) {
+  const url = `${API_BASE}${path}`;
+  const token = localStorage.getItem("ota_token");
 
-// ─── Request interceptor: attach auth token ───
-// (Currently a placeholder — will be wired up in Phase 3 when
-//  we add proper login flow to the React app)
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('optionsAnalyzer_token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-});
+  const headers = {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...options.headers,
+  };
 
-// ─── Response interceptor: normalize errors ───
-api.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    // If the API returns a structured error, pull out the detail message
-    if (error.response?.data?.detail) {
-      error.message = error.response.data.detail;
+  try {
+    const response = await fetch(url, { ...options, headers });
+
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({}));
+      const message = errorBody.detail || `API error: ${response.status}`;
+      throw new Error(message);
     }
-    return Promise.reject(error);
+
+    return await response.json();
+  } catch (err) {
+    if (err.name === "TypeError" && err.message.includes("fetch")) {
+      throw new Error("Cannot reach the backend. Is it running on https://127.0.0.1:8000?");
+    }
+    throw err;
   }
-);
-
-export default api;
-
-// ─── Convenience methods for each endpoint ───
-
-export async function analyzeVerticals(params) {
-  const { data } = await api.post('/analyze/verticals', params);
-  return data;
 }
 
-export async function analyzeLongCalls(params) {
-  const { data } = await api.post('/analyze/long-calls', params);
-  return data;
-}
 
-export async function analyzeDirectional(params) {
-  const { data } = await api.post('/analyze/directional', params);
-  return data;
-}
+// ═══════════════════════════════════════════════════════════════════
+// MARKET DATA
+// ═══════════════════════════════════════════════════════════════════
 
 export async function getQuote(symbol) {
-  const { data } = await api.get(`/market/quote/${symbol}`);
-  return data;
+  return apiFetch(`/market/quote/${symbol.toUpperCase()}`);
 }
 
 /**
  * Fetch quotes for multiple symbols in parallel.
- * Returns a map of { symbol: quoteData }.
- * Failed quotes are silently skipped (returns null for that symbol).
+ * Returns { SPY: { price, change, change_pct }, QQQ: { ... }, ... }
  */
 export async function getQuotes(symbols) {
   const results = {};
-  const promises = symbols.map(async (symbol) => {
+  const promises = symbols.map(async (sym) => {
     try {
-      const data = await getQuote(symbol);
-      results[symbol] = data;
+      const q = await getQuote(sym);
+      results[sym] = q;
     } catch {
-      results[symbol] = null;
+      results[sym] = null;
     }
   });
   await Promise.all(promises);
   return results;
 }
 
+export async function getOptionChain(symbol, params = {}) {
+  const query = new URLSearchParams();
+  if (params.min_dte !== undefined) query.set("min_dte", params.min_dte);
+  if (params.max_dte !== undefined) query.set("max_dte", params.max_dte);
+  if (params.strike_range_pct !== undefined) query.set("strike_range_pct", params.strike_range_pct);
+  if (params.option_type) query.set("option_type", params.option_type);
+  const qs = query.toString();
+  return apiFetch(`/market/chain/${symbol.toUpperCase()}${qs ? `?${qs}` : ""}`);
+}
+
+
+// ═══════════════════════════════════════════════════════════════════
+// ANALYSIS ENGINES (Phase 2)
+// ═══════════════════════════════════════════════════════════════════
+
+export async function analyzeVerticals(data) {
+  return apiFetch("/analyze/verticals", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function analyzeLongCalls(data) {
+  return apiFetch("/analyze/long-calls", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function analyzeDirectional(data) {
+  return apiFetch("/analyze/directional", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+
+// ═══════════════════════════════════════════════════════════════════
+// TRADE EVALUATION (AI — Ask Claude)
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * Evaluate a trade using the AI provider (Claude via Anthropic or Azure Foundry).
+ *
+ * @param {Object} tradeData — Matches the POST /evaluate/trade request schema
+ * @returns {Object} — { verdict, analysis, exit_levels, pre_screen_flags,
+ *                        model_used, provider, input_tokens, output_tokens }
+ */
+export async function evaluateTrade(tradeData) {
+  return apiFetch("/evaluate/trade", {
+    method: "POST",
+    body: JSON.stringify(tradeData),
+  });
+}
+
+/**
+ * Send a follow-up question about a previous trade evaluation.
+ *
+ * @param {string} question — The follow-up question text
+ * @param {Array} conversationHistory — Prior messages [{ role, content }, ...]
+ */
+export async function followUpQuestion(question, conversationHistory = []) {
+  return apiFetch("/evaluate/follow-up", {
+    method: "POST",
+    body: JSON.stringify({
+      question,
+      conversation_history: conversationHistory,
+    }),
+  });
+}
+
+/**
+ * Check if the AI evaluation service is healthy.
+ * @returns {Object} — { status: "ok", provider: "anthropic"|"foundry" }
+ */
+export async function checkAiHealth() {
+  return apiFetch("/evaluate/health");
+}
+
+
+// ═══════════════════════════════════════════════════════════════════
+// CONFIG
+// ═══════════════════════════════════════════════════════════════════
+
+export async function getUserConfig() {
+  return apiFetch("/config");
+}
+
+export async function updateUserConfig(configData) {
+  return apiFetch("/config", {
+    method: "PUT",
+    body: JSON.stringify(configData),
+  });
+}
+/**
+ * Check Schwab OAuth connection status.
+ * Used by Header to show connection indicator.
+ */
 export async function getSchwabStatus() {
   try {
-    const { data } = await api.get('/auth/schwab/status');
+    const data = await apiFetch("/auth/schwab/status");
     return data;
   } catch {
-    return { connected: false };
+    return { connected: false, error: "Not available" };
   }
 }

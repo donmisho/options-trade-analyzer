@@ -1,151 +1,137 @@
-# Options Analyzer — VS Code Project Hierarchy
+# Options Analyzer — Project Hierarchy (Updated 2026-02-28)
 
 ```
-Options Analyzer/                          ← Your VS Code workspace root
+Options Analyzer/                          ← VS Code workspace root
 │
-├── options-analyzer/                      ← The FastAPI backend (EXISTING)
-│   ├── venv/                              ← Python virtual environment (don't touch)
-│   ├── .env                               ← Your secrets (Tradier token, JWT key)
+├── options-analyzer/                      ← The FastAPI backend
+│   ├── venv/                              ← Python virtual environment (activate with .\venv\Scripts\Activate.ps1)
+│   ├── .env                               ← Secrets + config (Tradier, Schwab, Anthropic, JWT, AI_PROVIDER)
 │   ├── .env.example                       ← Template for .env
 │   ├── requirements.txt                   ← Python dependencies
 │   ├── README.md                          ← Project documentation
 │   ├── options_analyzer.db                ← SQLite database (auto-created)
+│   ├── certs/                             ← Self-signed SSL certs for local HTTPS
+│   │   ├── key.pem
+│   │   └── cert.pem
 │   │
 │   └── app/                               ← All Python code lives here
-│       ├── main.py                        ← FastAPI entry point ⚡ EDIT THIS (add 3 lines)
+│       ├── main.py                        ← FastAPI entry point (initializes all providers + routers)
 │       │
-│       ├── core/                          ← EXISTING — config & secrets
-│       │   ├── config.py                  ← App settings (loads from .env)
+│       ├── core/                          ← Config & secrets
+│       │   ├── config.py                  ← App settings (loads from .env) — includes AI provider settings
 │       │   └── secrets.py                 ← SecretsManager (Key Vault + .env fallback)
 │       │
-│       ├── auth/                          ← EXISTING — authentication
+│       ├── auth/                          ← Authentication (Phase 0)
 │       │   ├── service.py                 ← Password hashing, JWT, TOTP
 │       │   └── dependencies.py            ← Auth middleware (Tier 1/2/3)
 │       │
-│       ├── models/                        ← EXISTING — data models
-│       │   ├── database.py                ← SQLAlchemy models
+│       ├── models/                        ← Data models
+│       │   ├── database.py                ← SQLAlchemy models (User, UserConfig)
 │       │   ├── session.py                 ← Async DB engine
 │       │   └── schemas.py                 ← Pydantic request/response schemas
 │       │
-│       ├── providers/                     ← EXISTING — API adapters
-│       │   ├── base.py                    ← Abstract interfaces
-│       │   ├── tradier.py                 ← Tradier API adapter
-│       │   └── factory.py                 ← Creates provider instances
+│       ├── providers/                     ← API adapters (adapter pattern)
+│       │   ├── base.py                    ← Abstract interfaces (MarketData, Account, Trading)
+│       │   ├── tradier.py                 ← Tradier market data adapter
+│       │   ├── schwab_market_data.py      ← Schwab market data adapter
+│       │   ├── schwab_token_manager.py    ← Schwab OAuth token management
+│       │   ├── factory.py                 ← Creates provider instances by name
+│       │   │
+│       │   └── ai/                        ← 🆕 AI provider adapters (added 2026-02-28)
+│       │       ├── __init__.py            ← Package exports
+│       │       ├── base.py               ← AIProvider interface, TradeContext, TradeVerdict
+│       │       ├── prompts.py            ← System prompt, prompt builder, exit levels, pre-screen
+│       │       ├── anthropic_adapter.py  ← Direct Anthropic API (active — uses ANTHROPIC_API_KEY)
+│       │       └── foundry_adapter.py    ← Azure Foundry adapter (Entra ID or API key auth)
 │       │
-│       ├── analysis/                      ← 🆕 NEW — copy entire folder from package
-│       │   ├── __init__.py                ← 🆕 Package exports
-│       │   ├── vertical_engine.py         ← 🆕 Vertical spread scorer
-│       │   ├── long_call_engine.py        ← 🆕 Long call scorer
-│       │   └── directional_engine.py      ← 🆕 Strategy comparator
+│       ├── analysis/                      ← Analysis engines (Phase 2 — code written, not tested e2e)
+│       │   ├── __init__.py                ← Package exports
+│       │   ├── vertical_engine.py         ← Vertical spread scorer
+│       │   ├── long_call_engine.py        ← Long call scorer
+│       │   └── directional_engine.py      ← Strategy comparator
 │       │
 │       └── api/                           ← API routes
-│           ├── auth_routes.py             ← EXISTING — login, register, MFA
-│           ├── market_routes.py           ← EXISTING — quotes, chains
-│           ├── config_routes.py           ← EXISTING — user preferences
-│           └── analysis_routes.py         ← 🆕 NEW — copy this file
+│           ├── auth_routes.py             ← Login, register, MFA
+│           ├── market_routes.py           ← Quotes, option chains
+│           ├── config_routes.py           ← User config (GET/PUT)
+│           ├── analysis_routes.py         ← Vertical, long call, directional analysis
+│           └── evaluation_routes.py       ← 🆕 Trade evaluation via Claude (POST /evaluate/trade)
 │
 │
-└── web/                                   ← 🆕 NEW — React frontend (create with npm)
-    ├── node_modules/                      ← Auto-created by npm install (don't touch)
-    ├── package.json                       ← Auto-created by create-react-app
+└── web/                                   ← React frontend (Vite, port 5173)
+    ├── node_modules/
+    ├── package.json
+    ├── vite.config.js                     ← Proxy /api to backend with secure: false
     ├── public/
-    │   └── index.html                     ← Auto-created
+    │   └── index.html
     │
-    └── src/                               ← Your React code
-        ├── index.js                       ← Auto-created entry point
-        ├── App.jsx                        ← Main app with routing (build later)
+    └── src/
+        ├── index.js
+        ├── App.jsx                        ← Main app with routing
         │
-        ├── api/                           ← 🆕 Copy from package
-        │   └── client.js                  ← 🆕 API bridge (talks to FastAPI)
+        ├── api/
+        │   └── client.js                 ← API bridge (needs evaluateTrade, followUp functions)
         │
-        ├── components/                    ← Shared UI components (build later)
+        ├── components/                    ← 🔲 TODO: Move prototypes here
         │   ├── Layout.jsx                 ← Sidebar nav + top bar
-        │   ├── Chart.jsx                  ← TOS-style candlestick chart
-        │   └── shared.jsx                 ← Badges, buttons, metric cards
+        │   ├── Chart.jsx                  ← (placeholder)
+        │   └── shared.jsx                 ← (placeholder)
         │
-        └── pages/                         ← One file per screen
-            ├── Dashboard.jsx              ← (build later)
-            ├── Chain.jsx                  ← (build later)
-            ├── Analysis.jsx               ← 🆕 Copy from package — connected to API
-            ├── Portfolio.jsx              ← (build later)
-            ├── Trade.jsx                  ← (build later)
-            └── Settings.jsx               ← (build later)
+        └── pages/
+            ├── VerticalsPage.jsx          ← Vertical spread analysis screen
+            ├── LongCallsPage.jsx          ← Long call analysis screen
+            └── (other pages planned)
 ```
 
-## What to do RIGHT NOW (in order)
+## API Endpoints
 
-### Step 1: Copy backend files
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | /api/v1/auth/register | None | Create account |
+| POST | /api/v1/auth/login | None | Get JWT token |
+| POST | /api/v1/auth/setup-mfa | Tier 1 | Enable TOTP |
+| GET | /api/v1/market/quote/{symbol} | Tier 1 | Stock quote |
+| GET | /api/v1/market/chain/{symbol} | Tier 1 | Option chain |
+| GET | /api/v1/config | Tier 1 | User config |
+| PUT | /api/v1/config | Tier 1 | Update config |
+| POST | /api/v1/analyze/verticals | Tier 1 | Score vertical spreads |
+| POST | /api/v1/analyze/long-calls | Tier 1 | Score long calls |
+| POST | /api/v1/analyze/directional | Tier 1 | Compare strategies |
+| **POST** | **/api/v1/evaluate/trade** | **Tier 1** | **🆕 Claude trade evaluation** |
+| **POST** | **/api/v1/evaluate/follow-up** | **Tier 1** | **🆕 Follow-up question** |
+| **GET** | **/api/v1/evaluate/health** | **None** | **🆕 AI provider health check** |
+
+## .env Configuration (AI section)
+
 ```
-From package:  backend/app/analysis/       →  options-analyzer/app/analysis/
-From package:  backend/app/api/analysis_routes.py  →  options-analyzer/app/api/analysis_routes.py
-```
+# --- AI Provider ---
+AI_PROVIDER=anthropic              # "anthropic" or "foundry"
+ANTHROPIC_API_KEY=sk-ant-...       # Direct Anthropic API key
 
-### Step 2: Edit main.py (3 lines)
-```python
-# ADD this import near the top with the other route imports:
-from app.api.analysis_routes import router as analysis_router, init_analysis_routes
-
-# ADD this line where provider factory is initialized:
-init_analysis_routes(provider_factory)
-
-# ADD this line where other routers are included:
-app.include_router(analysis_router, prefix="/api/v1")
-```
-
-### Step 3: Test backend
-```bash
-cd options-analyzer
-venv\Scripts\activate
-uvicorn app.main:app --reload
-# Go to http://localhost:8000/docs → you should see 3 new analysis endpoints
-```
-
-### Step 4: Create React project (separate terminal)
-```bash
-cd "Options Analyzer"
-npx create-react-app web
-cd web
-npm install react-router-dom axios
+# --- Azure Foundry (uncomment when quota approved) ---
+# AI_PROVIDER=foundry
+# FOUNDRY_RESOURCE=ota-foundry
+# FOUNDRY_DEPLOYMENT=claude-sonnet-4-6
+# FOUNDRY_API_KEY=                  # Leave empty for Entra ID auth
 ```
 
-### Step 5: Copy frontend files
-```
-From package:  frontend/src/api/client.js      →  web/src/api/client.js
-From package:  frontend/src/pages/Analysis.jsx  →  web/src/pages/Analysis.jsx
-```
+## Azure Resources
 
-### Step 6: Add CORS to main.py
-```python
-from fastapi.middleware.cors import CORSMiddleware
+| Resource | Name | Tags |
+|----------|------|------|
+| Resource Group | (check portal) | project=options-trade-analyzer, environment=dev, owner=don |
+| Azure SQL | (check portal) | component=database |
+| App Service | (check portal) | component=api |
+| Static Web App | (check portal) | component=web |
+| Key Vault | (check portal) | component=secrets |
+| **Foundry** | **ota-foundry** | **component=ai** (quota pending for Sonnet 4.6) |
 
-# Add BEFORE route registrations:
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-```
+## Phase Tracker
 
-### Step 7: Run both (two separate terminals)
-
-**Terminal 1 — API (port 8000):**
-```powershell
-cd "C:\Users\DonMishory\OneDrive - jmholistic.com\VS Code Projects\Options Analyzer\options-analyzer"
-venv\Scripts\activate
-uvicorn app.main:app --reload
-```
-
-**Terminal 2 — React (port 5173):**
-```powershell
-cd "C:\Users\DonMishory\OneDrive - jmholistic.com\VS Code Projects\Options Analyzer\options-analyzer\web"
-npm run dev
-```
-
-
-
-### Future Enhancements:
-```
-** Config Screen (future): Build a UI config screen for all analysis parameters. Vertical spread filters are in UserConfig in models.py (already DB-backed). Long call filters are hardcoded in LongCallFilters in app/analysis/long_call_engine.py and need to be wired into the user config system first. **
-```
+- Phase 0 ✅ Security (auth, MFA, JWT tiers)
+- Phase 1 ✅ Config + Tradier market data adapter
+- Phase 2 ✅ Analysis engines (code written, not tested end-to-end)
+- Phase 2.5 ✅ AI provider layer (Anthropic direct + Foundry adapter)
+- Phase 3 🔲 Portfolio (Schwab OAuth, positions)
+- Phase 4 🔲 MCP integration
+- Phase 5 🔲 Trading (order execution, per-trade MFA)

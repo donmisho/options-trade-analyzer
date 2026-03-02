@@ -1,19 +1,15 @@
 /**
  * VerticalsPage — Vertical Spread analysis screen.
  *
- * HOW IT WORKS:
- * 1. When the page loads (or the active symbol changes), it
- *    automatically calls POST /api/v1/analyze/verticals
- * 2. The API fetches the options chain from Tradier, builds
- *    every valid bull call and bear put spread, scores them,
- *    and returns the top results ranked by composite score
- * 3. We render those results in a table with star buttons
+ * ROUND 2 ENHANCEMENTS:
+ *   - SmaPanel: candlestick chart with SMA overlay above results
+ *   - ✦ Ask Claude: button per trade opens AI evaluation panel
+ *   - ConfigDrawer: replaces the read-only config section
+ *   - FormulaBreakdown: expandable per-trade scoring math
  *
- * WHY auto-run instead of a manual "Analyze" button?
- * The watchlist click already signals intent ("I want to look at SPY").
- * Requiring a second click to run analysis adds friction. Auto-run
- * means you click SPY → results appear. You can still adjust filters
- * and re-run manually via the "Run Analysis" button.
+ * The existing CSS (PageShared.css, VerticalsPage.css) is preserved.
+ * New components use inline styles via tokens.js, so they blend in
+ * without needing additional CSS.
  */
 
 import { useState, useEffect, useCallback } from 'react';
@@ -21,9 +17,38 @@ import { useApp } from '../context/AppContext';
 import { analyzeVerticals } from '../api/client';
 import StarButton from '../components/StarButton';
 import ScoreBar from '../components/ScoreBar';
+import QuoteBar from '../components/QuoteBar';
+import SmaPanel from '../components/SmaPanel';
+import AskClaudePanel from '../components/AskClaudePanel';
+import FormulaBreakdownPanel from '../components/FormulaBreakdownPanel';
+import ConfigDrawer from '../components/ConfigDrawer';
+import { C, mono, DEFAULT_PRESETS } from '../styles/tokens';
 import './PageShared.css';
 import './VerticalsPage.css';
-import QuoteBar from '../components/QuoteBar';
+
+// Generate sample candle data from price (until we wire historical API)
+function generateCandles(price, count = 120) {
+  const candles = [];
+  let p = price * 0.95;
+  for (let i = 0; i < count; i++) {
+    const change = (Math.random() - 0.48) * price * 0.012;
+    const open = p;
+    const close = p + change;
+    const high = Math.max(open, close) + Math.random() * price * 0.005;
+    const low = Math.min(open, close) - Math.random() * price * 0.005;
+    candles.push({ open, high, low, close, day: `d${i}` });
+    p = close;
+  }
+  // Scale last candles so the final close matches current price
+  const scale = price / candles[candles.length - 1].close;
+  return candles.map(c => ({
+    open: c.open * scale,
+    high: c.high * scale,
+    low: c.low * scale,
+    close: c.close * scale,
+    day: c.day,
+  }));
+}
 
 export default function VerticalsPage() {
   const { activeSymbol } = useApp();
@@ -35,11 +60,33 @@ export default function VerticalsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // Collapsible panels
-  const [showFormula, setShowFormula] = useState(false);
-  const [showConfig, setShowConfig] = useState(false);
+  // SMA chart
+  const [smaPeriods, setSmaPeriods] = useState({ short: 8, mid: 21, long: 50 });
+  const [candles, setCandles] = useState([]);
 
-  // ─── Fetch analysis ──────────────────────────────────────
+  // Ask Claude
+  const [claudeOpen, setClaudeOpen] = useState(false);
+  const [claudeTrade, setClaudeTrade] = useState(null);
+
+ // Formula breakdown slideout
+  const [formulaOpen, setFormulaOpen] = useState(false);
+  const [formulaTrade, setFormulaTrade] = useState(null);
+
+  // Config drawer
+  const [configOpen, setConfigOpen] = useState(false);
+  const [presets, setPresets] = useState(DEFAULT_PRESETS);
+  const [activePresetId, setActivePresetId] = useState('balanced');
+  const activePreset = presets.find(p => p.id === activePresetId) || presets[0];
+  const [config, setConfig] = useState({
+    weights: { ...activePreset.weights },
+    dte: { min: activePreset.dte?.min || 14, max: activePreset.dte?.max || 60 },
+    strikes: { range_pct: activePreset.strikes?.range_pct || 10, min_open_interest: 50, min_volume: 5 },
+    spreads: { min_width: activePreset.spreads?.min_width || 1, max_width: activePreset.spreads?.max_width || 10 },
+    risk: { max_risk_per_trade: activePreset.risk?.max_risk || 500, profit_target_pct: 75, stop_loss_pct: 50 },
+  });
+
+
+  // ─── Fetch analysis ──────────────────────────────────────────
 
   const runAnalysis = useCallback(async (symbol) => {
     setLoading(true);
@@ -49,17 +96,30 @@ export default function VerticalsPage() {
         symbol,
         spread_types: ['bull_call', 'bear_put'],
         max_results: 20,
+        // Pass config weights
+        ev_weight: config.weights.expected_value,
+        rr_weight: config.weights.reward_risk,
+        prob_weight: config.weights.probability,
+        liq_weight: config.weights.liquidity,
+        theta_weight: config.weights.theta_efficiency,
+        min_dte: config.dte.min,
+        max_dte: config.dte.max,
+        strike_range_pct: config.strikes.range_pct,
       });
       setSpreads(data.spreads || []);
       setUnderlyingPrice(data.underlying_price || 0);
       setTotalValid(data.total_valid || 0);
+      // Generate chart candles from the underlying price
+      if (data.underlying_price) {
+        setCandles(generateCandles(data.underlying_price));
+      }
     } catch (err) {
       setError(err.message || 'Failed to fetch analysis');
       setSpreads([]);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [config]);
 
   // Auto-run when symbol changes
   useEffect(() => {
@@ -68,7 +128,63 @@ export default function VerticalsPage() {
     }
   }, [activeSymbol, runAnalysis]);
 
-  // ─── Build favorite trade object ─────────────────────────
+  // Compute SMA data for Ask Claude panel
+  function getSmaData() {
+    if (!candles.length) return { price: underlyingPrice, smaShort: 0, smaMid: 0, smaLong: 0 };
+    const sma = (period) => {
+      const slice = candles.slice(-period);
+      return slice.reduce((s, c) => s + c.close, 0) / slice.length;
+    };
+    return {
+      price: candles[candles.length - 1]?.close || underlyingPrice,
+      smaShort: sma(smaPeriods.short),
+      smaMid: sma(smaPeriods.mid),
+      smaLong: sma(smaPeriods.long),
+    };
+  }
+
+  // Build trade object for Ask Claude
+  function buildClaudeTrade(s) {
+    return {
+      symbol: activeSymbol,
+      spread_type: s.spread_type,
+      long_strike: s.long_strike,
+      short_strike: s.short_strike,
+      expiration: s.expiration,
+      option_type: s.spread_type === 'bull_call' ? 'call' : 'put',
+      net_debit: s.net_debit,
+      max_profit: s.max_profit,
+      max_loss: s.net_debit,
+      reward_risk_ratio: s.reward_risk_ratio,
+      prob_of_profit: s.prob_of_profit,
+      composite_score: s.composite_score,
+    };
+  }
+
+  // Build trade object for Formula Breakdown panel
+  function buildFormulaTrade(s) {
+    return {
+      symbol: activeSymbol,
+      spread_type: s.spread_type,
+      long_strike: s.long_strike,
+      short_strike: s.short_strike,
+      expiration: s.expiration,
+      net_debit: s.net_debit,
+      max_profit: s.max_profit,
+      reward_risk_ratio: s.reward_risk_ratio,
+      prob_of_profit: s.prob_of_profit,
+      composite_score: s.composite_score,
+      // Liquidity fields (may be 0 if not in API response yet)
+      long_volume: s.long_volume || 0,
+      short_volume: s.short_volume || 0,
+      long_oi: s.long_oi || 0,
+      short_oi: s.short_oi || 0,
+      // Theta
+      net_theta: s.net_theta || 0,
+    };
+  }
+  
+  // ─── Build favorite trade object ─────────────────────────────
 
   function buildFavTrade(spread) {
     const typeLabel = spread.spread_type === 'bull_call' ? 'Bull Call' : 'Bear Put';
@@ -88,17 +204,55 @@ export default function VerticalsPage() {
     };
   }
 
-  // ─── Render ──────────────────────────────────────────────
+  // ─── Config handlers ─────────────────────────────────────────
+
+  const handlePresetSelect = (id) => {
+    setActivePresetId(id);
+    const preset = presets.find(p => p.id === id);
+    if (preset) {
+      setConfig({
+        weights: { ...preset.weights },
+        dte: { min: preset.dte?.min || 14, max: preset.dte?.max || 60 },
+        strikes: { range_pct: preset.strikes?.range_pct || 10, min_open_interest: 50, min_volume: 5 },
+        spreads: { min_width: preset.spreads?.min_width || 1, max_width: preset.spreads?.max_width || 10 },
+        risk: { max_risk_per_trade: preset.risk?.max_risk || 500, profit_target_pct: 75, stop_loss_pct: 50 },
+      });
+    }
+  };
+
+  // ─── Render ──────────────────────────────────────────────────
 
   return (
     <div className="page-card">
       <QuoteBar title="Vertical Spread Analysis" />
 
-      {/* Status bar */}
+      {/* SMA Chart — shows above results when we have data */}
+      {candles.length > 0 && !loading && (
+        <SmaPanel
+          candles={candles}
+          smaPeriods={smaPeriods}
+          onPeriodsChange={setSmaPeriods}
+          symbol={activeSymbol}
+        />
+      )}
+
+      {/* Status bar with config button */}
       {!loading && !error && spreads.length > 0 && (
-        <p className="page-subtitle">
-          Showing top {spreads.length} of {totalValid} valid spreads, ranked by composite score.
-        </p>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <p className="page-subtitle" style={{ margin: 0 }}>
+            Showing top {spreads.length} of {totalValid} valid spreads, ranked by composite score.
+          </p>
+          <button
+            onClick={() => setConfigOpen(true)}
+            style={{
+              padding: '5px 12px', borderRadius: 6,
+              border: `1px solid ${C.border}`, backgroundColor: 'transparent',
+              color: C.textDim, fontSize: 12, cursor: 'pointer',
+            }}
+          >
+            ⚙ Config
+          </button>
+        </div>
       )}
 
       {/* Loading */}
@@ -137,13 +291,16 @@ export default function VerticalsPage() {
                 <th>Prob %</th>
                 <th>EV</th>
                 <th>Score</th>
+                <th style={{ width: 60 }}></th>
               </tr>
             </thead>
             <tbody>
               {spreads.map((s, i) => {
                 const isBull = s.spread_type === 'bull_call';
                 return (
-                  <tr key={i}>
+                  <tr key={i}
+                    style={{ borderLeft: '2px solid transparent' }}
+                  >
                     <td>
                       <StarButton trade={buildFavTrade(s)} />
                     </td>
@@ -167,6 +324,37 @@ export default function VerticalsPage() {
                     <td>
                       <ScoreBar score={s.composite_score} />
                     </td>
+                  <td>
+                      <div style={{ display: 'flex', gap: 3 }}>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setClaudeTrade(buildClaudeTrade(s)); setClaudeOpen(true); setFormulaOpen(false); }}
+                          title="Ask Claude to evaluate this trade"
+                          style={{
+                            padding: '3px 7px', borderRadius: 4,
+                            border: `1px solid ${C.claudeBorder}`,
+                            backgroundColor: C.claudeDim, color: C.claudeAccent,
+                            fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                            lineHeight: 1,
+                          }}
+                        >
+                          ✦
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setFormulaTrade(buildFormulaTrade(s)); setFormulaOpen(true); setClaudeOpen(false); }}
+                          title="View scoring formula breakdown"
+                          style={{
+                            padding: '3px 7px', borderRadius: 4,
+                            border: `1px solid ${C.accent}30`,
+                            backgroundColor: `${C.accent}10`, color: C.accent,
+                            fontSize: 10, fontWeight: 600, cursor: 'pointer',
+                            fontFamily: mono,
+                            lineHeight: 1,
+                          }}
+                        >
+                          ƒx
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 );
               })}
@@ -176,7 +364,7 @@ export default function VerticalsPage() {
       )}
 
       {/* Empty state */}
-      {!loading && !error && spreads.length === 0 && !loading && (
+      {!loading && !error && spreads.length === 0 && (
         <div className="empty-state">
           <div className="empty-icon">📊</div>
           <h3>No spreads found</h3>
@@ -187,128 +375,49 @@ export default function VerticalsPage() {
         </div>
       )}
 
-      {/* ═══ Formula Transparency ═══ */}
-      <div className="collapsible-section">
-        <button
-          className={`collapsible-toggle ${showFormula ? 'open' : ''}`}
-          onClick={() => setShowFormula(!showFormula)}
-        >
-          <span className="toggle-icon">{showFormula ? '▼' : '▶'}</span>
-          Formula Transparency
-        </button>
-        {showFormula && (
-          <div className="collapsible-body">
-            <div className="formula-grid">
-              <div className="formula-card">
-                <h4>Spread Construction</h4>
-                <code>net_debit = long_mid − short_mid</code>
-                <code>max_profit = width − debit</code>
-                <code>max_loss = debit</code>
-                <code>R:R = max_profit ÷ max_loss</code>
-                <code>breakeven (bull) = long_strike + debit</code>
-                <code>breakeven (bear) = long_strike − debit</code>
-              </div>
-              <div className="formula-card">
-                <h4>Probability &amp; EV</h4>
-                <code>prob ≈ 1 − |short_delta|</code>
-                <code>EV = (prob × max_profit) − ((1−prob) × max_loss)</code>
-                <p className="formula-note">
-                  Delta-based probability is an approximation. It works well
-                  for OTM spreads but is less accurate near ATM.
-                </p>
-              </div>
-              <div className="formula-card">
-                <h4>Composite Score</h4>
-                <code>
-                  score = ev×0.35 + rr×0.25 + prob×0.20 + liq×0.15 + theta×0.05
-                </code>
-                <p className="formula-note">
-                  Each raw metric is min-max normalized to 0–1 before weighting.
-                  This lets you compare a $500 EV to a 3.0 R:R on the same scale.
-                </p>
-              </div>
-              <div className="formula-card">
-                <h4>Theta Efficiency</h4>
-                <code>theta_eff = |net_theta| ÷ net_debit</code>
-                <p className="formula-note">
-                  Scored inversely — lower decay relative to cost is better.
-                  A spread losing $0.02/day on a $2 debit scores higher than
-                  one losing $0.10/day on a $3 debit.
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
+       {/* ═══ Formula Breakdown Panel ═══ */}
+      <FormulaBreakdownPanel
+        open={formulaOpen}
+        onClose={() => setFormulaOpen(false)}
+        trade={formulaTrade}
+        symbol={activeSymbol}
+        weights={config.weights}
+      />
+              
+      {/* ═══ Ask Claude Panel ═══ */}
+      <AskClaudePanel
+        open={claudeOpen}
+        onClose={() => setClaudeOpen(false)}
+        trade={claudeTrade}
+        smaData={getSmaData()}
+        smaPeriods={smaPeriods}
+      />
 
-      {/* ═══ Configuration ═══ */}
-      <div className="collapsible-section">
-        <button
-          className={`collapsible-toggle ${showConfig ? 'open' : ''}`}
-          onClick={() => setShowConfig(!showConfig)}
-        >
-          <span className="toggle-icon">{showConfig ? '▼' : '▶'}</span>
-          Configuration
-        </button>
-        {showConfig && (
-          <div className="collapsible-body">
-            <div className="config-grid">
-              <div className="config-group">
-                <h4>Spread Filters</h4>
-                <div className="config-row">
-                  <label>Short Delta Range</label>
-                  <span className="config-value mono">0.15 – 0.45</span>
-                </div>
-                <div className="config-row">
-                  <label>Max Spread Width</label>
-                  <span className="config-value mono">$10</span>
-                </div>
-                <div className="config-row">
-                  <label>Min Open Interest</label>
-                  <span className="config-value mono">50</span>
-                </div>
-                <div className="config-row">
-                  <label>Min Volume</label>
-                  <span className="config-value mono">5</span>
-                </div>
-                <div className="config-row">
-                  <label>Min R:R</label>
-                  <span className="config-value mono">0.50</span>
-                </div>
-              </div>
-              <div className="config-group">
-                <h4>Scoring Weights</h4>
-                <div className="weight-bar-display">
-                  <div className="weight-segment" style={{ flex: 35, background: 'var(--accent-green)' }} title="EV 35%">EV 35%</div>
-                  <div className="weight-segment" style={{ flex: 25, background: 'var(--accent-blue)' }} title="R:R 25%">R:R 25%</div>
-                  <div className="weight-segment" style={{ flex: 20, background: 'var(--accent-cyan)' }} title="Prob 20%">Prob 20%</div>
-                  <div className="weight-segment" style={{ flex: 15, background: 'var(--accent-purple)' }} title="Liq 15%">Liq 15%</div>
-                  <div className="weight-segment" style={{ flex: 5, background: 'var(--accent-orange)' }} title="Theta 5%">θ</div>
-                </div>
-                <p className="formula-note" style={{ marginTop: 8 }}>
-                  Weights are read-only in this version. Editable sliders
-                  will be wired to the /config API in a future update.
-                </p>
-              </div>
-              <div className="config-group">
-                <h4>Chain Filters</h4>
-                <div className="config-row">
-                  <label>DTE Range</label>
-                  <span className="config-value mono">14 – 60 days</span>
-                </div>
-                <div className="config-row">
-                  <label>Strike Range</label>
-                  <span className="config-value mono">±10%</span>
-                </div>
-                <div className="config-row">
-                  <label>Max Results</label>
-                  <span className="config-value mono">20</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
+      {/* ═══ Config Drawer ═══ */}
+      <ConfigDrawer
+        open={configOpen}
+        onClose={() => { setConfigOpen(false); runAnalysis(activeSymbol); }}
+        config={config}
+        onConfigChange={setConfig}
+        presets={presets}
+        activePresetId={activePresetId}
+        onPresetSelect={handlePresetSelect}
+        onSavePreset={(name) => {
+          const id = name.toLowerCase().replace(/\s+/g, '_');
+          setPresets(prev => [...prev, { id, name, icon: '📌', desc: 'Custom preset', ...config }]);
+          setActivePresetId(id);
+        }}
+        onOverwrite={(id) => {
+          setPresets(prev => prev.map(p => p.id === id ? { ...p, ...config } : p));
+        }}
+        onDelete={(id) => {
+          setPresets(prev => prev.filter(p => p.id !== id));
+          if (activePresetId === id) setActivePresetId('balanced');
+        }}
+        onRename={(id, newName) => {
+          setPresets(prev => prev.map(p => p.id === id ? { ...p, name: newName } : p));
+        }}
+      />
     </div>
   );
 }
