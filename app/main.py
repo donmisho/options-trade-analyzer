@@ -34,6 +34,7 @@ from app.api.analysis_routes import router as analysis_router, init_analysis_rou
 from app.api.schwab_auth_routes import router as schwab_auth_router, init_schwab_auth_routes
 from app.providers.schwab_token_manager import SchwabTokenManager
 from app.api.evaluation_routes import router as evaluation_router, init_evaluation_routes
+from app.api.user_routes import router as user_router
 from app.providers.ai import AnthropicAdapter, FoundryAdapter
 
 
@@ -132,6 +133,7 @@ app.add_middleware(
         "http://localhost:5173",
         "https://localhost:5173",
         "https://127.0.0.1:5173",
+        "https://purple-ground-0d4efed10.4.azurestaticapps.net",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -147,6 +149,7 @@ app.include_router(config_router, prefix="/api/v1")
 app.include_router(analysis_router, prefix="/api/v1")
 app.include_router(schwab_auth_router, prefix="/api/v1")
 app.include_router(evaluation_router, prefix="/api/v1")
+app.include_router(user_router, prefix="/api/v1")
 
 
 # --- Health Check ---

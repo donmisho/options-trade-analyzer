@@ -14,7 +14,7 @@
  */
 
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import { getQuotes } from '../api/client';
+import { getQuotes, getWatchlist, saveWatchlist as saveWatchlistApi, getFavorites, addFavoriteApi, removeFavoriteApi } from '../api/client';
 
 const AppContext = createContext(null);
 
@@ -97,11 +97,23 @@ export function AppProvider({ children }) {
     return localStorage.getItem('optionsAnalyzer_symbol') || 'SPY';
   });
 
-  // Dynamic watchlist — persisted in localStorage, reordered by most recent
+  // Dynamic watchlist — persisted in localStorage + backend
   const [watchlist, setWatchlist] = useState(loadWatchlist);
 
   // Config drawer — shared so Header gear icon can open it from any page
   const [configOpen, setConfigOpen] = useState(false);
+
+  // Load watchlist from backend on mount; fall back to localStorage if API fails
+  useEffect(() => {
+    getWatchlist()
+      .then(data => {
+        if (Array.isArray(data) && data.length > 0) {
+          setWatchlist(data);
+          saveWatchlist(data); // keep localStorage in sync
+        }
+      })
+      .catch(() => {}); // silently use localStorage fallback
+  }, []);
 
   // Live prices keyed by symbol: { SPY: { price: 598.12, change: -2.31, change_pct: -0.38 }, ... }
   const [prices, setPrices] = useState({});
@@ -180,15 +192,33 @@ export function AppProvider({ children }) {
     fetchPrices();
   }, [fetchPrices]);
 
-  // Favorites
+  // Favorites — loaded from backend on mount, localStorage as fallback
   const [favorites, setFavorites] = useState(loadFavorites);
+
+  useEffect(() => {
+    getFavorites()
+      .then(data => {
+        if (Array.isArray(data) && data.length > 0) {
+          // Backend stores trade_data as the full snapshot; add savedAt for TTL logic
+          const favs = data.map(f => ({
+            ...f.trade_data,
+            savedAt: new Date(f.saved_at).getTime(),
+            savedDate: f.saved_at.slice(0, 10),
+          }));
+          setFavorites(favs);
+          saveFavorites(favs);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Toast notification
   const [toast, setToast] = useState(null);
 
-  // Persist watchlist whenever it changes
+  // Persist watchlist to localStorage + backend whenever it changes
   useEffect(() => {
     saveWatchlist(watchlist);
+    saveWatchlistApi(watchlist).catch(() => {}); // best-effort API sync
   }, [watchlist]);
 
   // Persist active symbol
@@ -225,7 +255,6 @@ export function AppProvider({ children }) {
    */
   const addFavorite = useCallback((trade) => {
     setFavorites(prev => {
-      // Don't add duplicates
       if (prev.some(f => f.id === trade.id)) return prev;
       const fav = {
         ...trade,
@@ -233,12 +262,14 @@ export function AppProvider({ children }) {
         savedDate: new Date().toISOString().slice(0, 10),
       };
       showToast(`★ Saved: ${trade.label}`);
+      addFavoriteApi(fav).catch(() => {}); // best-effort API sync
       return [...prev, fav];
     });
   }, [showToast]);
 
   const removeFavorite = useCallback((id) => {
     setFavorites(prev => prev.filter(f => f.id !== id));
+    removeFavoriteApi(id).catch(() => {}); // best-effort API sync
     showToast('Removed from favorites');
   }, [showToast]);
 

@@ -13,8 +13,8 @@ authenticated user's ID.
 
 from datetime import datetime
 from sqlalchemy import (
-    Column, Integer, String, Float, Boolean, DateTime, Text, 
-    ForeignKey, JSON, Index
+    Column, Integer, String, Float, Boolean, DateTime, Text,
+    ForeignKey, JSON, Index, UniqueConstraint
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
 
@@ -183,4 +183,93 @@ class AuditLog(Base):
     __table_args__ = (
         Index("ix_audit_log_user_event", "user_id", "event_type"),
         Index("ix_audit_log_created", "created_at"),
+    )
+
+
+class UserWatchlist(Base):
+    """
+    Per-user watchlist: the symbols shown in the sidebar.
+
+    WHY no FK on user_id: Allows SKIP_AUTH dev mode (user_id = "dev-user")
+    to work without needing a real user row in the users table.
+    The position column preserves sidebar order (0 = top).
+    """
+    __tablename__ = "user_watchlist"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String(36), nullable=False, index=True)
+    symbol = Column(String(10), nullable=False)
+    name = Column(String(100), nullable=True)
+    position = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "symbol", name="uq_user_watchlist_symbol"),
+        Index("ix_user_watchlist_user_pos", "user_id", "position"),
+    )
+
+
+class UserFavorite(Base):
+    """
+    Per-user starred trades.
+
+    trade_id is the same unique key the frontend builds (e.g. "SPY-call-450-460-2024-01-19").
+    trade_data stores the full snapshot so the Favorites page can show the
+    original pricing and score without re-fetching.
+
+    WHY no FK on user_id: Same reason as UserWatchlist — dev mode compatibility.
+    """
+    __tablename__ = "user_favorites"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String(36), nullable=False, index=True)
+    trade_id = Column(String(300), nullable=False)   # Unique trade key from frontend
+    symbol = Column(String(10), nullable=False)
+    label = Column(String(300), nullable=True)        # Display name
+    strategy = Column(String(50), nullable=True)      # bull_call_spread, long_call, etc.
+    trade_data = Column(JSON, nullable=False)          # Full trade snapshot
+    saved_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "trade_id", name="uq_user_favorites_trade"),
+        Index("ix_user_favorites_user", "user_id"),
+    )
+
+
+class SchwabToken(Base):
+    """
+    Schwab OAuth tokens for persistent storage.
+
+    WHY: Schwab tokens were previously stored in-memory in the provider instance.
+    This meant every backend restart required users to re-authenticate via OAuth.
+    By storing tokens in the database, we can:
+    1. Persist tokens across restarts
+    2. Auto-refresh expired tokens using the refresh_token
+    3. Support multiple users each with their own Schwab connection
+
+    SECURITY: In production, tokens should be encrypted at rest using Azure Key Vault
+    or similar. For now we store them as-is (database is behind auth).
+    """
+    __tablename__ = "schwab_tokens"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String(36), ForeignKey("users.id"), unique=True, nullable=False, index=True)
+
+    # OAuth tokens
+    access_token = Column(Text, nullable=False)
+    refresh_token = Column(Text, nullable=False)
+
+    # Token expiration times
+    token_expires_at = Column(DateTime, nullable=False)
+    refresh_expires_at = Column(DateTime, nullable=False)
+
+    # Metadata
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    user = relationship("User", backref="schwab_token")
+
+    __table_args__ = (
+        Index("ix_schwab_tokens_user", "user_id"),
     )

@@ -12,7 +12,9 @@
  */
 
 // ─── Base URL ─────────────────────────────────────────────────────
-const API_BASE = "/api/v1";
+// In production, VITE_API_BASE_URL is the App Service URL baked in at build time.
+// In local dev, it's empty so the Vite proxy handles /api/* → localhost backend.
+const API_BASE = `${import.meta.env.VITE_API_BASE_URL || ''}/api/v1`;
 
 // ─── Helper: Make authenticated requests ──────────────────────────
 async function apiFetch(path, options = {}) {
@@ -164,6 +166,45 @@ export async function updateUserConfig(configData) {
     body: JSON.stringify(configData),
   });
 }
+// ═══════════════════════════════════════════════════════════════════
+// USER PREFERENCES — Watchlist & Favorites
+// ═══════════════════════════════════════════════════════════════════
+
+export async function getWatchlist() {
+  return apiFetch("/user/watchlist");
+}
+
+export async function saveWatchlist(symbols) {
+  return apiFetch("/user/watchlist", {
+    method: "PUT",
+    body: JSON.stringify({ symbols }),
+  });
+}
+
+export async function getFavorites() {
+  return apiFetch("/user/favorites");
+}
+
+export async function addFavoriteApi(trade) {
+  return apiFetch("/user/favorites", {
+    method: "POST",
+    body: JSON.stringify({
+      id: trade.id,
+      symbol: trade.symbol,
+      label: trade.label || "",
+      strategy: trade.strategy || "",
+      trade_data: trade,
+    }),
+  });
+}
+
+export async function removeFavoriteApi(tradeId) {
+  return apiFetch(`/user/favorites/${encodeURIComponent(tradeId)}`, {
+    method: "DELETE",
+  });
+}
+
+
 /**
  * Check Schwab OAuth connection status.
  * Used by Header to show connection indicator.
