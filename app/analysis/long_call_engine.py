@@ -1,32 +1,33 @@
 """
-Long Call Analysis Engine
+Naked Options Analysis Engine (formerly Long Call Engine)
 
-WHY THIS EXISTS:
-This replaces the "Naked Calls" sheet from the Excel analyzer.
-Given an options chain, it evaluates every call contract as a
-standalone long call position and scores it for:
+WHY THE RENAME:
+The original LongCallEngine only analyzed call options. But the scoring
+logic — delta alignment, theta efficiency, IV value, reward:risk, and
+liquidity — works identically for puts. The only differences are:
+  - Type filter: "call" vs "put"
+  - Breakeven: call = strike + premium, put = strike - premium
+  - Breakeven distance: calls measure upside needed, puts measure downside
 
-  1. Delta Alignment (30%): Does the option's delta match a good
-     directional bet? Sweet spot is 0.30-0.60 — too low means 
-     unlikely to profit, too high means overpaying for directional
-     exposure you could get cheaper with stock.
+Rather than duplicate the engine, we generalize it to handle both types.
+The engine accepts an option_types parameter (["call"], ["put"], or
+["call", "put"]) and processes each contract accordingly.
 
-  2. Theta Efficiency (25%): How many days of runway do you have
-     before time decay eats your premium? Computed as:
-     runway_days = premium / abs(daily_theta)
+SCORING CRITERIA (unchanged from original):
+  1. Delta Alignment (30%): Sweet spot 0.30-0.60. Too low = lottery
+     ticket, too high = overpaying for directional exposure.
+  2. Theta Efficiency (25%): runway_days = premium / abs(daily_theta).
      More days = more time for your thesis to play out.
-
-  3. IV Value (20%): Is implied volatility low relative to what
-     you'd expect? Buying calls when IV is elevated means you're
-     overpaying. We use IV percentile if available, otherwise
-     compare IV to a reasonable baseline.
-
-  4. Reward:Risk (15%): Theoretical upside relative to premium paid.
-     Estimated as: (delta × underlying_price × expected_move_pct) / premium
-     This tells you how much directional profit you'd capture per
-     dollar at risk.
-
+  3. IV Value (20%): Lower IV = cheaper options = better entry.
+  4. Reward:Risk (15%): (delta × underlying_price × move_pct) / premium.
   5. Liquidity (10%): Volume + OI. Can you get filled at a fair price?
+
+BACKWARD COMPATIBILITY:
+  - LongCallEngine is an alias for NakedOptionEngine
+  - LongCallWeights is an alias for NakedOptionWeights
+  - LongCallFilters is an alias for NakedOptionFilters
+  - ScoredLongCall is an alias for ScoredNakedOption
+  - All old imports continue to work without changes
 """
 
 from dataclasses import dataclass, asdict
@@ -34,8 +35,8 @@ from typing import Optional
 
 
 @dataclass
-class LongCallWeights:
-    """Weights for long call scoring — must sum to 1.0"""
+class NakedOptionWeights:
+    """Weights for naked option scoring — must sum to 1.0"""
     delta_alignment: float = 0.30
     theta_efficiency: float = 0.25
     iv_value: float = 0.20
@@ -52,7 +53,7 @@ class LongCallWeights:
 
 
 @dataclass
-class LongCallFilters:
+class NakedOptionFilters:
     """Filters applied before scoring"""
     min_delta: float = 0.25          # Below this = lottery ticket
     max_delta: float = 0.65          # Above this = just buy stock
@@ -62,39 +63,46 @@ class LongCallFilters:
     min_days_to_exp: int = 7         # Don't buy weeklies
     max_days_to_exp: int = 90        # Don't go too far out
     max_bid_ask_spread_pct: float = 0.15  # 15% max spread vs mid
+    # NEW: Which option types to include (default: calls only for backward compat)
+    option_types: list = None        # ["call"], ["put"], or ["call", "put"]
+
+    def __post_init__(self):
+        if self.option_types is None:
+            self.option_types = ["call"]
 
 
 @dataclass
-class ScoredLongCall:
-    """A single scored long call candidate"""
+class ScoredNakedOption:
+    """A single scored naked option candidate (call or put)"""
     strike: float
     expiration: str
     days_to_exp: int
-    
+    option_type: str               # NEW: "call" or "put"
+
     # Option details
     bid: float
     ask: float
     mid_price: float
-    premium_dollars: float     # mid × 100
-    
+    premium_dollars: float         # mid × 100
+
     # Greeks
     delta: float
     gamma: float
     theta: float
     vega: float
-    iv: float                  # Implied volatility %
-    
+    iv: float                      # Implied volatility %
+
     # Liquidity
     volume: int
     open_interest: int
-    bid_ask_spread_pct: float  # (ask-bid)/mid as %
-    
+    bid_ask_spread_pct: float      # (ask-bid)/mid as %
+
     # Calculated values
-    breakeven: float           # strike + premium
+    breakeven: float               # call: strike + premium, put: strike - premium
     breakeven_distance_pct: float  # How far underlying must move
     theta_per_day_dollars: float   # Daily theta decay in $
     theta_runway_days: float       # Days until theta eats premium
-    
+
     # Scores (0-1 normalized)
     delta_score: float = 0.0
     theta_score: float = 0.0
@@ -102,72 +110,99 @@ class ScoredLongCall:
     rr_score: float = 0.0
     liquidity_score: float = 0.0
     composite_score: float = 0.0
-    
+
     def to_dict(self):
         return asdict(self)
 
 
-class LongCallEngine:
+class NakedOptionEngine:
     """
-    Scores and ranks long call candidates from an options chain.
-    
+    Scores and ranks naked option candidates (calls and/or puts) from
+    an options chain.
+
     Usage:
-        engine = LongCallEngine(weights, filters)
+        engine = NakedOptionEngine(weights, filters)
         results = engine.analyze(chain_data, underlying_price)
     """
-    
+
     def __init__(
         self,
-        weights: Optional[LongCallWeights] = None,
-        filters: Optional[LongCallFilters] = None,
+        weights: Optional[NakedOptionWeights] = None,
+        filters: Optional[NakedOptionFilters] = None,
     ):
-        self.weights = weights or LongCallWeights()
+        self.weights = weights or NakedOptionWeights()
         self.weights.validate()
-        self.filters = filters or LongCallFilters()
-    
+        self.filters = filters or NakedOptionFilters()
+
     def analyze(
         self,
         contracts: list[dict],
         underlying_price: float,
         max_results: Optional[int] = None,
     ) -> dict:
-        """Analyze all call contracts and return ranked results."""
-        
-        # Filter to calls only
-        calls = [c for c in contracts if c.get("option_type") == "call"]
-        
+        """
+        Analyze option contracts and return ranked results.
+
+        WHAT CHANGED FROM ORIGINAL:
+        - Filters by option_types list instead of hardcoded "call"
+        - Returns key "options" (plus backward-compat "calls")
+        - Each result has an option_type field
+        """
+
+        # Filter to requested option types
+        # WHY: The chain from Schwab contains both calls and puts.
+        # We filter to only the types the user toggled on in the UI.
+        allowed = set(self.filters.option_types)
+        filtered = [
+            c for c in contracts
+            if c.get("option_type") in allowed
+        ]
+
         # Build scored candidates
         candidates = []
-        for c in calls:
-            scored = self._evaluate_call(c, underlying_price)
+        for c in filtered:
+            scored = self._evaluate_option(c, underlying_price)
             if scored:
                 candidates.append(scored)
-        
+
         if not candidates:
             return {
-                "calls": [],
+                "options": [],
+                "calls": [],          # backward compat
                 "total_valid": 0,
                 "underlying_price": underlying_price,
             }
-        
+
         # Score and rank
         scored = self._score_all(candidates)
         scored.sort(key=lambda s: s.composite_score, reverse=True)
-        
+
         if max_results:
             scored = scored[:max_results]
-        
+
+        result_dicts = [s.to_dict() for s in scored]
         return {
-            "calls": [s.to_dict() for s in scored],
-            "total_valid": len(scored),
+            "options": result_dicts,
+            "calls": result_dicts,    # backward compat for frontend
+            "total_valid": len(candidates),
             "underlying_price": underlying_price,
         }
-    
-    def _evaluate_call(
+
+    def _evaluate_option(
         self, contract: dict, price: float
-    ) -> Optional[ScoredLongCall]:
-        """Build a ScoredLongCall from a raw contract, applying filters."""
-        
+    ) -> Optional[ScoredNakedOption]:
+        """
+        Build a ScoredNakedOption from a raw contract, applying filters.
+
+        WHAT CHANGED FROM ORIGINAL _evaluate_call:
+        - Accepts both calls and puts
+        - Breakeven calculation is type-aware
+        - Breakeven distance measures the correct direction
+        - Returns ScoredNakedOption with option_type field
+        """
+        option_type = contract.get("option_type", "call")
+
+        # abs(delta) because put deltas are negative from the provider
         delta = abs(contract.get("delta", 0) or 0)
         bid = contract.get("bid", 0) or 0
         ask = contract.get("ask", 0) or 0
@@ -179,7 +214,7 @@ class LongCallEngine:
         iv = contract.get("implied_volatility", 0) or contract.get("iv", 0) or 0
         strike = contract["strike"]
         exp = contract["expiration"]
-        
+
         # Calculate DTE from expiration string
         from datetime import datetime, date
         try:
@@ -187,7 +222,7 @@ class LongCallEngine:
             dte = (exp_date - date.today()).days
         except (ValueError, TypeError):
             dte = 30  # Fallback
-        
+
         # ── Filters ──
         if delta < self.filters.min_delta or delta > self.filters.max_delta:
             return None
@@ -197,34 +232,42 @@ class LongCallEngine:
             return None
         if dte < self.filters.min_days_to_exp or dte > self.filters.max_days_to_exp:
             return None
-        
+
         mid = (bid + ask) / 2 if (bid + ask) > 0 else 0
         if mid <= 0:
             return None
-        
+
         premium = mid * 100  # Dollar cost per contract
         if premium > self.filters.max_premium:
             return None
-        
+
         # Bid-ask spread filter
         ba_spread_pct = (ask - bid) / mid if mid > 0 else 999
         if ba_spread_pct > self.filters.max_bid_ask_spread_pct:
             return None
-        
+
         # ── Calculations ──
-        breakeven = strike + mid
-        be_distance = ((breakeven - price) / price) * 100
-        
+        # BREAKEVEN differs by type:
+        #   Call: stock must rise ABOVE strike + premium to profit
+        #   Put:  stock must fall BELOW strike - premium to profit
+        if option_type == "put":
+            breakeven = strike - mid
+            # Distance is how far DOWN the stock must move (as positive %)
+            be_distance = ((price - breakeven) / price) * 100
+        else:
+            breakeven = strike + mid
+            # Distance is how far UP the stock must move (as positive %)
+            be_distance = ((breakeven - price) / price) * 100
+
         # Theta runway: how many days until theta alone eats the premium
-        # WHY: If theta = -$0.15/day and premium = $3.00, runway = 20 days
-        # You need your thesis to play out before theta eats your position
         theta_per_day = abs(theta) * 100  # Daily $ decay per contract
         theta_runway = premium / theta_per_day if theta_per_day > 0 else 999
-        
-        return ScoredLongCall(
+
+        return ScoredNakedOption(
             strike=strike,
             expiration=exp,
             days_to_exp=dte,
+            option_type=option_type,
             bid=bid,
             ask=ask,
             mid_price=round(mid, 2),
@@ -233,7 +276,7 @@ class LongCallEngine:
             gamma=round(gamma, 4),
             theta=round(theta, 4),
             vega=round(vega, 4),
-            iv=round(iv * 100 if iv < 1 else iv, 2),  # Normalize to %
+            iv=round(iv * 100 if iv < 1 else iv, 2),
             volume=volume,
             open_interest=oi,
             bid_ask_spread_pct=round(ba_spread_pct * 100, 2),
@@ -242,19 +285,25 @@ class LongCallEngine:
             theta_per_day_dollars=round(theta_per_day, 2),
             theta_runway_days=round(theta_runway, 1),
         )
-    
+
     def _score_all(
-        self, candidates: list[ScoredLongCall]
-    ) -> list[ScoredLongCall]:
-        """Normalize and apply weighted scoring."""
-        
+        self, candidates: list[ScoredNakedOption]
+    ) -> list[ScoredNakedOption]:
+        """
+        Normalize and apply weighted scoring.
+
+        UNCHANGED from original — the scoring math is identical for
+        calls and puts. Delta sweet spot, theta runway, IV preference,
+        R:R ratio, and liquidity all work the same way regardless of
+        option type.
+        """
         if len(candidates) <= 1:
             if candidates:
                 for attr in ["delta_score", "theta_score", "iv_score",
                              "rr_score", "liquidity_score", "composite_score"]:
                     setattr(candidates[0], attr, 1.0)
             return candidates
-        
+
         def normalize(values, higher_is_better=True):
             mn, mx = min(values), max(values)
             rng = mx - mn
@@ -263,42 +312,38 @@ class LongCallEngine:
             if higher_is_better:
                 return [(v - mn) / rng for v in values]
             return [(mx - v) / rng for v in values]
-        
-        # Delta alignment: score peaks at 0.45 (sweet spot), drops off either side
-        # WHY 0.45: It's the Goldilocks zone — enough directional exposure
-        # to profit meaningfully, but not so much you're overpaying
+
+        # Delta alignment: score peaks at 0.45 (sweet spot)
         delta_scores = []
         for c in candidates:
-            # Distance from ideal delta (0.45), normalized
             distance = abs(c.delta - 0.45) / 0.45
             delta_scores.append(max(0, 1 - distance))
-        
+
         # Theta efficiency: more runway = better
         runway_scores = normalize(
             [c.theta_runway_days for c in candidates],
             higher_is_better=True
         )
-        
+
         # IV: lower = better (cheaper options)
         iv_scores = normalize(
             [c.iv for c in candidates],
-            higher_is_better=False  # Lower IV = better value
+            higher_is_better=False
         )
-        
-        # Reward:Risk approximation: delta × price / premium
-        # WHY: This estimates how much you'd profit from a 1% move per $ at risk
+
+        # Reward:Risk: delta × 100 / premium
         rr_values = [
             (c.delta * 100) / c.premium_dollars if c.premium_dollars > 0 else 0
             for c in candidates
         ]
         rr_scores = normalize(rr_values, higher_is_better=True)
-        
+
         # Liquidity
         liq_scores = normalize(
             [c.volume + c.open_interest for c in candidates],
             higher_is_better=True
         )
-        
+
         w = self.weights
         for i, c in enumerate(candidates):
             c.delta_score = round(delta_scores[i], 4)
@@ -314,5 +359,16 @@ class LongCallEngine:
                 c.liquidity_score * w.liquidity,
                 4
             )
-        
+
         return candidates
+
+
+# ── Backward-compatible aliases ──────────────────────────────────
+# WHY: The old class names are used throughout the codebase —
+# analysis_routes.py, __init__.py, client.js, etc. These aliases
+# mean all existing imports continue to work with zero changes.
+# New code should prefer the Naked* names.
+LongCallWeights = NakedOptionWeights
+LongCallFilters = NakedOptionFilters
+ScoredLongCall = ScoredNakedOption
+LongCallEngine = NakedOptionEngine

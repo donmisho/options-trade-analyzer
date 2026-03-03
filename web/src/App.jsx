@@ -16,7 +16,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AppProvider } from './context/AppContext';
 import Layout from './components/Layout';
 import VerticalsPage from './pages/VerticalsPage';
-import LongCallsPage from './pages/LongCallsPage';
+import NakedOptionsPage from './pages/NakedOptionsPage';
 import DirectionalPage from './pages/DirectionalPage';
 import FavoritesPage from './pages/FavoritesPage';
 
@@ -27,7 +27,7 @@ export default function App() {
         <Routes>
           <Route element={<Layout />}>
             <Route path="/verticals" element={<VerticalsPage />} />
-            <Route path="/long-calls" element={<LongCallsPage />} />
+            <Route path="/naked-options" element={<NakedOptionsPage />} />
             <Route path="/directional" element={<DirectionalPage />} />
             <Route path="/favorites" element={<FavoritesPage />} />
             {/* Default route → Vertical Spreads */}

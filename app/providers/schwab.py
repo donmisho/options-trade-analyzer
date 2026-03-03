@@ -119,6 +119,8 @@ class SchwabMarketData(MarketDataProvider):
             "week_52_low": quote.get("52WeekLow"),
             "avg_volume": avg_volume if avg_volume > 0 else None,
             "volume_ratio": volume_ratio,
+            "next_earnings_date": fundamental.get("nextEarningsDate"),
+            "next_dividend_date": fundamental.get("divDate"),
             "timestamp": datetime.now(timezone.utc),
         }
 

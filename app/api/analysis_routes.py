@@ -75,6 +75,7 @@ class VerticalRequest(BaseModel):
 
 class LongCallRequest(BaseModel):
     symbol: str
+    option_types: list[str]
     max_results: Optional[int] = Field(default=15)
     min_dte: int = Field(default=14, ge=0, le=365)
     max_dte: int = Field(default=60, ge=1, le=730)
@@ -217,18 +218,23 @@ async def analyze_long_calls(
     Returns calls ranked by composite score (weighted combination
     of delta alignment, theta efficiency, IV value, R:R, liquidity).
     """
+    chain_type = None
+    if len(req.option_types) == 1:
+        chain_type = req.option_types[0]
+    
     contracts, price = await _fetch_chain(
         req.symbol, user,
         min_dte=req.min_dte,
         max_dte=req.max_dte,
         strike_range_pct=req.strike_range_pct,
-        option_type="call",
+        option_type=chain_type,
     )
     
     filters = LongCallFilters(
         max_premium=req.max_premium or 1500.0,
         min_days_to_exp=req.min_dte,
         max_days_to_exp=req.max_dte,
+        option_types=req.option_types,
     )
     engine = LongCallEngine(filters=filters)
     

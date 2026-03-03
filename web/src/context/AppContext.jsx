@@ -100,6 +100,9 @@ export function AppProvider({ children }) {
   // Dynamic watchlist — persisted in localStorage, reordered by most recent
   const [watchlist, setWatchlist] = useState(loadWatchlist);
 
+  // Config drawer — shared so Header gear icon can open it from any page
+  const [configOpen, setConfigOpen] = useState(false);
+
   // Live prices keyed by symbol: { SPY: { price: 598.12, change: -2.31, change_pct: -0.38 }, ... }
   const [prices, setPrices] = useState({});
   const [pricesLoading, setPricesLoading] = useState(false);
@@ -254,6 +257,10 @@ export function AppProvider({ children }) {
     activeSymbol,
     setActiveSymbol: handleSetActiveSymbol,
     watchlist,
+
+    // Config drawer
+    configOpen,
+    setConfigOpen,
 
     // Prices
     prices,

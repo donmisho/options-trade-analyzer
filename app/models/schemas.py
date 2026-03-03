@@ -81,7 +81,7 @@ class UserConfigUpdate(BaseModel):
     weight_probability: Optional[float] = Field(None, ge=0, le=1)
     weight_liquidity: Optional[float] = Field(None, ge=0, le=1)
     max_risk_per_trade: Optional[float] = Field(None, ge=0)
-    profit_target_pct: Optional[float] = Field(None, ge=0, le=100)
+    profit_target_pct: Optional[float] = Field(None, ge=0, le=300)
     stop_loss_pct: Optional[float] = Field(None, ge=0, le=100)
     extra_settings: Optional[dict] = None
 
@@ -121,11 +121,13 @@ class Quote(BaseModel):
     day_high: float
     day_low: float
     previous_close: float
+    timestamp: datetime
     week_52_high: Optional[float] = None
     week_52_low: Optional[float] = None
     avg_volume: Optional[int] = None
-    volume_ratio: Optional[float] = None   # today's volume / avg volume
-    timestamp: datetime
+    volume_ratio: Optional[float] = None
+    next_earnings_date: Optional[str] = None
+    next_dividend_date: Optional[str] = None
 
 
 class OptionContract(BaseModel):

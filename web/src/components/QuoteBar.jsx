@@ -127,6 +127,26 @@ export default function QuoteBar({ title }) {
             <span className="qb-range-values">{fmtVol(quote.volume)}</span>
           </div>
 
+          {/* Critical Dates */}
+          {quote.next_earnings_date && (
+            <>
+              <span className="qb-divider">|</span>
+              <div className="qb-critical-date">
+                <span className="qb-critical-date-label">Earnings:</span>
+                <span className="qb-critical-date-value">{quote.next_earnings_date}</span>
+              </div>
+            </>
+          )}
+          {quote.next_dividend_date && (
+            <>
+              <span className="qb-divider">|</span>
+              <div className="qb-critical-date">
+                <span className="qb-critical-date-label">Dividend:</span>
+                <span className="qb-critical-date-value">{quote.next_dividend_date}</span>
+              </div>
+            </>
+          )}
+
           {/* Activity Indicator */}
           {activityLevel && (
             <>

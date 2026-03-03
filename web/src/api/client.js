@@ -92,10 +92,10 @@ export async function analyzeVerticals(data) {
   });
 }
 
-export async function analyzeLongCalls(data) {
+export async function analyzeLongCalls({ symbol, max_results = 15, option_types = ["call"] }) {
   return apiFetch("/analyze/long-calls", {
     method: "POST",
-    body: JSON.stringify(data),
+    body: JSON.stringify({ symbol, max_results, option_types }),
   });
 }
 

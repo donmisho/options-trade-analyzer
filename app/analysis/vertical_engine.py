@@ -11,7 +11,7 @@ HOW SCORING WORKS:
 Each spread gets a 0-1 score in 5 categories:
   1. Expected Value (EV): (prob × maxWin) - ((1-prob) × maxLoss)
   2. Reward:Risk (R:R): maxProfit / maxLoss
-  3. Probability of Profit: estimated from short leg delta
+  3. Probability of Profit: estimated from long leg delta (≈ prob of any profit)
   4. Liquidity: combined volume + open interest of both legs
   5. Theta Efficiency: net theta relative to cost
 
@@ -312,19 +312,29 @@ class VerticalSpreadEngine:
         else:  # bear_put
             breakeven = long_leg["strike"] - net_debit
         
-        # Probability of profit (approximation from short delta)
-        # WHY: Delta ≈ probability of expiring ITM. For a bull call spread,
-        # probability of profit ≈ delta of the short (sold) call, because
-        # profit happens when the stock is above the long strike + debit.
-        # This is a rough estimate — true probability requires a pricing model.
-        prob = abs(short_leg.get("delta", 0) or 0)
-        
-        # For bear put: prob = abs(short put delta)
-        # Both cases: we want the probability the short leg expires worthless
-        # ... actually for bull call, prob_of_profit ≈ 1 - short_delta
-        # For bear put, prob_of_profit ≈ 1 - abs(short_delta)
-        # The short delta is already the ITM probability of the short leg
-        prob_of_profit = 1 - prob  # Probability short expires OTM = we profit
+# Probability of Profit ≈ |long leg delta|
+        #
+        # WHY long delta instead of (1 - short delta)?
+        # The old formula (1 - short_delta) measured the probability of
+        # avoiding MAX LOSS — not the probability of ANY profit. For OTM
+        # spreads this inflated probability by 30-50+ percentage points.
+        #
+        # Example: GLD bear put 460/450 with GLD at $483
+        #   Old: short leg (450 put) delta=0.18 → 1-0.18 = 82% (WRONG)
+        #   New: long leg (460 put) delta=0.30 → 30% (CORRECT)
+        #   Reality: GLD must drop 5.4% to breakeven — 82% was absurd.
+        #
+        # The long leg's strike is near the breakeven price, so its delta
+        # approximates the probability of profit. This works identically
+        # for bull call and bear put spreads — no conditional logic needed.
+        #
+        # Known limitation: delta reflects probability of expiring ITM at
+        # the strike, not at breakeven (which is slightly worse by the
+        # debit paid). True prob of profit is slightly lower than long
+        # delta, typically by 3-8 percentage points. Still far more
+        # accurate than the old formula.
+        long_delta_val = abs(long_leg.get("delta", 0) or 0)
+        prob_of_profit = long_delta_val
         
         # Expected Value
         ev = (prob_of_profit * max_profit) - ((1 - prob_of_profit) * max_loss)
