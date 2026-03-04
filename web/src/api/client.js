@@ -217,3 +217,8 @@ export async function getSchwabStatus() {
     return { connected: false, error: "Not available" };
   }
 }
+
+export async function getSchwabAuthUrl() {
+  const data = await apiFetch("/auth/schwab/get-url");
+  return data.authorization_url;
+}

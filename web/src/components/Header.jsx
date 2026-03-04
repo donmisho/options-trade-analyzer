@@ -8,7 +8,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { NavLink } from 'react-router-dom';
 import Logo from '../assets/Logo';
 import { useApp } from '../context/AppContext';
-import { getSchwabStatus } from '../api/client';
+import { getSchwabStatus, getSchwabAuthUrl } from '../api/client';
 import './Header.css';
 
 export default function Header() {
@@ -32,10 +32,11 @@ export default function Header() {
     return () => clearInterval(interval);
   }, [checkSchwabStatus]);
 
-  const handleSchwabClick = () => {
+  const handleSchwabClick = async () => {
     if (schwabConnected) return;
+    const authUrl = await getSchwabAuthUrl();
     const popup = window.open(
-      `${import.meta.env.VITE_API_BASE_URL || 'https://127.0.0.1:8000'}/api/v1/auth/schwab/login`,
+      authUrl,
       'schwab-login',
       'width=600,height=700,menubar=no,toolbar=no'
     );

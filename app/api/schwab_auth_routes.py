@@ -54,6 +54,21 @@ def _get_token_manager():
 # 1. Login — Redirect to Schwab
 # ------------------------------------------------------------------
 
+@router.get("/get-url")
+async def schwab_get_url(user: dict = Depends(require_read)):
+    """
+    Return the Schwab authorization URL as JSON.
+
+    The frontend calls this via authenticated fetch, then opens the URL
+    in a popup directly. This avoids the problem of window.open() being
+    unable to send Authorization headers to /login.
+    """
+    manager = _get_token_manager()
+    auth_url = manager.get_authorization_url()
+    logger.info("Schwab OAuth: Returning authorization URL to frontend")
+    return {"authorization_url": auth_url}
+
+
 @router.get("/login")
 async def schwab_login(user: dict = Depends(require_read)):
     """
