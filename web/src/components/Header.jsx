@@ -35,7 +35,7 @@ export default function Header() {
   const handleSchwabClick = () => {
     if (schwabConnected) return;
     const popup = window.open(
-      'https://127.0.0.1:8000/api/v1/auth/schwab/login',
+      `${import.meta.env.VITE_API_BASE_URL || 'https://127.0.0.1:8000'}/api/v1/auth/schwab/login`,
       'schwab-login',
       'width=600,height=700,menubar=no,toolbar=no'
     );
