@@ -5,6 +5,7 @@ These are Tier 1 (read-only) — any authenticated user can access them.
 MCP tools will call these endpoints too.
 """
 
+import logging
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import Optional
 
@@ -14,6 +15,7 @@ from app.providers.factory import ProviderFactory
 from app.core.config import settings
 
 router = APIRouter(prefix="/market", tags=["Market Data"])
+log = logging.getLogger(__name__)
 
 # Initialized in main.py at startup
 _provider_factory: Optional[ProviderFactory] = None
@@ -37,21 +39,27 @@ async def get_quote(
 ):
     """
     Get current price data for a symbol.
-    
-    Uses the authenticated user's configured market data provider.
-    For most users, this will be Tradier. The provider adapter
-    normalizes the response regardless of source.
+
+    Tries Schwab first (includes earnings/dividend dates), falls back to Tradier.
     """
     factory = _get_factory()
-    # TODO: look up user's provider preference from DB
-    # For now, use Tradier
-    provider = factory.get_market_data(
-        settings.default_market_data_provider,
-        user_id=user.get("sub"),
-    )
+    user_id = user.get("sub")
+    sym = symbol.upper()
 
+    # Try Schwab first — it returns earnings + dividend dates
     try:
-        data = await provider.get_quote(symbol.upper())
+        token_mgr = getattr(factory, '_schwab_token_manager', None)
+        if token_mgr and token_mgr.get_status().get('connected'):
+            schwab = factory.get_market_data("schwab", user_id=user_id)
+            data = await schwab.get_quote(sym)
+            return Quote(**data)
+    except Exception as e:
+        log.warning(f"quote/{sym}: Schwab failed ({e}), falling back to Tradier")
+
+    # Fallback to Tradier
+    try:
+        tradier = factory.get_market_data(settings.default_market_data_provider, user_id=user_id)
+        data = await tradier.get_quote(sym)
         return Quote(**data)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Provider error: {str(e)}")

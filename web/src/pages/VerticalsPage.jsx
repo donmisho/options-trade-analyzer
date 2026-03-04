@@ -42,11 +42,11 @@ function computeAlignment(price, smaShort, smaMid, smaLong) {
 }
 
 // --- Sortable header helper (shared pattern with NakedOptionsPage) ---
-function SortTh({ label, sortKey, currentSort, onSort, style }) {
+function SortTh({ label, sortKey, currentSort, onSort, style, num }) {
   const isActive = currentSort.key === sortKey;
   const arrow = isActive ? (currentSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
   return (
-    <th onClick={() => onSort(sortKey)} style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap', ...style }}>
+    <th onClick={() => onSort(sortKey)} style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap', ...(num ? { textAlign: 'right' } : {}), ...style }}>
       {label}{arrow && <span style={{ fontSize: 9, opacity: 0.7 }}>{arrow}</span>}
     </th>
   );
@@ -180,7 +180,7 @@ export default function VerticalsPage() {
   function buildFavTrade(spread) {
     const typeLabel = spread.spread_type === 'bull_call' ? 'Bull Call' : 'Bear Put';
     const strikes = `${spread.long_strike}/${spread.short_strike}`;
-    return { id: `vs-${activeSymbol}-${spread.spread_type}-${strikes}-${spread.expiration}`, symbol: activeSymbol, label: `${typeLabel} ${strikes}`, expiration: spread.expiration, source: 'vertical', score: spread.composite_score, originalPrice: `Debit: $${spread.net_debit.toFixed(2)}`, originalDebit: spread.net_debit, maxProfit: spread.max_profit, rewardRisk: spread.reward_risk_ratio, probOfProfit: spread.prob_of_profit };
+    return { id: `vs-${activeSymbol}-${spread.spread_type}-${strikes}-${spread.expiration}`, symbol: activeSymbol, label: `${typeLabel} ${strikes}`, expiration: spread.expiration, source: 'vertical', score: spread.composite_score, originalPrice: `Debit: ${spread.net_debit.toFixed(2)}`, originalDebit: spread.net_debit, maxProfit: spread.max_profit, rewardRisk: spread.reward_risk_ratio, probOfProfit: spread.prob_of_profit };
   }
 
   // ─── Config handlers ─────────────────────────────────────────
@@ -244,14 +244,15 @@ export default function VerticalsPage() {
               <tr>
                 <th style={{ width: 32 }}></th>
                 <SortTh label="Type" sortKey="spread_type" currentSort={sort} onSort={handleSort} />
-                <SortTh label="Long / Short" sortKey="long_strike" currentSort={sort} onSort={handleSort} />
-                <SortTh label="Exp" sortKey="expiration" currentSort={sort} onSort={handleSort} />
-                <SortTh label="Debit" sortKey="net_debit" currentSort={sort} onSort={handleSort} />
-                <SortTh label="Max Profit" sortKey="max_profit" currentSort={sort} onSort={handleSort} />
-                <SortTh label="R:R" sortKey="reward_risk_ratio" currentSort={sort} onSort={handleSort} />
-                <SortTh label="Breakeven" sortKey="breakeven" currentSort={sort} onSort={handleSort} />
-                <SortTh label="Prob %" sortKey="prob_of_profit" currentSort={sort} onSort={handleSort} />
-                <SortTh label="EV" sortKey="ev_raw" currentSort={sort} onSort={handleSort} />
+                <SortTh label="Long / Short" sortKey="long_strike" currentSort={sort} onSort={handleSort} style={{ textAlign: 'center' }} />
+                <SortTh label="Exp" sortKey="expiration" currentSort={sort} onSort={handleSort} style={{ textAlign: 'center' }} />
+                <th style={{ textAlign: 'right', cursor: 'default', whiteSpace: 'nowrap' }}>DTE</th>
+                <SortTh label="Debit" sortKey="net_debit" currentSort={sort} onSort={handleSort} num />
+                <SortTh label="Max Profit" sortKey="max_profit" currentSort={sort} onSort={handleSort} num />
+                <SortTh label="R:R" sortKey="reward_risk_ratio" currentSort={sort} onSort={handleSort} num />
+                <SortTh label="Breakeven" sortKey="breakeven" currentSort={sort} onSort={handleSort} num />
+                <SortTh label="Prob %" sortKey="prob_of_profit" currentSort={sort} onSort={handleSort} num />
+                <SortTh label="EV" sortKey="ev_raw" currentSort={sort} onSort={handleSort} num />
                 <SortTh label="Score" sortKey="composite_score" currentSort={sort} onSort={handleSort} />
                 <th style={{ width: 60 }}></th>
               </tr>
@@ -263,14 +264,15 @@ export default function VerticalsPage() {
                   <tr key={i} style={{ borderLeft: '2px solid transparent' }}>
                     <td><StarButton trade={buildFavTrade(s)} /></td>
                     <td><span className={`type-badge ${isBull ? 'type-bull' : 'type-bear'}`}>{isBull ? 'Bull Call' : 'Bear Put'}</span></td>
-                    <td className="mono">{s.long_strike} / {s.short_strike}</td>
-                    <td className="mono text-muted">{s.expiration}</td>
-                    <td className="mono">${s.net_debit.toFixed(2)}</td>
-                    <td className="mono text-green">${s.max_profit.toFixed(2)}</td>
+                    <td className="mono" style={{ textAlign: 'center' }}>{s.long_strike} / {s.short_strike}</td>
+                    <td className="mono text-muted" style={{ textAlign: 'center' }}>{s.expiration}</td>
+                    <td className="mono">{Math.max(0, Math.round((new Date(s.expiration) - new Date()) / 86400000))}</td>
+                    <td className="mono">{s.net_debit.toFixed(2)}</td>
+                    <td className="mono text-green">{s.max_profit.toFixed(2)}</td>
                     <td className="mono">{s.reward_risk_ratio.toFixed(2)}</td>
-                    <td className="mono">${s.breakeven.toFixed(2)}</td>
+                    <td className="mono">{s.breakeven.toFixed(2)}</td>
                     <td className="mono">{(s.prob_of_profit * 100).toFixed(0)}%</td>
-                    <td className={`mono ${s.ev_raw >= 0 ? 'text-green' : 'text-red'}`}>${s.ev_raw.toFixed(2)}</td>
+                    <td className={`mono ${s.ev_raw >= 0 ? 'text-green' : 'text-red'}`}>{s.ev_raw.toFixed(2)}</td>
                     <td><ScoreBar score={s.composite_score} /></td>
                     <td>
                       <div style={{ display: 'flex', gap: 3 }}>

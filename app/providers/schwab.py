@@ -120,7 +120,7 @@ class SchwabMarketData(MarketDataProvider):
             "avg_volume": avg_volume if avg_volume > 0 else None,
             "volume_ratio": volume_ratio,
             "next_earnings_date": fundamental.get("nextEarningsDate"),
-            "next_dividend_date": fundamental.get("divDate"),
+            "next_dividend_date": fundamental.get("nextDivExDate"),
             "timestamp": datetime.now(timezone.utc),
         }
 

@@ -48,11 +48,11 @@ function computeAlignment(price, smaShort, smaMid, smaLong) {
 }
 
 // --- Sortable header ---
-function SortTh({ label, sortKey, currentSort, onSort, style }) {
+function SortTh({ label, sortKey, currentSort, onSort, style, num }) {
   const isActive = currentSort.key === sortKey;
   const arrow = isActive ? (currentSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
   return (
-    <th onClick={() => onSort(sortKey)} style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap', ...style }}>
+    <th onClick={() => onSort(sortKey)} style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap', ...(num ? { textAlign: 'right' } : {}), ...style }}>
       {label}{arrow && <span style={{ fontSize: 9, opacity: 0.7 }}>{arrow}</span>}
     </th>
   );
@@ -204,10 +204,10 @@ export default function NakedOptionsPage() {
     const typeLabel = type === 'put' ? 'Put' : 'Call';
     return {
       id: `nc-${activeSymbol}-${c.strike}-${c.expiration}-${type}`,
-      symbol: activeSymbol, label: `$${c.strike} ${typeLabel}`,
+      symbol: activeSymbol, label: `${c.strike} ${typeLabel}`,
       expiration: c.expiration, source: 'naked',
       score: c.composite_score,
-      originalPrice: `Premium: $${c.premium_dollars.toFixed(2)}`,
+      originalPrice: `Premium: ${c.premium_dollars.toFixed(2)}`,
       premium: c.premium_dollars, delta: c.delta, iv: c.iv,
     };
   }
@@ -299,14 +299,14 @@ export default function NakedOptionsPage() {
               <tr>
                 <th style={{ width: 32 }}></th>
                 <SortTh label="Type" sortKey="option_type" currentSort={sort} onSort={handleSort} />
-                <SortTh label="Strike" sortKey="strike" currentSort={sort} onSort={handleSort} />
-                <SortTh label="Exp" sortKey="expiration" currentSort={sort} onSort={handleSort} />
-                <SortTh label="Premium" sortKey="premium_dollars" currentSort={sort} onSort={handleSort} />
-                <SortTh label="Delta" sortKey="delta" currentSort={sort} onSort={handleSort} />
-                <SortTh label="Theta $/day" sortKey="theta_per_day_dollars" currentSort={sort} onSort={handleSort} />
-                <SortTh label="Runway" sortKey="theta_runway_days" currentSort={sort} onSort={handleSort} />
-                <SortTh label="IV" sortKey="iv" currentSort={sort} onSort={handleSort} />
-                <SortTh label="Breakeven" sortKey="breakeven" currentSort={sort} onSort={handleSort} />
+                <SortTh label="Strike" sortKey="strike" currentSort={sort} onSort={handleSort} style={{ textAlign: 'center' }} />
+                <SortTh label="Exp" sortKey="expiration" currentSort={sort} onSort={handleSort} style={{ textAlign: 'center' }} />
+                <SortTh label="DTE" sortKey="days_to_exp" currentSort={sort} onSort={handleSort} num />
+                <SortTh label="Premium" sortKey="premium_dollars" currentSort={sort} onSort={handleSort} num />
+                <SortTh label="Delta" sortKey="delta" currentSort={sort} onSort={handleSort} num />
+                <SortTh label="Theta/day" sortKey="theta_per_day_dollars" currentSort={sort} onSort={handleSort} num />
+                <SortTh label="IV" sortKey="iv" currentSort={sort} onSort={handleSort} num />
+                <SortTh label="Breakeven" sortKey="breakeven" currentSort={sort} onSort={handleSort} num />
                 <SortTh label="Score" sortKey="composite_score" currentSort={sort} onSort={handleSort} />
                 <th style={{ width: 70 }}></th>
               </tr>
@@ -316,14 +316,14 @@ export default function NakedOptionsPage() {
                 <tr key={i}>
                   <td><StarButton trade={buildFavTrade(c)} /></td>
                   <td><span className={`type-badge ${(c.option_type || 'call') === 'call' ? 'type-bull' : 'type-bear'}`}>{(c.option_type || 'call') === 'call' ? 'Call' : 'Put'}</span></td>
-                  <td className="mono text-cyan">${c.strike}</td>
-                  <td className="mono text-muted">{c.expiration}</td>
-                  <td className="mono">${c.premium_dollars.toFixed(0)}</td>
+                  <td className="mono text-cyan" style={{ textAlign: 'center' }}>{c.strike}</td>
+                  <td className="mono text-muted" style={{ textAlign: 'center' }}>{c.expiration}</td>
+                  <td className="mono">{c.days_to_exp}</td>
+                  <td className="mono">{c.premium_dollars.toFixed(2)}</td>
                   <td className="mono text-green">{c.delta.toFixed(2)}</td>
-                  <td className="mono text-red">−${c.theta_per_day_dollars.toFixed(2)}</td>
-                  <td className="mono">{c.theta_runway_days.toFixed(0)}d</td>
+                  <td className="mono text-red">−{c.theta_per_day_dollars.toFixed(2)}</td>
                   <td className="mono">{c.iv.toFixed(1)}%</td>
-                  <td className="mono">${c.breakeven.toFixed(2)}</td>
+                  <td className="mono">{c.breakeven.toFixed(2)}</td>
                   <td><ScoreBar score={c.composite_score} /></td>
                   <td>
                     <div style={{ display: 'flex', gap: 3 }}>

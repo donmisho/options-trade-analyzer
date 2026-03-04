@@ -91,7 +91,7 @@ export default function SmaPanel({ candles, smaPeriods, onPeriodsChange, symbol 
           <span style={{ fontSize: 16, color: aCol, fontWeight: 800 }}>{aIcon}</span>
           <span style={{ fontSize: 13, fontWeight: 700, color: aCol }}>{aLabel}</span>
           <span style={{ color: C.textMuted, fontSize: 11 }}>·</span>
-          <span style={{ color: C.textDim, fontSize: 11, fontFamily: mono }}>{symbol} ${lc.toFixed(2)}</span>
+          <span style={{ color: C.textDim, fontSize: 11, fontFamily: mono }}>{symbol} {lc.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           {!expanded && smaRows.map(s => (<span key={s.l} style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 8, height: 2, borderRadius: 1, backgroundColor: s.c, display: "inline-block" }} /><span style={{ fontSize: 10.5, color: s.c, fontFamily: mono, fontWeight: 600 }}>{s.v.toFixed(1)}</span></span>))}
@@ -101,7 +101,7 @@ export default function SmaPanel({ candles, smaPeriods, onPeriodsChange, symbol 
       {expanded && (<div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 16px", borderBottom: `1px solid ${C.border}20` }}>
           <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
-            <div><div style={{ fontSize: 9, color: C.textMuted, textTransform: "uppercase" }}>Price</div><div style={{ fontSize: 18, fontWeight: 700, color: C.text, fontFamily: mono }}>${lc.toFixed(2)}</div></div>
+            <div><div style={{ fontSize: 9, color: C.textMuted, textTransform: "uppercase" }}>Price</div><div style={{ fontSize: 18, fontWeight: 700, color: C.text, fontFamily: mono }}>{lc.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div></div>
             {smaRows.map(s => (<div key={s.l}><div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 1 }}><div style={{ width: 12, height: 2.5, borderRadius: 1, backgroundColor: s.c }} /><span style={{ fontSize: 9.5, color: C.textMuted }}>{s.l}</span></div><div style={{ fontSize: 14, fontWeight: 600, color: s.c, fontFamily: mono }}>{s.v.toFixed(2)}</div></div>))}
           </div>
           <button onClick={(e) => { e.stopPropagation(); setShowCfg(!showCfg); }} style={{ padding: "5px 10px", borderRadius: 5, border: `1px solid ${C.border}`, backgroundColor: showCfg ? C.surfaceAlt : "transparent", color: C.textMuted, fontSize: 11, cursor: "pointer" }}>⚙ Periods</button>

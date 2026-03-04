@@ -61,7 +61,7 @@ export default function Watchlist() {
             <div className="wl-price-block">
               {hasPrice ? (
                 <>
-                  <span className="wl-price">${quote.price.toFixed(2)}</span>
+                  <span className="wl-price">{quote.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                   <span className={`wl-change ${isUp ? 'up' : 'down'}`}>
                     {isUp ? '+' : ''}{quote.change_pct.toFixed(2)}%
                   </span>

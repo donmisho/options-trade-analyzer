@@ -113,6 +113,14 @@ tr:hover td {
   border: 1px solid rgba(168, 85, 247, 0.25);
 }
 
+/* ── Numeric cells — right-align all mono table data ── */
+td.mono {
+  text-align: right;
+}
+th.sortable.num {
+  text-align: right;
+}
+
 /* ── Sortable headers ── */
 th.sortable {
   cursor: pointer;

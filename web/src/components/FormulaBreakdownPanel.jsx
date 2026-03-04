@@ -76,7 +76,7 @@ function computeBreakdown(trade, weights) {
     {
       key: "expected_value",
       formula: "(prob × maxProfit) − ((1−prob) × maxLoss)",
-      math: `(${prob.toFixed(2)} × $${maxProfit.toFixed(2)}) − (${(1 - prob).toFixed(2)} × $${maxLoss.toFixed(2)}) = $${ev.toFixed(2)}`,
+      math: `(${prob.toFixed(2)} × ${maxProfit.toFixed(2)}) − (${(1 - prob).toFixed(2)} × ${maxLoss.toFixed(2)}) = ${ev.toFixed(2)}`,
       norm: `(${ev.toFixed(2)} − ${evMin}) / (${evMax} − ${evMin}) = ${evNorm.toFixed(4)}`,
       normalized: evNorm,
       weighted: evNorm * (weights.expected_value || 0),
@@ -84,7 +84,7 @@ function computeBreakdown(trade, weights) {
     {
       key: "reward_risk",
       formula: "maxProfit / maxLoss",
-      math: `$${maxProfit.toFixed(2)} / $${maxLoss.toFixed(2)} = ${rr.toFixed(2)} : 1`,
+      math: `${maxProfit.toFixed(2)} / ${maxLoss.toFixed(2)} = ${rr.toFixed(2)} : 1`,
       norm: `(${rr.toFixed(2)} − ${rrMin}) / (${rrMax} − ${rrMin}) = ${rrNorm.toFixed(4)}`,
       normalized: rrNorm,
       weighted: rrNorm * (weights.reward_risk || 0),

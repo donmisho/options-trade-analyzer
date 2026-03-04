@@ -105,7 +105,7 @@ export default function DirectionalPage() {
       symbol: activeSymbol, label: s.strategy_name,
       expiration: s.expiration, source: 'directional',
       score: s.prob_of_profit,
-      originalPrice: `Cost: $${s.cost.toFixed(0)}`,
+      originalPrice: `Cost: ${s.cost.toFixed(2)}`,
       cost: s.cost, maxProfit: s.max_profit,
     };
   }
@@ -164,11 +164,11 @@ export default function DirectionalPage() {
           <span className={`thesis-dir ${direction}`}>{direction === 'bullish' ? '▲' : '▼'} {direction.toUpperCase()}</span>
           <span className="mono">{activeSymbol}</span>
           <span className="text-muted">→</span>
-          <span className="mono text-cyan">${thesis.target_price}</span>
+          <span className="mono text-cyan">{thesis.target_price}</span>
           <span className="text-muted">within</span>
           <span className="mono">{thesis.timeframe_days}d</span>
           <span className="text-muted">|</span>
-          <span className="mono">Budget: ${thesis.risk_budget}</span>
+          <span className="mono">Budget: {thesis.risk_budget}</span>
         </div>
       )}
 
@@ -180,11 +180,11 @@ export default function DirectionalPage() {
                 <th style={{ width: 32 }}></th>
                 <th>Strategy</th>
                 <th>Exp</th>
-                <th>Cost</th>
-                <th>Max Profit</th>
-                <th>Breakeven</th>
-                <th>Prob %</th>
-                <th>Buffer</th>
+                <th style={{ textAlign: 'right' }}>Cost</th>
+                <th style={{ textAlign: 'right' }}>Max Profit</th>
+                <th style={{ textAlign: 'right' }}>Breakeven</th>
+                <th style={{ textAlign: 'right' }}>Prob %</th>
+                <th style={{ textAlign: 'right' }}>Buffer</th>
                 <th>Verdict</th>
                 <th style={{ width: 60 }}></th>
               </tr>
@@ -198,11 +198,11 @@ export default function DirectionalPage() {
                     {s.strategy_name.replace(/\.0(?=\/|$)/g, '')}
                   </td>
                   <td className="mono text-muted">{s.expiration}</td>
-                  <td className="mono">${s.cost.toFixed(2)}</td>
+                  <td className="mono">{s.cost.toFixed(2)}</td>
                   <td className={`mono ${s.max_profit_str === 'Unlimited' ? 'text-cyan' : 'text-green'}`}>
                     {s.max_profit_str === 'Unlimited' ? <em>Unlimited</em> : s.max_profit_str}
                   </td>
-                  <td className="mono">${s.breakeven.toFixed(2)}</td>
+                  <td className="mono">{s.breakeven.toFixed(2)}</td>
                   <td className="mono">{(s.prob_of_profit * 100).toFixed(0)}%</td>
                   <td className={`mono ${s.buffer_pct >= 0 ? 'text-green' : 'text-red'}`}>{s.buffer_pct.toFixed(1)}%</td>
                   <td><span className={`verdict-badge ${verdictStyle(s)}`}>{s.verdict}</span></td>

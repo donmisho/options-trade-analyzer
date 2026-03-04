@@ -98,10 +98,10 @@ export default function LongCallsPage() {
   function buildFavTrade(c) {
     return {
       id: `lc-${activeSymbol}-${c.strike}-${c.expiration}`,
-      symbol: activeSymbol, label: `$${c.strike} Call`,
+      symbol: activeSymbol, label: `${c.strike} Call`,
       expiration: c.expiration, source: 'longcall',
       score: c.composite_score,
-      originalPrice: `Premium: $${c.premium_dollars.toFixed(2)}`,
+      originalPrice: `Premium: ${c.premium_dollars.toFixed(2)}`,
       premium: c.premium_dollars, delta: c.delta, iv: c.iv,
     };
   }
@@ -141,14 +141,14 @@ export default function LongCallsPage() {
             <thead>
               <tr>
                 <th style={{ width: 32 }}></th>
-                <th>Strike</th>
-                <th>Exp</th>
-                <th>Premium</th>
-                <th>Delta</th>
-                <th>Theta $/day</th>
-                <th>Runway</th>
-                <th>IV</th>
-                <th>Breakeven</th>
+                <th style={{ textAlign: 'center' }}>Strike</th>
+                <th style={{ textAlign: 'center' }}>Exp</th>
+                <th style={{ textAlign: 'right' }}>DTE</th>
+                <th style={{ textAlign: 'right' }}>Premium</th>
+                <th style={{ textAlign: 'right' }}>Delta</th>
+                <th style={{ textAlign: 'right' }}>Theta/day</th>
+                <th style={{ textAlign: 'right' }}>IV</th>
+                <th style={{ textAlign: 'right' }}>Breakeven</th>
                 <th>Score</th>
                 <th style={{ width: 60 }}></th>
               </tr>
@@ -157,14 +157,14 @@ export default function LongCallsPage() {
               {calls.map((c, i) => (
                 <tr key={i}>
                   <td><StarButton trade={buildFavTrade(c)} /></td>
-                  <td className="mono text-cyan">${c.strike}</td>
-                  <td className="mono text-muted">{c.expiration}</td>
-                  <td className="mono">${c.premium_dollars.toFixed(0)}</td>
+                  <td className="mono text-cyan" style={{ textAlign: 'center' }}>{c.strike}</td>
+                  <td className="mono text-muted" style={{ textAlign: 'center' }}>{c.expiration}</td>
+                  <td className="mono">{c.theta_runway_days.toFixed(0)}</td>
+                  <td className="mono">{c.premium_dollars.toFixed(2)}</td>
                   <td className="mono text-green">{c.delta.toFixed(2)}</td>
-                  <td className="mono text-red">−${c.theta_per_day_dollars.toFixed(2)}</td>
-                  <td className="mono">{c.theta_runway_days.toFixed(0)}d</td>
+                  <td className="mono text-red">−{c.theta_per_day_dollars.toFixed(2)}</td>
                   <td className="mono">{c.iv.toFixed(1)}%</td>
-                  <td className="mono">${c.breakeven.toFixed(2)}</td>
+                  <td className="mono">{c.breakeven.toFixed(2)}</td>
                   <td><ScoreBar score={c.composite_score} /></td>
                   <td>
                     <button

@@ -14,8 +14,8 @@ function preScreenTrade(trade, thesis) {
   const flags = [];
   if (trade.reward_risk_ratio < 1.5) flags.push({ level: "warn", msg: `R:R is ${trade.reward_risk_ratio.toFixed(2)} — below 1.5 minimum` });
   if (trade.net_debit * 100 > (thesis.risk_budget || 500)) flags.push({ level: "warn", msg: "Total cost exceeds risk budget" });
-  if (thesis.direction === "Bullish" && thesis.target && thesis.target < trade.short_strike) flags.push({ level: "alert", msg: `Target $${thesis.target} doesn't reach short strike $${trade.short_strike}` });
-  if (thesis.direction === "Bearish" && thesis.target && thesis.target > trade.long_strike) flags.push({ level: "alert", msg: `Target $${thesis.target} doesn't reach long strike $${trade.long_strike}` });
+  if (thesis.direction === "Bullish" && thesis.target && thesis.target < trade.short_strike) flags.push({ level: "alert", msg: `Target ${thesis.target} doesn't reach short strike ${trade.short_strike}` });
+  if (thesis.direction === "Bearish" && thesis.target && thesis.target > trade.long_strike) flags.push({ level: "alert", msg: `Target ${thesis.target} doesn't reach long strike ${trade.long_strike}` });
   if (trade.prob_of_profit < 0.45) flags.push({ level: "warn", msg: `Low probability (${(trade.prob_of_profit * 100).toFixed(0)}%) — consider wider spread` });
   return flags;
 }
@@ -138,7 +138,7 @@ export default function AskClaudePanel({ open, onClose, trade, smaData, smaPerio
             <span style={{ color: C.textDim, fontSize: 11 }}>{trade.spread_type === "bull_call" ? "Call" : "Put"} Spread · Exp {trade.expiration}</span>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8 }}>
-            {[{ l: "Debit", v: `$${trade.net_debit.toFixed(2)}` }, { l: "Max Profit", v: `$${(trade.max_profit * 100).toFixed(0)}` }, { l: "R:R", v: trade.reward_risk_ratio.toFixed(2) }, { l: "Prob", v: `${(trade.prob_of_profit * 100).toFixed(0)}%` }].map(({ l, v }) => (
+            {[{ l: "Debit", v: trade.net_debit.toFixed(2) }, { l: "Max Profit", v: (trade.max_profit * 100).toFixed(2) }, { l: "R:R", v: trade.reward_risk_ratio.toFixed(2) }, { l: "Prob", v: `${(trade.prob_of_profit * 100).toFixed(0)}%` }].map(({ l, v }) => (
               <div key={l}><div style={{ fontSize: 9, color: C.textMuted, textTransform: "uppercase" }}>{l}</div><div style={{ fontSize: 13, fontWeight: 600, color: C.text, fontFamily: mono }}>{v}</div></div>
             ))}
           </div>
@@ -148,7 +148,7 @@ export default function AskClaudePanel({ open, onClose, trade, smaData, smaPerio
         <div style={{ padding: 12, borderRadius: 8, border: `1px solid ${C.border}`, backgroundColor: C.card, marginBottom: 12 }}>
           <div style={{ fontSize: 10, color: C.textMuted, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>Market Context</div>
           <div style={{ display: "flex", gap: 16, fontSize: 11 }}>
-            <span style={{ color: C.text }}>${lastClose.toFixed(2)}</span>
+            <span style={{ color: C.text }}>{lastClose.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
             <span style={{ color: C.smaCyan }}>SMA{smaPeriods.short} {smaS.toFixed(1)}</span>
             <span style={{ color: C.smaOrange }}>SMA{smaPeriods.mid} {smaM.toFixed(1)}</span>
             <span style={{ color: C.smaRed }}>SMA{smaPeriods.long} {smaL.toFixed(1)}</span>
@@ -166,7 +166,7 @@ export default function AskClaudePanel({ open, onClose, trade, smaData, smaPerio
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
             <div><label style={{ display: "block", fontSize: 10, color: C.textDim, marginBottom: 3 }}>Price Target</label><input type="number" value={thesis.target} placeholder={`e.g. ${(lastClose*1.02).toFixed(0)}`} onChange={e => setThesis({...thesis, target: e.target.value})} style={{ width: "100%", padding: "5px 7px", borderRadius: 5, border: `1px solid ${C.border}`, backgroundColor: C.bg, color: C.text, fontSize: 12, fontFamily: mono, outline: "none" }} /></div>
             <div><label style={{ display: "block", fontSize: 10, color: C.textDim, marginBottom: 3 }}>Timeframe</label><div style={{ display: "flex", alignItems: "center", gap: 4 }}><input type="number" value={thesis.timeframe} min={1} max={365} onChange={e => setThesis({...thesis, timeframe: parseInt(e.target.value)||30})} style={{ width: "100%", padding: "5px 7px", borderRadius: 5, border: `1px solid ${C.border}`, backgroundColor: C.bg, color: C.text, fontSize: 12, fontFamily: mono, outline: "none" }} /><span style={{ fontSize: 10, color: C.textMuted }}>days</span></div></div>
-            <div><label style={{ display: "block", fontSize: 10, color: C.textDim, marginBottom: 3 }}>Risk Budget</label><div style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ fontSize: 11, color: C.textMuted }}>$</span><input type="number" value={thesis.risk_budget} min={50} step={50} onChange={e => setThesis({...thesis, risk_budget: parseInt(e.target.value)||500})} style={{ width: "100%", padding: "5px 7px", borderRadius: 5, border: `1px solid ${C.border}`, backgroundColor: C.bg, color: C.text, fontSize: 12, fontFamily: mono, outline: "none" }} /></div></div>
+            <div><label style={{ display: "block", fontSize: 10, color: C.textDim, marginBottom: 3 }}>Risk Budget</label><div style={{ display: "flex", alignItems: "center", gap: 4 }}><input type="number" value={thesis.risk_budget} min={50} step={50} onChange={e => setThesis({...thesis, risk_budget: parseInt(e.target.value)||500})} style={{ width: "100%", padding: "5px 7px", borderRadius: 5, border: `1px solid ${C.border}`, backgroundColor: C.bg, color: C.text, fontSize: 12, fontFamily: mono, outline: "none" }} /></div></div>
           </div>
           {flags.length > 0 && (<div style={{ marginTop: 10, padding: 8, borderRadius: 6, backgroundColor: C.amberBg, border: `1px solid ${C.amber}20` }}><div style={{ fontSize: 10, color: C.amber, fontWeight: 600, marginBottom: 4 }}>PRE-SCREEN FLAGS</div>{flags.map((f, i) => <div key={i} style={{ fontSize: 11, color: f.level === "alert" ? C.red : C.amber, marginBottom: 2 }}>{f.level === "alert" ? "🚨" : "⚠️"} {f.msg}</div>)}</div>)}
           {error && <div style={{ marginTop: 10, padding: 8, borderRadius: 6, backgroundColor: C.redBg, border: `1px solid ${C.red}30` }}><div style={{ fontSize: 11, color: C.red }}>{error}</div></div>}
@@ -223,15 +223,15 @@ export default function AskClaudePanel({ open, onClose, trade, smaData, smaPerio
               <div style={{ fontSize: 10, color: C.accent, fontWeight: 700, textTransform: "uppercase", marginBottom: 8 }}>Exit Plan & Alerts</div>
               <div style={{ fontSize: 10, color: C.textDim, fontWeight: 600, marginBottom: 4, textTransform: "uppercase" }}>Spread Value</div>
               <div style={{ display: "grid", gap: 4, marginBottom: 10 }}>
-                <ExitRow icon="🏆" label="Scale out" val={`$${msg.exitLevels.scale_out_target}`} action="Close 50-75%" />
-                <ExitRow icon="🏆" label="Full exit" val={`$${msg.exitLevels.full_profit_target}`} action="Close 100%" />
-                <ExitRow icon="⚠️" label="Warning" val={`$${msg.exitLevels.warning_level}`} action="Tighten stop" />
-                <ExitRow icon="🛑" label="Hard stop" val={`$${msg.exitLevels.stop_loss}`} action="Close position" />
+                <ExitRow icon="🏆" label="Scale out" val={msg.exitLevels.scale_out_target} action="Close 50-75%" />
+                <ExitRow icon="🏆" label="Full exit" val={msg.exitLevels.full_profit_target} action="Close 100%" />
+                <ExitRow icon="⚠️" label="Warning" val={msg.exitLevels.warning_level} action="Tighten stop" />
+                <ExitRow icon="🛑" label="Hard stop" val={msg.exitLevels.stop_loss} action="Close position" />
               </div>
               <div style={{ fontSize: 10, color: C.textDim, fontWeight: 600, marginBottom: 4, textTransform: "uppercase" }}>Underlying Price</div>
               <div style={{ display: "grid", gap: 4, marginBottom: 10 }}>
-                <ExitRow icon="🎯" label="Target" val={`$${msg.exitLevels.underlying_target}`} action="Take profit" />
-                <ExitRow icon="🔴" label="Stop" val={`$${msg.exitLevels.underlying_stop}`} action="Close immediately" />
+                <ExitRow icon="🎯" label="Target" val={msg.exitLevels.underlying_target} action="Take profit" />
+                <ExitRow icon="🔴" label="Stop" val={msg.exitLevels.underlying_stop} action="Close immediately" />
               </div>
               <div style={{ fontSize: 10, color: C.textDim, fontWeight: 600, marginBottom: 4, textTransform: "uppercase" }}>Time Rules</div>
               <div style={{ fontSize: 11, color: C.textDim, lineHeight: 1.5 }}>• Flat after 10 days → reassess{"\n"}• Never hold final 7 days unless deep ITM{"\n"}• VIX spike 20%+ → evaluate early close</div>

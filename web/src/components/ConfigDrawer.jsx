@@ -253,7 +253,7 @@ export default function ConfigDrawer({ mode = "verticals", open, onClose, config
           <SingleSlider label="Min Delta" value={parseFloat(gk.min_short_delta.toFixed(2))} min={0.05} max={gk.max_short_delta - 0.05} step={0.05} color={C.accent} onChange={v => sd({ greeks: { ...gk, min_short_delta: parseFloat(v.toFixed(2)) } })} />
           <SingleSlider label="Max Delta" value={parseFloat(gk.max_short_delta.toFixed(2))} min={gk.min_short_delta + 0.05} max={0.80} step={0.05} color={C.accent} onChange={v => sd({ greeks: { ...gk, max_short_delta: parseFloat(v.toFixed(2)) } })} />
           <SingleSlider label="Min Net Delta" value={parseFloat(gk.min_net_delta.toFixed(2))} min={0} max={0.50} step={0.05} color={C.yellow} onChange={v => sd({ greeks: { ...gk, min_net_delta: parseFloat(v.toFixed(2)) } })} />
-          <SingleSlider label="Max Net Theta" value={parseFloat(gk.max_net_theta.toFixed(2))} min={0} max={2.0} step={0.05} unit="$/day" color={C.red} onChange={v => sd({ greeks: { ...gk, max_net_theta: parseFloat(v.toFixed(2)) } })} />
+          <SingleSlider label="Max Net Theta" value={parseFloat(gk.max_net_theta.toFixed(2))} min={0} max={2.0} step={0.05} unit="/day" color={C.red} onChange={v => sd({ greeks: { ...gk, max_net_theta: parseFloat(v.toFixed(2)) } })} />
           <p style={{ fontSize: 10, color: C.textMuted, margin: "2px 0 0" }}>0 = no filter</p>
         </Sect>
 
@@ -261,11 +261,11 @@ export default function ConfigDrawer({ mode = "verticals", open, onClose, config
           <NumInput label="Strike Range" value={strikes.range_pct} onChange={v => sd({ strikes: { ...strikes, range_pct: v } })} min={1} max={50} step={0.5} unit="%" />
           <SingleSlider label="Min Open Interest" value={strikes.min_open_interest} min={0} max={1000} step={10} color={C.accent} onChange={v => sd({ strikes: { ...strikes, min_open_interest: v } })} />
           <SingleSlider label="Min Volume" value={strikes.min_volume} min={0} max={500} step={5} color={C.accent} onChange={v => sd({ strikes: { ...strikes, min_volume: v } })} />
-          {isV && <DualRangeSlider label="Spread Width" minVal={spreads.min_width} maxVal={spreads.max_width} min={1} max={100} step={1} unit="$" color={C.accent} onChange={(a, b) => sd({ spreads: { ...spreads, min_width: a, max_width: b } })} />}
+          {isV && <DualRangeSlider label="Spread Width" minVal={spreads.min_width} maxVal={spreads.max_width} min={1} max={100} step={1} color={C.accent} onChange={(a, b) => sd({ spreads: { ...spreads, min_width: a, max_width: b } })} />}
         </Sect>
 
         <Sect title="Risk Management" icon="&#128737;&#65039;">
-          <SingleSlider label="Max Risk Per Trade" value={risk.max_risk_per_trade} min={50} max={5000} step={50} unit="$" color={C.accent} onChange={v => sd({ risk: { ...risk, max_risk_per_trade: v } })} />
+          <SingleSlider label="Max Risk Per Trade" value={risk.max_risk_per_trade} min={50} max={5000} step={50} color={C.accent} onChange={v => sd({ risk: { ...risk, max_risk_per_trade: v } })} />
           <SingleSlider label="Profit Target" value={risk.profit_target_pct} min={0} max={500} step={5} unit="%" color={C.green} onChange={v => sd({ risk: { ...risk, profit_target_pct: v } })} />
           <SingleSlider label="Stop Loss" value={risk.stop_loss_pct} min={0} max={100} step={5} unit="%" color={C.red} onChange={v => sd({ risk: { ...risk, stop_loss_pct: v } })} />
         </Sect>

@@ -78,6 +78,36 @@ export default function QuoteBar({ title }) {
     return n.toLocaleString();
   }
 
+  // Days until a date string; negative = already past
+  function daysUntil(dateStr) {
+    if (!dateStr) return null;
+    const d = new Date(dateStr);
+    if (isNaN(d)) return null;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return Math.round((d - today) / 86400000);
+  }
+
+  function dateColor(dateStr) {
+    const days = daysUntil(dateStr);
+    if (days === null) return 'var(--text-muted)';
+    if (days <= 10) return 'var(--accent-red)';
+    return 'var(--accent-green)';
+  }
+
+  function fmtDate(dateStr) {
+    if (!dateStr) return '—';
+    const d = new Date(dateStr);
+    if (isNaN(d)) return dateStr;
+    const tz = 'America/New_York';
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz, month: '2-digit', day: '2-digit', year: 'numeric',
+      hour: 'numeric', minute: '2-digit', hour12: true,
+    }).formatToParts(d);
+    const get = (type) => parts.find(p => p.type === type)?.value ?? '';
+    return `${get('month')}/${get('day')}/${get('year')} ${get('hour')}:${get('minute')} ${get('dayPeriod')} ET`;
+  }
+
   return (
     <div className="quote-bar">
       {/* Row 1: Title + Symbol Input */}
@@ -91,7 +121,7 @@ export default function QuoteBar({ title }) {
         <div className="qb-data-row">
           {/* Price + Change */}
           <div className="qb-price-group">
-            <span className="qb-price">${quote.price.toFixed(2)}</span>
+            <span className="qb-price">{quote.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
             <span className={`qb-change ${isUp ? 'up' : 'down'}`}>
               {isUp ? '+' : ''}{quote.change.toFixed(2)} ({isUp ? '+' : ''}{quote.change_pct.toFixed(2)}%)
             </span>
@@ -103,7 +133,7 @@ export default function QuoteBar({ title }) {
           <div className="qb-range-group">
             <span className="qb-range-label">Day</span>
             <span className="qb-range-values">
-              ${quote.day_low.toFixed(2)} – ${quote.day_high.toFixed(2)}
+              {quote.day_low.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} – {quote.day_high.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </span>
           </div>
 
@@ -114,7 +144,7 @@ export default function QuoteBar({ title }) {
               <div className="qb-range-group">
                 <span className="qb-range-label">52W</span>
                 <span className="qb-range-values">
-                  ${quote.week_52_low.toFixed(2)} – ${quote.week_52_high.toFixed(2)}
+                  {quote.week_52_low.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} – {quote.week_52_high.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
               </div>
             </>
@@ -133,7 +163,9 @@ export default function QuoteBar({ title }) {
               <span className="qb-divider">|</span>
               <div className="qb-critical-date">
                 <span className="qb-critical-date-label">Earnings:</span>
-                <span className="qb-critical-date-value">{quote.next_earnings_date}</span>
+                <span className="qb-critical-date-value" style={{ color: dateColor(quote.next_earnings_date) }}>
+                  {fmtDate(quote.next_earnings_date)}
+                </span>
               </div>
             </>
           )}
@@ -142,7 +174,9 @@ export default function QuoteBar({ title }) {
               <span className="qb-divider">|</span>
               <div className="qb-critical-date">
                 <span className="qb-critical-date-label">Dividend:</span>
-                <span className="qb-critical-date-value">{quote.next_dividend_date}</span>
+                <span className="qb-critical-date-value" style={{ color: dateColor(quote.next_dividend_date) }}>
+                  {fmtDate(quote.next_dividend_date)}
+                </span>
               </div>
             </>
           )}

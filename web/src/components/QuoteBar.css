@@ -127,6 +127,26 @@
   background: rgba(136, 136, 136, 0.08);
 }
 
+/* Critical Dates (Earnings, Dividend) */
+.qb-critical-date {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.qb-critical-date-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted, #666);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.qb-critical-date-value {
+  font-size: 12px;
+  font-weight: 600;
+}
+
 /* Loading */
 .qb-loading {
   color: var(--text-muted, #666);
