@@ -30,6 +30,16 @@ async function apiFetch(path, options = {}) {
   try {
     const response = await fetch(url, { ...options, headers });
 
+    // 401 with an existing token means the session expired → kick back to login.
+    // Don't hard-reload if already on /login — that would kill an in-flight MSAL popup.
+    if (response.status === 401 && localStorage.getItem("ota_token")) {
+      localStorage.removeItem("ota_token");
+      if (window.location.pathname !== "/login") {
+        window.location.href = "/login";
+      }
+      throw new Error("Session expired");
+    }
+
     if (!response.ok) {
       const errorBody = await response.json().catch(() => ({}));
       const message = errorBody.detail || `API error: ${response.status}`;
@@ -43,6 +53,23 @@ async function apiFetch(path, options = {}) {
     }
     throw err;
   }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════
+// AUTH — Entra ID token exchange
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * Exchange a Microsoft Entra id_token for our app JWT.
+ * Called by LoginPage after a successful MSAL loginPopup.
+ * No Authorization header needed — this is the login endpoint.
+ */
+export async function entraLogin(entraToken) {
+  return apiFetch("/auth/entra/token", {
+    method: "POST",
+    body: JSON.stringify({ entra_token: entraToken }),
+  });
 }
 
 

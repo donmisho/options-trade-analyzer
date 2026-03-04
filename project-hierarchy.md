@@ -126,6 +126,49 @@ ANTHROPIC_API_KEY=sk-ant-...       # Direct Anthropic API key
 | Key Vault | (check portal) | component=secrets |
 | **Foundry** | **ota-foundry** | **component=ai** (quota pending for Sonnet 4.6) |
 
+## Startup & Shutdown
+
+### Local Development
+
+**Backend** (from `options-analyzer/`):
+```bash
+venv\Scripts\activate                          # Windows (PowerShell)
+source venv/bin/activate                       # Mac/Linux
+
+# Standard (no HTTPS — most features work)
+uvicorn app.main:app --reload
+
+# With HTTPS (required for Schwab OAuth)
+uvicorn app.main:app --reload --ssl-keyfile=certs/key.pem --ssl-certfile=certs/cert.pem --host=127.0.0.1 --port=8000
+```
+
+**Frontend** (from `web/`):
+```bash
+npm run dev        # Starts HTTPS dev server on https://localhost:5173
+```
+
+To stop: `Ctrl+C` in each terminal.
+
+---
+
+### Azure (Production)
+
+**Backend — App Service** (`options-analyzer-api`):
+```bash
+az webapp stop    --name options-analyzer-api --resource-group options-analyzer-rg
+az webapp start   --name options-analyzer-api --resource-group options-analyzer-rg
+az webapp restart --name options-analyzer-api --resource-group options-analyzer-rg
+```
+
+- **Cold start (~90s):** F1 Free tier has no Always On — app sleeps after 20 min idle. First request triggers cold start, which includes ODBC Driver 18 install. Subsequent restarts are ~30s (driver already cached).
+- **Upgrade to B1 (~$13/mo):** Eliminates cold starts via Always On. Run: `az appservice plan update --name ASP-optionsanalyzerrg-94e9 --resource-group options-analyzer-rg --sku B1` then `az webapp config set --name options-analyzer-api --resource-group options-analyzer-rg --always-on true`
+
+**Frontend — Static Web App** (`options-analyzer-web`):
+- Always-on serverless hosting — no start/stop needed.
+- Deploys automatically on push to `main` via GitHub Actions.
+
+---
+
 ## Phase Tracker
 
 - Phase 0 ✅ Security (auth, MFA, JWT tiers)

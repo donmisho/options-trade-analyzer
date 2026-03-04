@@ -37,7 +37,7 @@ class User(Base):
     id = Column(String(36), primary_key=True)  # UUID
     username = Column(String(50), unique=True, nullable=False, index=True)
     email = Column(String(255), unique=True, nullable=False)
-    password_hash = Column(String(255), nullable=False)
+    password_hash = Column(String(255), nullable=True)  # Null for Entra ID users
     role = Column(String(20), nullable=False, default="viewer")  # admin, trader, viewer
     is_active = Column(Boolean, default=True)
 

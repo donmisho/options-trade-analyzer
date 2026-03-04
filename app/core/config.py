@@ -69,6 +69,10 @@ class Settings(BaseSettings):
     # --- CORS ---
     cors_origins: list[str] = ["http://localhost:3000", "http://localhost:5173"]
 
+    # --- Entra ID (Azure AD) Authentication ---
+    entra_tenant_id: str = ""
+    entra_client_id: str = ""
+
     # --- AI Provider ---
     # "anthropic" = direct to Anthropic API (uses ANTHROPIC_API_KEY)
     # "foundry"   = Azure Foundry (uses FOUNDRY_RESOURCE + Entra ID)

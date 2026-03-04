@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(# Check if the App Service managed identity has Key Vault access\nAPP_PRINCIPAL=\"057b8987-203f-44c7-8186-13522e928503\"\naz role assignment list --assignee $APP_PRINCIPAL --scope \"/subscriptions/0f394f87-c8b1-429a-8c86-7e5305042eb9/resourceGroups/options-analyzer-rg/providers/Microsoft.KeyVault/vaults/options-analyzer\" --output json 2>&1 | grep -v UserWarning | grep -v \"32-bit\" | python -c \"import json,sys; roles=json.load\\(sys.stdin\\); print\\('Roles:', [r['roleDefinitionName'] for r in roles]\\) if roles else print\\('No roles assigned to App Service identity'\\)\" 2>/dev/null)",
+      "Bash(az webapp:*)",
+      "Bash(curl:*)",
+      "WebFetch(domain:pypi.org)",
+      "WebSearch",
+      "WebFetch(domain:pymssql.readthedocs.io)",
+      "WebFetch(domain:docs.sqlalchemy.org)",
+      "WebFetch(domain:github.com)",
+      "Bash(gh run:*)",
+      "Bash(unzip -o /tmp/appservice-logs3.zip -d /tmp/appservice-logs3)",
+      "Bash(xargs ls:*)",
+      "Bash(unzip:*)",
+      "Bash(az sql:*)",
+      "Bash(sqlcmd:*)",
+      "Bash(python3:*)",
+      "Bash(where:*)",
+      "Bash(az role:*)",
+      "Bash(az rest:*)",
+      "Bash(venv/Scripts/python.exe:*)",
+      "Bash(az account:*)",
+      "Bash(az keyvault:*)",
+      "Bash(npm install:*)",
+      "Bash(python:*)",
+      "Bash(venv/Scripts/python:*)"
+    ]
+  }
+}

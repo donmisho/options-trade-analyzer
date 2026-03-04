@@ -31,6 +31,8 @@ jobs:
           output_location: "dist"
         env:
           VITE_API_BASE_URL: "https://options-analyzer-api-d7aqhsdmd6f2anbc.centralus-01.azurewebsites.net"
+          VITE_ENTRA_CLIENT_ID: ${{ secrets.VITE_ENTRA_CLIENT_ID }}
+          VITE_ENTRA_TENANT_ID: ${{ secrets.VITE_ENTRA_TENANT_ID }}
 
   close_pull_request_job:
     if: github.event_name == 'pull_request' && github.event.action == 'closed'

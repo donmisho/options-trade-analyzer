@@ -39,6 +39,7 @@ from app.api.schwab_auth_routes import router as schwab_auth_router, init_schwab
 from app.providers.schwab_token_manager import SchwabTokenManager
 from app.api.evaluation_routes import router as evaluation_router, init_evaluation_routes
 from app.api.user_routes import router as user_router
+from app.api.entra_auth_routes import router as entra_auth_router
 from app.providers.ai import AnthropicAdapter, FoundryAdapter
 
 
@@ -222,6 +223,7 @@ app.include_router(analysis_router, prefix="/api/v1")
 app.include_router(schwab_auth_router, prefix="/api/v1")
 app.include_router(evaluation_router, prefix="/api/v1")
 app.include_router(user_router, prefix="/api/v1")
+app.include_router(entra_auth_router, prefix="/api/v1")
 
 
 # --- Health Check ---
