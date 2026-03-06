@@ -29,6 +29,7 @@ import base64
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from urllib.parse import quote
 
 import httpx
 
@@ -90,7 +91,7 @@ class SchwabTokenManager:
         url = (
             f"{SCHWAB_AUTH_URL}"
             f"?client_id={app_key}"
-            f"&redirect_uri={callback_url}"
+            f"&redirect_uri={quote(callback_url, safe='')}"
         )
         logger.info(f"SchwabTokenManager: Generated auth URL (callback: {callback_url})")
         return url

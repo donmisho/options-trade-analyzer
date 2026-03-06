@@ -54,6 +54,18 @@ def _get_token_manager():
 # 1. Login — Redirect to Schwab
 # ------------------------------------------------------------------
 
+@router.get("/debug-url")
+async def schwab_debug_url():
+    """Temporary public endpoint to verify the exact auth URL being generated."""
+    from app.core.config import settings
+    manager = _get_token_manager()
+    auth_url = manager.get_authorization_url()
+    return {
+        "callback_url_setting": settings.schwab_callback_url,
+        "full_auth_url": auth_url,
+    }
+
+
 @router.get("/get-url")
 async def schwab_get_url(user: dict = Depends(require_read)):
     """
