@@ -1,0 +1,23 @@
+name: Remove Hotel Firewall Rule
+
+on:
+  schedule:
+    - cron: '37 16 7 3 *'  # 2026-03-07 16:37 UTC (11:37 AM ET)
+  workflow_dispatch:
+
+jobs:
+  remove-rule:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Log in to Azure
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Delete firewall rule
+        run: |
+          az sql server firewall-rule delete \
+            --resource-group options-analyzer-rg \
+            --server options-analyzer-sql \
+            --name "NordVPN-Hotel-20260306" \
+            --yes
