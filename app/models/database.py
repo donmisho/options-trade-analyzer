@@ -273,3 +273,88 @@ class SchwabToken(Base):
     __table_args__ = (
         Index("ix_schwab_tokens_user", "user_id"),
     )
+
+
+class AgentRunLog(Base):
+    """
+    Full audit trail for every AI agent invocation.
+
+    WHY: OpenTelemetry traces expire after 90 days and lack relational structure.
+    This table is the permanent business record — every stage of every agent call,
+    including the exact prompt and model response. Linked to Application Insights
+    traces via otel_trace_id for cross-referencing.
+
+    See app/skills/ota-agentic-strategy/SKILL.md for the full observability design.
+    """
+    __tablename__ = "agent_run_log"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(String(36), nullable=False)  # UUID linking multi-stage sessions
+
+    agent_name = Column(String(100), nullable=False)
+    stage = Column(String(50), nullable=False)       # triage | deep_dive | followup
+    trade_key = Column(String(255), nullable=True)   # "{symbol}:{spread}:{expiration}"
+    symbol = Column(String(20), nullable=True)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=True)
+
+    # Full inputs sent to the model
+    prompt_system = Column(Text, nullable=True)
+    prompt_user = Column(Text, nullable=True)
+    prompt_version = Column(String(50), nullable=True)
+    market_snapshot = Column(JSON, nullable=True)   # price, SMAs, VIX at call time
+    trade_snapshot = Column(JSON, nullable=True)    # trade metrics at call time
+
+    # Full outputs
+    model_response_raw = Column(Text, nullable=True)
+    verdict = Column(String(20), nullable=True)     # EXECUTE | WAIT | PASS | STRONG | MEDIUM | WEAK
+    verdict_summary = Column(Text, nullable=True)
+
+    # Telemetry linkage
+    otel_trace_id = Column(String(64), nullable=True)  # links to Application Insights trace
+
+    # Performance
+    input_tokens = Column(Integer, nullable=True)
+    output_tokens = Column(Integer, nullable=True)
+    latency_ms = Column(Integer, nullable=True)
+    model_name = Column(String(100), nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_agent_run_log_run_id", "run_id"),
+        Index("ix_agent_run_log_user", "user_id"),
+        Index("ix_agent_run_log_trade_key", "trade_key"),
+    )
+
+
+class TradeRecommendation(Base):
+    """
+    Persisted AI recommendations, one row per trade key.
+
+    WHY: The agent_run_log stores every invocation. This table stores the
+    current recommendation for each trade — the "what Claude said last" record.
+    Upserted on each evaluation so the UI can show the prior recommendation
+    before asking for a new one (enabling triage vs deep-dive stage logic).
+
+    Linked back to agent_run_log via run_id for full traceability.
+    """
+    __tablename__ = "trade_recommendations"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    trade_key = Column(String(255), nullable=False, unique=True, index=True)
+    symbol = Column(String(20), nullable=False)
+    spread_label = Column(String(100), nullable=False)
+    expiration = Column(String(20), nullable=False)
+
+    verdict = Column(String(20), nullable=False)    # EXECUTE | WAIT | PASS | STRONG | MEDIUM | WEAK
+    rank = Column(String(20), nullable=True)
+    verdict_summary = Column(Text, nullable=False)
+
+    market_snapshot = Column(JSON, nullable=False)
+    trade_snapshot = Column(JSON, nullable=False)
+
+    run_id = Column(String(36), nullable=True)      # links back to agent_run_log
+    prompt_version = Column(String(50), nullable=True)
+
+    evaluated_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

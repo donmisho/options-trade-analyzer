@@ -24,10 +24,27 @@ import FavoritesPage from './pages/FavoritesPage';
 import LoginPage from './pages/LoginPage';
 import BrokerConnectPage from './pages/BrokerConnectPage';
 
-/** Redirect unauthenticated users to /login. */
+/** Decode the exp claim from a JWT without a library. Returns 0 if unreadable. */
+function getTokenExpiry(token) {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    return payload.exp || 0;
+  } catch {
+    return 0;
+  }
+}
+
+/** Redirect unauthenticated or expired sessions to /login. */
 function RequireAuth({ children }) {
   const token = localStorage.getItem('ota_token');
   if (!token) return <Navigate to="/login" replace />;
+
+  const exp = getTokenExpiry(token);
+  if (exp && Date.now() / 1000 > exp) {
+    localStorage.removeItem('ota_token');
+    return <Navigate to="/login" replace />;
+  }
+
   return children;
 }
 

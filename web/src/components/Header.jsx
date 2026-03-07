@@ -119,6 +119,27 @@ export default function Header() {
              schwabConnected ? 'Connected' : 'Disconnected'}
           </span>
         </div>
+        <button
+          onClick={() => {
+            localStorage.removeItem('ota_token');
+            window.location.href = '/login';
+          }}
+          title="Log out"
+          style={{
+            background: 'none',
+            border: '1px solid transparent',
+            color: '#8b90a0',
+            fontSize: 13,
+            cursor: 'pointer',
+            padding: '4px 8px',
+            borderRadius: 6,
+            transition: 'all 0.15s',
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.color = '#e4e7ef'; e.currentTarget.style.borderColor = '#252a3a'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.color = '#8b90a0'; e.currentTarget.style.borderColor = 'transparent'; }}
+        >
+          Sign out
+        </button>
       </nav>
     </header>
   );

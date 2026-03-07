@@ -32,6 +32,20 @@ def _get_factory() -> ProviderFactory:
     return _provider_factory
 
 
+def _get_provider(factory: ProviderFactory, user_id: Optional[str]):
+    """
+    Return the market data provider to use for this request.
+
+    Schwab is the primary provider. If Schwab is connected (OAuth tokens
+    present), use it. Otherwise fall back to the configured default
+    (Tradier) so dev/testing still works without Schwab credentials.
+    """
+    token_mgr = getattr(factory, '_schwab_token_manager', None)
+    if token_mgr and token_mgr.get_status().get('connected'):
+        return factory.get_market_data("schwab", user_id=user_id)
+    return factory.get_market_data(settings.default_market_data_provider, user_id=user_id)
+
+
 @router.get("/quote/{symbol}", response_model=Quote)
 async def get_quote(
     symbol: str,
@@ -40,26 +54,15 @@ async def get_quote(
     """
     Get current price data for a symbol.
 
-    Tries Schwab first (includes earnings/dividend dates), falls back to Tradier.
+    Uses Schwab if connected (includes earnings/dividend dates), falls back to Tradier.
     """
     factory = _get_factory()
     user_id = user.get("sub")
     sym = symbol.upper()
 
-    # Try Schwab first — it returns earnings + dividend dates
     try:
-        token_mgr = getattr(factory, '_schwab_token_manager', None)
-        if token_mgr and token_mgr.get_status().get('connected'):
-            schwab = factory.get_market_data("schwab", user_id=user_id)
-            data = await schwab.get_quote(sym)
-            return Quote(**data)
-    except Exception as e:
-        log.warning(f"quote/{sym}: Schwab failed ({e}), falling back to Tradier")
-
-    # Fallback to Tradier
-    try:
-        tradier = factory.get_market_data(settings.default_market_data_provider, user_id=user_id)
-        data = await tradier.get_quote(sym)
+        provider = _get_provider(factory, user_id)
+        data = await provider.get_quote(sym)
         return Quote(**data)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Provider error: {str(e)}")
@@ -76,20 +79,17 @@ async def get_option_chain(
 ):
     """
     Fetch a filtered options chain.
-    
+
     Filters applied:
       - DTE range: only expirations within min_dte to max_dte days
       - Strike range: only strikes within ±strike_range_pct% of current price
       - Option type: optionally filter to calls only or puts only
-    
+
     The user's config defaults are used if no query params are provided.
     Query params override config defaults for this request.
     """
     factory = _get_factory()
-    provider = factory.get_market_data(
-        settings.default_market_data_provider,
-        user_id=user.get("sub"),
-    )
+    provider = _get_provider(factory, user.get("sub"))
 
     try:
         data = await provider.get_chain(
@@ -111,10 +111,7 @@ async def get_expirations(
 ):
     """List available expiration dates for a symbol."""
     factory = _get_factory()
-    provider = factory.get_market_data(
-        settings.default_market_data_provider,
-        user_id=user.get("sub"),
-    )
+    provider = _get_provider(factory, user.get("sub"))
 
     try:
         expirations = await provider.get_expirations(symbol.upper())
@@ -131,10 +128,7 @@ async def get_strikes(
 ):
     """List available strike prices for a specific expiration."""
     factory = _get_factory()
-    provider = factory.get_market_data(
-        settings.default_market_data_provider,
-        user_id=user.get("sub"),
-    )
+    provider = _get_provider(factory, user.get("sub"))
 
     try:
         strikes = await provider.get_strikes(symbol.upper(), expiration)
