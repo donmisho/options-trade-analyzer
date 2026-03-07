@@ -123,6 +123,25 @@ class AIProvider(ABC):
         ...
 
     @abstractmethod
+    async def chat(
+        self,
+        system_prompt: str,
+        user_message: str,
+        max_tokens: int,
+    ) -> dict:
+        """
+        Send a single-turn message with a custom system prompt.
+
+        WHY this exists: evaluate_trade() has a fixed prompt baked into the
+        adapter. The agent routes load prompts from SKILL.md at runtime and
+        need to pass arbitrary system/user text to the model. This method
+        is the generic escape hatch — same auth and client, flexible prompts.
+
+        Returns a dict: {text, input_tokens, output_tokens, model, provider}
+        """
+        ...
+
+    @abstractmethod
     async def health_check(self) -> bool:
         """Test if the AI provider connection is working."""
         ...

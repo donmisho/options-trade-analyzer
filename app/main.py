@@ -40,7 +40,9 @@ from app.providers.schwab_token_manager import SchwabTokenManager
 from app.api.evaluation_routes import router as evaluation_router, init_evaluation_routes
 from app.api.user_routes import router as user_router
 from app.api.entra_auth_routes import router as entra_auth_router
+from app.api.agent_routes import router as agent_router, init_agent_routes
 from app.providers.ai import AnthropicAdapter, FoundryAdapter
+from app.agents.telemetry import init_agent_telemetry
 
 
 # Configure logging
@@ -178,6 +180,11 @@ async def lifespan(app: FastAPI):
 
     if ai_provider:
         init_evaluation_routes(ai_provider)
+        init_agent_routes(ai_provider)
+
+    # 7. Initialize OpenTelemetry → Application Insights (agent observability)
+    appinsights_cs = secrets_manager.get("applicationinsights-connection-string")
+    init_agent_telemetry(appinsights_cs)
 
     logger.info(f"{settings.app_name} ready at http://{settings.host}:{settings.port}")
 
@@ -224,6 +231,7 @@ app.include_router(schwab_auth_router, prefix="/api/v1")
 app.include_router(evaluation_router, prefix="/api/v1")
 app.include_router(user_router, prefix="/api/v1")
 app.include_router(entra_auth_router, prefix="/api/v1")
+app.include_router(agent_router, prefix="/api/v1")
 
 
 # --- Health Check ---

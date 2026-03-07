@@ -172,6 +172,24 @@ class AnthropicAdapter(AIProvider):
             logger.error(f"AnthropicAdapter: Follow-up failed: {e}")
             raise
 
+    async def chat(self, system_prompt: str, user_message: str, max_tokens: int) -> dict:
+        """Call the model with fully custom system/user prompts (used by agent routes)."""
+        client = self._get_client()
+        response = await client.messages.create(
+            model=self.model,
+            max_tokens=max_tokens,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_message}],
+        )
+        text = "".join(b.text for b in response.content if hasattr(b, "text"))
+        return {
+            "text": text,
+            "input_tokens": response.usage.input_tokens if response.usage else 0,
+            "output_tokens": response.usage.output_tokens if response.usage else 0,
+            "model": self.model,
+            "provider": "anthropic",
+        }
+
     async def health_check(self) -> bool:
         """
         Verify the Anthropic API connection is working.
