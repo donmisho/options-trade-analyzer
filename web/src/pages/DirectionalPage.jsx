@@ -11,7 +11,6 @@ import StarButton from '../components/StarButton';
 import ScoreBar from '../components/ScoreBar';
 import QuoteBar from '../components/QuoteBar';
 import SmaPanel from '../components/SmaPanel';
-import AskClaudePanel from '../components/AskClaudePanel';
 import { C } from '../styles/tokens';
 import './PageShared.css';
 import './VerticalsPage.css';
@@ -33,7 +32,7 @@ function generateCandles(price, count = 120) {
 }
 
 export default function DirectionalPage() {
-  const { activeSymbol } = useApp();
+  const { activeSymbol, openAgent } = useApp();
 
   // Form state
   const [direction, setDirection] = useState('bullish');
@@ -52,10 +51,6 @@ export default function DirectionalPage() {
   // SMA chart
   const [smaPeriods, setSmaPeriods] = useState({ short: 8, mid: 21, long: 50 });
   const [candles, setCandles] = useState([]);
-
-  // Ask Claude
-  const [claudeOpen, setClaudeOpen] = useState(false);
-  const [claudeTrade, setClaudeTrade] = useState(null);
 
   const runAnalysis = useCallback(async () => {
     if (!targetPrice) return;
@@ -208,7 +203,7 @@ export default function DirectionalPage() {
                   <td><span className={`verdict-badge ${verdictStyle(s)}`}>{s.verdict}</span></td>
                   <td>
                     <button
-                      onClick={(e) => { e.stopPropagation(); setClaudeTrade(buildClaudeTrade(s)); setClaudeOpen(true); }}
+                      onClick={(e) => { e.stopPropagation(); const smaD = getSmaData(); openAgent([{ trade_id: `${activeSymbol}-${s.strategy_name}-${s.expiration}`, symbol: activeSymbol, spread_type: s.strategy_name, spread_label: s.strategy_name, expiration: s.expiration, dte: Math.max(0, Math.round((new Date(s.expiration) - new Date()) / 86400000)), net_debit: s.cost / 100, max_profit: s.max_profit || null, reward_risk_ratio: null, prob_of_profit: s.prob_of_profit || 0, composite_score: s.composite_score || null, direction }], { symbol: activeSymbol, underlying_price: smaD.price, sma_8: smaD.smaShort, sma_21: smaD.smaMid, sma_50: smaD.smaLong, ma_alignment: direction, vix: null }); }}
                       style={{
                         padding: '3px 8px', borderRadius: 4,
                         border: `1px solid ${C.claudeBorder}`,
@@ -244,7 +239,6 @@ export default function DirectionalPage() {
         </div>
       )}
 
-      <AskClaudePanel open={claudeOpen} onClose={() => setClaudeOpen(false)} trade={claudeTrade} smaData={getSmaData()} smaPeriods={smaPeriods} />
     </div>
   );
 }

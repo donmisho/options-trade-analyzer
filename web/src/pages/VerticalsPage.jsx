@@ -13,8 +13,8 @@ import StarButton from '../components/StarButton';
 import ScoreBar from '../components/ScoreBar';
 import QuoteBar from '../components/QuoteBar';
 import SmaPanel from '../components/SmaPanel';
-import AskClaudePanel from '../components/AskClaudePanel';
 import FormulaBreakdownPanel from '../components/FormulaBreakdownPanel';
+import RecommendationBadge from '../components/RecommendationBadge';
 import ConfigDrawer from '../components/ConfigDrawer';
 import { C, mono, DEFAULT_PRESETS } from '../styles/tokens';
 import './PageShared.css';
@@ -53,7 +53,7 @@ function SortTh({ label, sortKey, currentSort, onSort, style, num }) {
 }
 
 export default function VerticalsPage() {
-  const { activeSymbol, configOpen, setConfigOpen } = useApp();
+  const { activeSymbol, configOpen, setConfigOpen, openAgent } = useApp();
 
   const [spreads, setSpreads] = useState([]);
   const [underlyingPrice, setUnderlyingPrice] = useState(0);
@@ -63,8 +63,7 @@ export default function VerticalsPage() {
 
   const [candles, setCandles] = useState([]);
 
-  const [claudeOpen, setClaudeOpen] = useState(false);
-  const [claudeTrade, setClaudeTrade] = useState(null);
+  const [selectedIds, setSelectedIds] = useState(new Set());
   const [formulaOpen, setFormulaOpen] = useState(false);
   const [formulaTrade, setFormulaTrade] = useState(null);
 
@@ -173,6 +172,36 @@ export default function VerticalsPage() {
     return { symbol: activeSymbol, spread_type: s.spread_type, long_strike: s.long_strike, short_strike: s.short_strike, expiration: s.expiration, option_type: s.spread_type === 'bull_call' ? 'call' : 'put', net_debit: s.net_debit, max_profit: s.max_profit, max_loss: s.net_debit, reward_risk_ratio: s.reward_risk_ratio, prob_of_profit: s.prob_of_profit, composite_score: s.composite_score };
   }
 
+  function buildAgentTrade(s) {
+    const dte = Math.max(0, Math.round((new Date(s.expiration) - new Date()) / 86400000));
+    return {
+      trade_id: `${activeSymbol}-${s.long_strike}-${s.short_strike}-${s.expiration}`,
+      symbol: activeSymbol,
+      spread_type: s.spread_type,
+      spread_label: `${s.long_strike}/${s.short_strike} ${s.spread_type === 'bull_call' ? 'Call' : 'Put'} Spread`,
+      expiration: s.expiration,
+      dte,
+      net_debit: s.net_debit,
+      max_profit: s.max_profit,
+      reward_risk_ratio: s.reward_risk_ratio,
+      prob_of_profit: s.prob_of_profit,
+      composite_score: s.composite_score,
+      direction: s.spread_type === 'bull_call' ? 'bullish' : 'bearish',
+    };
+  }
+
+  function getMarketContext() {
+    return {
+      symbol: activeSymbol,
+      underlying_price: smaData.price || underlyingPrice,
+      sma_8: smaData.smaShort,
+      sma_21: smaData.smaMid,
+      sma_50: smaData.smaLong,
+      ma_alignment: alignment,
+      vix: null,
+    };
+  }
+
   function buildFormulaTrade(s) {
     return { symbol: activeSymbol, spread_type: s.spread_type, long_strike: s.long_strike, short_strike: s.short_strike, expiration: s.expiration, net_debit: s.net_debit, max_profit: s.max_profit, reward_risk_ratio: s.reward_risk_ratio, prob_of_profit: s.prob_of_profit, composite_score: s.composite_score, long_volume: s.long_volume || 0, short_volume: s.short_volume || 0, long_oi: s.long_oi || 0, short_oi: s.short_oi || 0, net_theta: s.net_theta || 0 };
   }
@@ -239,9 +268,30 @@ export default function VerticalsPage() {
 
       {!loading && !error && sortedSpreads.length > 0 && (
         <div className="table-wrap">
+          {selectedIds.size > 0 && (
+            <div style={{ padding: '6px 0 8px', display: 'flex', alignItems: 'center', gap: 10 }}>
+              <button
+                onClick={() => openAgent(
+                  sortedSpreads.filter(s => selectedIds.has(`${s.long_strike}-${s.short_strike}-${s.expiration}`)).map(buildAgentTrade),
+                  getMarketContext()
+                )}
+                style={{
+                  padding: '6px 14px', borderRadius: 6, fontSize: 12.5, fontWeight: 700,
+                  cursor: 'pointer', border: `1px solid ${C.claudeBorder}`,
+                  backgroundColor: C.claudeDim, color: C.claudeAccent,
+                }}>
+                ✦ Ask Claude ({selectedIds.size})
+              </button>
+              <button onClick={() => setSelectedIds(new Set())}
+                style={{ background: 'none', border: 'none', color: C.textDim, fontSize: 11, cursor: 'pointer' }}>
+                Clear
+              </button>
+            </div>
+          )}
           <table>
             <thead>
               <tr>
+                <th style={{ width: 28 }}></th>
                 <th style={{ width: 32 }}></th>
                 <SortTh label="Type" sortKey="spread_type" currentSort={sort} onSort={handleSort} />
                 <SortTh label="Long / Short" sortKey="long_strike" currentSort={sort} onSort={handleSort} style={{ textAlign: 'center' }} />
@@ -260,8 +310,20 @@ export default function VerticalsPage() {
             <tbody>
               {sortedSpreads.map((s, i) => {
                 const isBull = s.spread_type === 'bull_call';
+                const rowId = `${s.long_strike}-${s.short_strike}-${s.expiration}`;
+                const isChecked = selectedIds.has(rowId);
                 return (
-                  <tr key={i} style={{ borderLeft: '2px solid transparent' }}>
+                  <tr key={i} style={{ borderLeft: `2px solid ${isChecked ? C.claudeAccent : 'transparent'}` }}>
+                    <td>
+                      <input type="checkbox" checked={isChecked}
+                        onChange={() => setSelectedIds(prev => {
+                          const next = new Set(prev);
+                          if (next.has(rowId)) next.delete(rowId); else next.add(rowId);
+                          return next;
+                        })}
+                        style={{ cursor: 'pointer', accentColor: C.claudeAccent }}
+                      />
+                    </td>
                     <td><StarButton trade={buildFavTrade(s)} /></td>
                     <td><span className={`type-badge ${isBull ? 'type-bull' : 'type-bear'}`}>{isBull ? 'Bull Call' : 'Bear Put'}</span></td>
                     <td className="mono" style={{ textAlign: 'center' }}>{s.long_strike} / {s.short_strike}</td>
@@ -275,10 +337,10 @@ export default function VerticalsPage() {
                     <td className={`mono ${s.ev_raw >= 0 ? 'text-green' : 'text-red'}`}>{s.ev_raw.toFixed(2)}</td>
                     <td><ScoreBar score={s.composite_score} /></td>
                     <td>
-                      <div style={{ display: 'flex', gap: 3 }}>
-                        <button onClick={(e) => { e.stopPropagation(); setClaudeTrade(buildClaudeTrade(s)); setClaudeOpen(true); setFormulaOpen(false); }}
+                      <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+                        <button onClick={(e) => { e.stopPropagation(); openAgent([buildAgentTrade(s)], getMarketContext()); }}
                           title="Ask Claude" style={{ padding: '3px 7px', borderRadius: 4, border: `1px solid ${C.claudeBorder}`, backgroundColor: C.claudeDim, color: C.claudeAccent, fontSize: 12, fontWeight: 700, cursor: 'pointer', lineHeight: 1 }}>✦</button>
-                        <button onClick={(e) => { e.stopPropagation(); setFormulaTrade(buildFormulaTrade(s)); setFormulaOpen(true); setClaudeOpen(false); }}
+                        <button onClick={(e) => { e.stopPropagation(); setFormulaTrade(buildFormulaTrade(s)); setFormulaOpen(true); }}
                           title="View scoring formula" style={{ padding: '3px 7px', borderRadius: 4, border: `1px solid ${C.accent}30`, backgroundColor: `${C.accent}10`, color: C.accent, fontSize: 10, fontWeight: 600, cursor: 'pointer', fontFamily: mono, lineHeight: 1 }}>ƒx</button>
                       </div>
                     </td>
@@ -299,7 +361,6 @@ export default function VerticalsPage() {
       )}
 
       <FormulaBreakdownPanel open={formulaOpen} onClose={() => setFormulaOpen(false)} trade={formulaTrade} symbol={activeSymbol} weights={config.weights} />
-      <AskClaudePanel open={claudeOpen} onClose={() => setClaudeOpen(false)} trade={claudeTrade} smaData={smaData} smaPeriods={smaPeriods} />
 
       <ConfigDrawer
         mode="verticals"

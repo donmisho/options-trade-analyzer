@@ -19,7 +19,6 @@ import StarButton from '../components/StarButton';
 import ScoreBar from '../components/ScoreBar';
 import QuoteBar from '../components/QuoteBar';
 import SmaPanel from '../components/SmaPanel';
-import AskClaudePanel from '../components/AskClaudePanel';
 import FormulaBreakdownPanel from '../components/FormulaBreakdownPanel';
 import ConfigDrawer from '../components/ConfigDrawer';
 import { C, mono, DEFAULT_PRESETS } from '../styles/tokens';
@@ -59,7 +58,7 @@ function SortTh({ label, sortKey, currentSort, onSort, style, num }) {
 }
 
 export default function NakedOptionsPage() {
-  const { activeSymbol, configOpen, setConfigOpen } = useApp();
+  const { activeSymbol, configOpen, setConfigOpen, openAgent } = useApp();
 
   const [results, setResults] = useState([]);
   const [underlyingPrice, setUnderlyingPrice] = useState(0);
@@ -74,9 +73,8 @@ export default function NakedOptionsPage() {
   // SMA chart
   const [candles, setCandles] = useState([]);
 
-  // Ask Claude
-  const [claudeOpen, setClaudeOpen] = useState(false);
-  const [claudeTrade, setClaudeTrade] = useState(null);
+  // Multi-select for agent
+  const [selectedIds, setSelectedIds] = useState(new Set());
 
   // Formula breakdown slideout
   const [formulaOpen, setFormulaOpen] = useState(false);
@@ -179,6 +177,40 @@ export default function NakedOptionsPage() {
       max_loss: c.premium_dollars / 100,
       reward_risk_ratio: 0, prob_of_profit: c.delta,
       composite_score: c.composite_score,
+    };
+  }
+
+  function buildAgentTrade(c) {
+    const type = c.option_type || 'call';
+    return {
+      trade_id: `${activeSymbol}-${c.strike}-${c.expiration}-${type}`,
+      symbol: activeSymbol,
+      spread_type: type === 'put' ? 'long_put' : 'long_call',
+      spread_label: `${c.strike} ${type === 'put' ? 'Put' : 'Call'}`,
+      expiration: c.expiration,
+      dte: c.theta_runway_days || 0,
+      net_debit: c.premium_dollars,
+      max_profit: null,
+      reward_risk_ratio: null,
+      prob_of_profit: c.delta,
+      composite_score: c.composite_score,
+      direction: type === 'put' ? 'bearish' : 'bullish',
+      delta: c.delta,
+      theta_per_day: c.theta_per_day_dollars,
+      iv: c.iv,
+      breakeven: c.breakeven,
+    };
+  }
+
+  function getMarketContext() {
+    return {
+      symbol: activeSymbol,
+      underlying_price: smaData.price || underlyingPrice,
+      sma_8: smaData.smaShort,
+      sma_21: smaData.smaMid,
+      sma_50: smaData.smaLong,
+      ma_alignment: alignment,
+      vix: null,
     };
   }
 
@@ -294,9 +326,30 @@ export default function NakedOptionsPage() {
 
       {!loading && !error && sortedResults.length > 0 && (
         <div className="table-wrap">
+          {selectedIds.size > 0 && (
+            <div style={{ padding: '6px 0 8px', display: 'flex', alignItems: 'center', gap: 10 }}>
+              <button
+                onClick={() => openAgent(
+                  sortedResults.filter(c => selectedIds.has(`${c.strike}-${c.expiration}-${c.option_type || 'call'}`)).map(buildAgentTrade),
+                  getMarketContext()
+                )}
+                style={{
+                  padding: '6px 14px', borderRadius: 6, fontSize: 12.5, fontWeight: 700,
+                  cursor: 'pointer', border: `1px solid ${C.claudeBorder}`,
+                  backgroundColor: C.claudeDim, color: C.claudeAccent,
+                }}>
+                ✦ Ask Claude ({selectedIds.size})
+              </button>
+              <button onClick={() => setSelectedIds(new Set())}
+                style={{ background: 'none', border: 'none', color: C.textDim, fontSize: 11, cursor: 'pointer' }}>
+                Clear
+              </button>
+            </div>
+          )}
           <table>
             <thead>
               <tr>
+                <th style={{ width: 28 }}></th>
                 <th style={{ width: 32 }}></th>
                 <SortTh label="Type" sortKey="option_type" currentSort={sort} onSort={handleSort} />
                 <SortTh label="Strike" sortKey="strike" currentSort={sort} onSort={handleSort} style={{ textAlign: 'center' }} />
@@ -312,10 +365,24 @@ export default function NakedOptionsPage() {
               </tr>
             </thead>
             <tbody>
-              {sortedResults.map((c, i) => (
-                <tr key={i}>
+              {sortedResults.map((c, i) => {
+                const type = c.option_type || 'call';
+                const rowId = `${c.strike}-${c.expiration}-${type}`;
+                const isChecked = selectedIds.has(rowId);
+                return (
+                <tr key={i} style={{ borderLeft: `2px solid ${isChecked ? C.claudeAccent : 'transparent'}` }}>
+                  <td>
+                    <input type="checkbox" checked={isChecked}
+                      onChange={() => setSelectedIds(prev => {
+                        const next = new Set(prev);
+                        if (next.has(rowId)) next.delete(rowId); else next.add(rowId);
+                        return next;
+                      })}
+                      style={{ cursor: 'pointer', accentColor: C.claudeAccent }}
+                    />
+                  </td>
                   <td><StarButton trade={buildFavTrade(c)} /></td>
-                  <td><span className={`type-badge ${(c.option_type || 'call') === 'call' ? 'type-bull' : 'type-bear'}`}>{(c.option_type || 'call') === 'call' ? 'Call' : 'Put'}</span></td>
+                  <td><span className={`type-badge ${type === 'call' ? 'type-bull' : 'type-bear'}`}>{type === 'call' ? 'Call' : 'Put'}</span></td>
                   <td className="mono text-cyan" style={{ textAlign: 'center' }}>{c.strike}</td>
                   <td className="mono text-muted" style={{ textAlign: 'center' }}>{c.expiration}</td>
                   <td className="mono">{c.days_to_exp}</td>
@@ -326,15 +393,16 @@ export default function NakedOptionsPage() {
                   <td className="mono">{c.breakeven.toFixed(2)}</td>
                   <td><ScoreBar score={c.composite_score} /></td>
                   <td>
-                    <div style={{ display: 'flex', gap: 3 }}>
-                      <button onClick={(e) => { e.stopPropagation(); setClaudeTrade(buildClaudeTrade(c)); setClaudeOpen(true); setFormulaOpen(false); }}
+                    <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+                      <button onClick={(e) => { e.stopPropagation(); openAgent([buildAgentTrade(c)], getMarketContext()); }}
                         title="Ask Claude" style={{ padding: '3px 7px', borderRadius: 4, border: `1px solid ${C.claudeBorder}`, backgroundColor: C.claudeDim, color: C.claudeAccent, fontSize: 12, fontWeight: 700, cursor: 'pointer', lineHeight: 1 }}>✦</button>
-                      <button onClick={(e) => { e.stopPropagation(); setFormulaTrade(buildFormulaTrade(c)); setFormulaOpen(true); setClaudeOpen(false); }}
+                      <button onClick={(e) => { e.stopPropagation(); setFormulaTrade(buildFormulaTrade(c)); setFormulaOpen(true); }}
                         title="View scoring formula" style={{ padding: '3px 7px', borderRadius: 4, border: `1px solid ${C.accent}30`, backgroundColor: `${C.accent}10`, color: C.accent, fontSize: 10, fontWeight: 600, cursor: 'pointer', fontFamily: mono, lineHeight: 1 }}>ƒx</button>
                     </div>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -350,9 +418,6 @@ export default function NakedOptionsPage() {
 
       {/* Formula Breakdown slideout */}
       <FormulaBreakdownPanel open={formulaOpen} onClose={() => setFormulaOpen(false)} trade={formulaTrade} symbol={activeSymbol} weights={config.weights} />
-
-      {/* Ask Claude Panel */}
-      <AskClaudePanel open={claudeOpen} onClose={() => setClaudeOpen(false)} trade={claudeTrade} smaData={smaData} smaPeriods={smaPeriods} />
 
       {/* Config Drawer — mode="naked" hides spread sections */}
       <ConfigDrawer

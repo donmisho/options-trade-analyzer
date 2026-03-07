@@ -249,3 +249,119 @@ export async function getSchwabAuthUrl() {
   const data = await apiFetch("/auth/schwab/get-url");
   return data.authorization_url;
 }
+
+
+// ═══════════════════════════════════════════════════════════════════
+// AGENT — Claude Trade Evaluation
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * Stage 1: Batch rank 1-10 trades STRONG / MEDIUM / WEAK.
+ * Returns { run_id, rankings: [{trade_id, rank, reason, explore_further}], triage_summary }
+ */
+export async function triageTrades(trades, marketContext) {
+  return apiFetch("/agent/triage", {
+    method: "POST",
+    body: JSON.stringify({
+      symbol: marketContext.symbol,
+      underlying_price: marketContext.underlying_price,
+      sma_8: marketContext.sma_8,
+      sma_21: marketContext.sma_21,
+      sma_50: marketContext.sma_50,
+      ma_alignment: marketContext.ma_alignment,
+      vix: marketContext.vix || null,
+      trades,
+    }),
+  });
+}
+
+/**
+ * Stage 2: Full single-trade deep dive. Returns verdict + full analysis.
+ * exit_levels are pre-calculated here (per SKILL.md formula) so Claude
+ * doesn't have to do math.
+ */
+export async function deepDiveTrade(trade, marketContext, priceTarget, runId) {
+  const debit = trade.net_debit || 0;
+  const maxProfit = trade.max_profit || 0;
+  const dte = trade.dte || 30;
+  const price = marketContext.underlying_price;
+  const sma8 = marketContext.sma_8;
+
+  return apiFetch("/agent/deep-dive", {
+    method: "POST",
+    body: JSON.stringify({
+      symbol: trade.symbol,
+      current_price: price,
+      sma_8: sma8,
+      sma_21: marketContext.sma_21,
+      sma_50: marketContext.sma_50,
+      ma_alignment: marketContext.ma_alignment,
+      vix: marketContext.vix || null,
+      direction: trade.direction || "Bullish",
+      timeframe_days: dte,
+      price_target: priceTarget ? parseFloat(priceTarget) : null,
+      conviction: "Medium",
+      spread_type_label: trade.spread_label || trade.spread_type,
+      spread_label: trade.spread_label,
+      expiration: trade.expiration,
+      dte,
+      net_debit: debit,
+      max_profit: maxProfit,
+      reward_risk_ratio: trade.reward_risk_ratio || 0,
+      prob_of_profit: trade.prob_of_profit || 0,
+      composite_score: trade.composite_score || null,
+      risk_budget: 500,
+      num_contracts: 1,
+      total_cost: debit * 100,
+      // Pre-calculated exit levels (SKILL.md formula)
+      exit_stop_loss: parseFloat((debit * 0.50).toFixed(2)),
+      exit_warning: parseFloat((debit * 0.67).toFixed(2)),
+      exit_scale_out: parseFloat((debit * 1.60).toFixed(2)),
+      exit_full_profit: parseFloat((maxProfit * 0.75).toFixed(2)),
+      exit_underlying_stop: parseFloat(Math.min(sma8, price - price * 0.015).toFixed(2)),
+      exit_time_stop: Math.max(0, dte - 10),
+      run_id: runId || null,
+    }),
+  });
+}
+
+/**
+ * Stage 3: Contextual follow-up on a prior verdict.
+ */
+export async function followupTrade(trade, verdict, verdictSummary, question, runId) {
+  return apiFetch("/agent/followup", {
+    method: "POST",
+    body: JSON.stringify({
+      trade_key: `${trade.symbol}:${trade.spread_label}:${trade.expiration}`,
+      symbol: trade.symbol,
+      spread_label: trade.spread_label,
+      expiration: trade.expiration,
+      verdict,
+      verdict_summary: verdictSummary,
+      user_question: question,
+      run_id: runId || null,
+    }),
+  });
+}
+
+/**
+ * Look up a stored recommendation by trade key.
+ * Returns null if not found (404 → null).
+ */
+export async function getRecommendation(tradeKey) {
+  try {
+    return await apiFetch(`/agent/recommendations/${encodeURIComponent(tradeKey)}`);
+  } catch (err) {
+    if (err.message?.includes("404") || err.message?.includes("No recommendation")) return null;
+    return null;
+  }
+}
+
+/**
+ * Delete a stored recommendation (clear so next deep dive starts fresh).
+ */
+export async function deleteRecommendation(tradeKey) {
+  return apiFetch(`/agent/recommendations/${encodeURIComponent(tradeKey)}`, {
+    method: "DELETE",
+  });
+}

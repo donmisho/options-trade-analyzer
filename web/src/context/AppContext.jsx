@@ -103,6 +103,21 @@ export function AppProvider({ children }) {
   // Config drawer — shared so Header gear icon can open it from any page
   const [configOpen, setConfigOpen] = useState(false);
 
+  // Trade Agent Panel — shared so any page can trigger Claude evaluation
+  const [agentOpen, setAgentOpen] = useState(false);
+  const [agentTrades, setAgentTrades] = useState([]);
+  const [agentMarketContext, setAgentMarketContext] = useState(null);
+
+  function openAgent(trades, marketContext) {
+    setAgentTrades(trades);
+    setAgentMarketContext(marketContext);
+    setAgentOpen(true);
+  }
+  function closeAgent() {
+    setAgentOpen(false);
+    // Don't clear trades/context on close — allow re-open to same state
+  }
+
   // Load watchlist from backend on mount; fall back to localStorage if API fails
   useEffect(() => {
     getWatchlist()
@@ -307,6 +322,13 @@ export function AppProvider({ children }) {
     // Toast
     toast,
     showToast,
+
+    // Agent panel
+    agentOpen,
+    agentTrades,
+    agentMarketContext,
+    openAgent,
+    closeAgent,
   };
 
   return (
