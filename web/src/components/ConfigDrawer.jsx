@@ -178,6 +178,9 @@ export default function ConfigDrawer({ mode = "verticals", open, onClose, config
     if (Math.abs(total - 1.0) > 0.02) { setValidationError(`Scoring weights must total 100% (currently ${Math.round(total * 100)}%).`); return; }
     const sp = draft.smaPeriods || { short: 8, mid: 21, long: 50 };
     if (sp.short >= sp.mid || sp.mid >= sp.long) { setValidationError(`SMA periods must be in order: Short (${sp.short}) < Mid (${sp.mid}) < Long (${sp.long}).`); return; }
+    if (draft.dte.min < 1) { setValidationError("Min DTE must be at least 1 day."); return; }
+    if (draft.dte.max >= 730) { setValidationError("Max DTE must be less than 730 days."); return; }
+    if (draft.dte.max <= draft.dte.min) { setValidationError(`Max DTE (${draft.dte.max}) must be greater than Min DTE (${draft.dte.min}).`); return; }
     setValidationError(null);
     onApply(draft);
   }, [draft, onApply]);
@@ -241,8 +244,8 @@ export default function ConfigDrawer({ mode = "verticals", open, onClose, config
 
         <Sect title="Days to Expiration" icon="&#128197;">
           <div style={{ display: "flex", gap: 12, alignItems: "flex-end" }}>
-            <NumInput label="Min DTE" value={dte.min} onChange={v => sd({ dte: { ...dte, min: v } })} min={1} max={dte.max - 1} step={1} unit="days" w={70} />
-            <NumInput label="Max DTE" value={dte.max} onChange={v => sd({ dte: { ...dte, max: v } })} min={dte.min + 1} max={730} step={1} unit="days" w={70} />
+            <NumInput label="Min DTE" value={dte.min} onChange={v => sd({ dte: { ...dte, min: v } })} min={1} max={729} step={1} unit="days" w={70} />
+            <NumInput label="Max DTE" value={dte.max} onChange={v => sd({ dte: { ...dte, max: v } })} min={1} max={730} step={1} unit="days" w={70} />
           </div>
         </Sect>
 
@@ -261,7 +264,7 @@ export default function ConfigDrawer({ mode = "verticals", open, onClose, config
           <NumInput label="Strike Range" value={strikes.range_pct} onChange={v => sd({ strikes: { ...strikes, range_pct: v } })} min={1} max={50} step={0.5} unit="%" />
           <SingleSlider label="Min Open Interest" value={strikes.min_open_interest} min={0} max={1000} step={10} color={C.accent} onChange={v => sd({ strikes: { ...strikes, min_open_interest: v } })} />
           <SingleSlider label="Min Volume" value={strikes.min_volume} min={0} max={500} step={5} color={C.accent} onChange={v => sd({ strikes: { ...strikes, min_volume: v } })} />
-          {isV && <DualRangeSlider label="Spread Width" minVal={spreads.min_width} maxVal={spreads.max_width} min={1} max={100} step={1} color={C.accent} onChange={(a, b) => sd({ spreads: { ...spreads, min_width: a, max_width: b } })} />}
+          {isV && <DualRangeSlider label="Spread Width" minVal={spreads.min_width} maxVal={spreads.max_width} min={1} max={40} step={1} color={C.accent} onChange={(a, b) => sd({ spreads: { ...spreads, min_width: a, max_width: b } })} />}
         </Sect>
 
         <Sect title="Risk Management" icon="&#128737;&#65039;">

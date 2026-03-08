@@ -71,6 +71,8 @@ class VerticalRequest(BaseModel):
     min_dte: int = Field(default=14, ge=0, le=365)
     max_dte: int = Field(default=60, ge=1, le=730)
     strike_range_pct: float = Field(default=10.0, ge=1, le=50)
+    min_spread_width: float = Field(default=1.0, ge=0.5)
+    max_spread_width: float = Field(default=10.0, ge=1)
 
 
 class LongCallRequest(BaseModel):
@@ -193,7 +195,10 @@ async def analyze_verticals(
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     
-    filters = SpreadFilters(spread_types=req.spread_types)
+    filters = SpreadFilters(
+        spread_types=req.spread_types,
+        max_spread_width=req.max_spread_width,
+    )
     engine = VerticalSpreadEngine(weights=weights, filters=filters)
     
     result = engine.analyze(

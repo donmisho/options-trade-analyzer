@@ -88,8 +88,8 @@ function TradeCard({ trade, rank, reason, exploreButton, selected, dim }) {
       </div>
       <div style={{ display: 'flex', gap: 12, color: C.textDim, fontSize: 11, flexWrap: 'wrap' }}>
         <span>{trade.expiration}</span>
-        {trade.dte > 0 && <span>{trade.dte}d</span>}
-        {trade.net_debit != null && <span>Debit ${trade.net_debit.toFixed(2)}</span>}
+        {trade.dte > 0 && <span>{Math.round(trade.dte)}d</span>}
+        {trade.net_debit != null && <span>Debit {trade.net_debit.toFixed(2)}</span>}
         {trade.reward_risk_ratio != null && <span>R:R {trade.reward_risk_ratio.toFixed(2)}</span>}
         {trade.prob_of_profit != null && <span>PoP {Math.round(trade.prob_of_profit * 100)}%</span>}
       </div>
@@ -111,12 +111,98 @@ function CollapsibleSection({ title, children, defaultOpen = true }) {
         <span style={{ color: C.textMuted, fontSize: 14, transform: open ? 'rotate(180deg)' : 'rotate(0)', display: 'inline-block', transition: 'transform 0.2s' }}>▾</span>
       </button>
       {open && (
-        <div style={{ padding: '2px 12px 12px', borderTop: `1px solid ${C.border}`, fontSize: 13, color: C.text, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+        <div style={{ padding: '2px 12px 12px', borderTop: `1px solid ${C.border}` }}>
           {children}
         </div>
       )}
     </div>
   );
+}
+
+// Render inline markdown — bold stays bold, rest is stripped
+function renderInline(text) {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((p, i) => {
+    if (p.startsWith('**') && p.endsWith('**')) {
+      return <strong key={i} style={{ color: C.text, fontWeight: 700 }}>{p.slice(2, -2)}</strong>;
+    }
+    return p.replace(/\*(.+?)\*/g, '$1').replace(/`(.+?)`/g, '$1');
+  });
+}
+
+// Render a block of Claude's markdown as clean JSX — no raw markup visible
+function RenderMarkdown({ text }) {
+  if (!text) return null;
+  const lines = text.split('\n');
+  const elements = [];
+  let key = 0;
+
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line || line === '---' || line === '***' || line === '---') continue;
+
+    // Heading lines (##, ###) — render as a styled sub-header with accent bar
+    if (line.startsWith('#')) {
+      const content = line.replace(/^#+\s*/, '').replace(/\*\*/g, '');
+      // Skip lines that are just the section title (already shown in CollapsibleSection header)
+      if (content) elements.push(
+        <div key={key++} style={{
+          display: 'flex', alignItems: 'center', gap: 7,
+          marginTop: 10, marginBottom: 4,
+        }}>
+          <div style={{ width: 3, height: 14, borderRadius: 2, backgroundColor: C.claudeAccent, flexShrink: 0 }} />
+          <span style={{ fontWeight: 700, color: C.textDim, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+            {content}
+          </span>
+        </div>
+      );
+      continue;
+    }
+
+    // Emoji-led lines (🚩, ✅, ⚠️, 💡, etc.) — preserve emoji as the icon
+    const emojiMatch = line.match(/^(\p{Emoji_Presentation}|\p{Emoji}\uFE0F)\s*(.*)/u);
+    if (emojiMatch) {
+      elements.push(
+        <div key={key++} style={{ display: 'flex', gap: 7, marginBottom: 4, alignItems: 'flex-start' }}>
+          <span style={{ flexShrink: 0, fontSize: 14, lineHeight: 1.4 }}>{emojiMatch[1]}</span>
+          <span style={{ lineHeight: 1.5 }}>{renderInline(emojiMatch[2])}</span>
+        </div>
+      );
+      continue;
+    }
+
+    // Bullet lines (- or *) — replace with ◆ icon
+    const bulletMatch = line.match(/^[-*]\s+(.+)/);
+    if (bulletMatch) {
+      elements.push(
+        <div key={key++} style={{ display: 'flex', gap: 8, marginBottom: 3, alignItems: 'flex-start' }}>
+          <span style={{ color: C.claudeAccent, flexShrink: 0, fontSize: 8, marginTop: 5 }}>◆</span>
+          <span style={{ lineHeight: 1.5 }}>{renderInline(bulletMatch[1])}</span>
+        </div>
+      );
+      continue;
+    }
+
+    // Numbered list — preserve numbering with accent color
+    const numMatch = line.match(/^(\d+)\.\s+(.+)/);
+    if (numMatch) {
+      elements.push(
+        <div key={key++} style={{ display: 'flex', gap: 8, marginBottom: 3, alignItems: 'flex-start' }}>
+          <span style={{ color: C.claudeAccent, flexShrink: 0, fontWeight: 700, fontSize: 11, minWidth: 18, marginTop: 2 }}>{numMatch[1]}.</span>
+          <span style={{ lineHeight: 1.5 }}>{renderInline(numMatch[2])}</span>
+        </div>
+      );
+      continue;
+    }
+
+    // Plain text paragraph
+    const content = renderInline(line);
+    elements.push(
+      <div key={key++} style={{ marginBottom: 3, lineHeight: 1.5 }}>{content}</div>
+    );
+  }
+
+  return <div style={{ fontSize: 12.5, color: C.text, paddingTop: 4 }}>{elements}</div>;
 }
 
 // Parse Claude's markdown analysis into named sections
@@ -159,6 +245,7 @@ export default function TradeAgentPanel() {
   const { agentOpen, agentTrades, agentMarketContext, closeAgent } = useApp();
 
   const [agentState, setAgentState] = useState('idle');
+  // idle | triaging | triage_complete | pre_dive | diving | verdict | followup
   const [triageResults, setTriageResults] = useState(null);
   const [selectedTrade, setSelectedTrade] = useState(null);
   const [priceTarget, setPriceTarget] = useState('');
@@ -250,6 +337,12 @@ export default function TradeAgentPanel() {
 
   // ─── Derived values ─────────────────────────────────────────────
 
+  function selectTrade(trade) {
+    setSelectedTrade(trade);
+    setPriceTarget('');
+    setAgentState('pre_dive');
+  }
+
   const isSingleTrade = agentTrades.length === 1;
   const symbol = agentMarketContext?.symbol || agentTrades[0]?.symbol || '';
 
@@ -286,7 +379,7 @@ export default function TradeAgentPanel() {
           {error && <p style={{ color: C.red, fontSize: 12, marginTop: 8 }}>⚠ {error}</p>}
         </div>
         <div style={{ padding: '12px 16px', borderTop: `1px solid ${C.border}` }}>
-          <button onClick={isSingleTrade ? () => handleDeepDive(agentTrades[0]) : handleTriage}
+          <button onClick={isSingleTrade ? () => selectTrade(agentTrades[0]) : handleTriage}
             disabled={loading}
             style={{
               width: '100%', padding: '10px', borderRadius: 7,
@@ -328,7 +421,7 @@ export default function TradeAgentPanel() {
                   reason={ranking?.reason}
                   exploreButton={ranking?.explore_further && (
                     <button
-                      onClick={() => handleDeepDive(t)}
+                      onClick={() => selectTrade(t)}
                       style={{
                         marginTop: 8, padding: '5px 12px', borderRadius: 6, fontSize: 12,
                         fontWeight: 600, cursor: 'pointer',
@@ -352,6 +445,54 @@ export default function TradeAgentPanel() {
           <button onClick={() => setAgentState('idle')}
             style={{ background: 'none', border: 'none', color: C.textDim, fontSize: 12, cursor: 'pointer' }}>
             ← New Selection
+          </button>
+        </div>
+      </>
+    );
+  }
+
+  function renderPreDive() {
+    return (
+      <>
+        <div style={{ padding: '0 16px 16px', flex: 1, overflowY: 'auto' }}>
+          {selectedTrade && <TradeCard trade={selectedTrade} selected />}
+          <div style={{ marginTop: 14, padding: '12px 14px', borderRadius: 8, backgroundColor: C.card, border: `1px solid ${C.border}` }}>
+            <label style={{ display: 'block', fontSize: 11, color: C.textDim, fontWeight: 600, marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Price Target (optional)
+            </label>
+            <input
+              type="number"
+              placeholder="e.g. 565.00"
+              value={priceTarget}
+              onChange={e => setPriceTarget(e.target.value)}
+              autoFocus
+              style={{
+                width: '100%', padding: '8px 10px', borderRadius: 6, fontSize: 13,
+                border: `1px solid ${C.border}`, backgroundColor: C.bg, color: C.text,
+                fontFamily: mono, outline: 'none', boxSizing: 'border-box',
+              }}
+              onFocus={e => e.target.style.borderColor = C.claudeAccent}
+              onBlur={e => e.target.style.borderColor = C.border}
+              onKeyDown={e => e.key === 'Enter' && handleDeepDive(selectedTrade)}
+            />
+            <p style={{ margin: '6px 0 0', fontSize: 11, color: C.textMuted, lineHeight: 1.4 }}>
+              Claude uses this to assess whether the spread reaches profitability. Leave blank to analyze without a target.
+            </p>
+          </div>
+          {error && <p style={{ color: C.red, fontSize: 12, marginTop: 8 }}>⚠ {error}</p>}
+        </div>
+        <div style={{ padding: '12px 16px', borderTop: `1px solid ${C.border}`, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <button onClick={() => handleDeepDive(selectedTrade)} disabled={loading}
+            style={{
+              width: '100%', padding: '10px', borderRadius: 7,
+              backgroundColor: C.claudeDim, border: `1px solid ${C.claudeBorder}`,
+              color: C.claudeAccent, fontSize: 13, fontWeight: 700, cursor: 'pointer',
+            }}>
+            ✦ Analyze This Trade
+          </button>
+          <button onClick={() => setAgentState(triageResults ? 'triage_complete' : 'idle')}
+            style={{ background: 'none', border: 'none', color: C.textDim, fontSize: 11, cursor: 'pointer' }}>
+            ← Back
           </button>
         </div>
       </>
@@ -394,36 +535,24 @@ export default function TradeAgentPanel() {
             {selectedTrade && <DirectionBadge direction={selectedTrade.direction} />}
           </div>
 
-          {/* Price target used */}
-          <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 11, color: C.textDim }}>Price target:</span>
-            <input
-              type="number"
-              placeholder="Not set"
-              value={priceTarget}
-              onChange={e => setPriceTarget(e.target.value)}
-              style={{
-                width: 90, padding: '3px 7px', borderRadius: 5, fontSize: 12,
-                border: `1px solid ${C.border}`, backgroundColor: C.bg, color: C.text,
-                fontFamily: mono,
-              }}
-            />
-          </div>
+          {priceTarget && (
+            <div style={{ marginBottom: 10, fontSize: 11, color: C.textDim }}>
+              Price target: <span style={{ color: C.text, fontFamily: mono }}>{priceTarget}</span>
+            </div>
+          )}
 
           {/* Collapsible analysis sections */}
           {sectionOrder.map(title =>
             sections[title] ? (
               <CollapsibleSection key={title} title={title}>
-                {sections[title]}
+                <RenderMarkdown text={sections[title]} />
               </CollapsibleSection>
             ) : null
           )}
 
-          {/* If no sections parsed, show full analysis */}
+          {/* If no sections parsed, show full analysis cleaned */}
           {Object.keys(sections).length === 0 && (
-            <div style={{ fontSize: 13, color: C.text, lineHeight: 1.65, whiteSpace: 'pre-wrap' }}>
-              {analysis}
-            </div>
+            <RenderMarkdown text={analysis} />
           )}
 
           {error && <p style={{ color: C.red, fontSize: 12, marginTop: 8 }}>⚠ {error}</p>}
@@ -496,11 +625,13 @@ export default function TradeAgentPanel() {
               </div>
               {/* Claude bubble */}
               <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
-                <div style={{ maxWidth: '90%', padding: '8px 12px', borderRadius: '12px 12px 12px 3px', backgroundColor: C.card, border: `1px solid ${C.border}`, color: C.text, fontSize: 12.5, lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
-                  {item.response || (loading && i === followupThread.length - 1
-                    ? <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: C.textDim }}><Spinner /> Thinking…</span>
-                    : null
-                  )}
+                <div style={{ maxWidth: '90%', padding: '8px 12px', borderRadius: '12px 12px 12px 3px', backgroundColor: C.card, border: `1px solid ${C.border}`, color: C.text, fontSize: 12.5, lineHeight: 1.55 }}>
+                  {item.response
+                    ? <RenderMarkdown text={item.response} />
+                    : (loading && i === followupThread.length - 1
+                      ? <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: C.textDim }}><Spinner /> Thinking…</span>
+                      : null
+                    )}
                 </div>
               </div>
             </div>
@@ -584,6 +715,7 @@ export default function TradeAgentPanel() {
           {agentState === 'idle' && renderIdle()}
           {agentState === 'triaging' && renderTriaging()}
           {agentState === 'triage_complete' && renderTriageComplete()}
+          {agentState === 'pre_dive' && renderPreDive()}
           {agentState === 'diving' && renderDiving()}
           {agentState === 'verdict' && renderVerdict()}
           {agentState === 'followup' && renderFollowup()}

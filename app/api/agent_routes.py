@@ -138,12 +138,12 @@ class TradeItem(BaseModel):
     spread_type: str
     spread_label: str
     expiration: str
-    dte: int
+    dte: float  # float to handle fractional days from long call engine
     net_debit: float
-    max_profit: float
-    reward_risk_ratio: float
+    max_profit: Optional[float] = None   # None for long calls (unlimited upside)
+    reward_risk_ratio: Optional[float] = None  # None for long calls
     prob_of_profit: float
-    composite_score: float
+    composite_score: Optional[float] = None
     direction: str
 
 
@@ -301,10 +301,10 @@ class DeepDiveRequest(BaseModel):
     spread_type_label: str
     spread_label: str
     expiration: str
-    dte: int
+    dte: float
     net_debit: float
-    max_profit: float
-    reward_risk_ratio: float
+    max_profit: Optional[float] = None
+    reward_risk_ratio: Optional[float] = None
     prob_of_profit: float
     composite_score: Optional[float] = None
 
@@ -387,6 +387,7 @@ async def deep_dive(
     system_prompt = skill.get("DEEP_DIVE_SYSTEM")
     user_message = skill.render(
         "DEEP_DIVE_USER",
+        current_date=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
         symbol=request.symbol,
         current_price=request.current_price,
         sma_8=request.sma_8,

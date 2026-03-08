@@ -8,7 +8,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
-import { analyzeVerticals } from '../api/client';
+import { analyzeVerticals, listRecommendations } from '../api/client';
 import StarButton from '../components/StarButton';
 import ScoreBar from '../components/ScoreBar';
 import QuoteBar from '../components/QuoteBar';
@@ -53,13 +53,14 @@ function SortTh({ label, sortKey, currentSort, onSort, style, num }) {
 }
 
 export default function VerticalsPage() {
-  const { activeSymbol, configOpen, setConfigOpen, openAgent } = useApp();
+  const { activeSymbol, configOpen, setConfigOpen, openAgent, agentOpen } = useApp();
 
   const [spreads, setSpreads] = useState([]);
   const [underlyingPrice, setUnderlyingPrice] = useState(0);
   const [totalValid, setTotalValid] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [recommendations, setRecommendations] = useState(new Map());
 
   const [candles, setCandles] = useState([]);
 
@@ -111,6 +112,7 @@ export default function VerticalsPage() {
     const cfg = configRef.current;
     setLoading(true);
     setError(null);
+    setSelectedIds(new Set());
 
     const spreadTypesArr = [];
     if (cfg.spreadTypes?.bull_call) spreadTypesArr.push('bull_call');
@@ -130,11 +132,14 @@ export default function VerticalsPage() {
         min_dte: cfg.dte.min,
         max_dte: cfg.dte.max,
         strike_range_pct: cfg.strikes.range_pct,
+        min_spread_width: cfg.spreads?.min_width ?? 1,
+        max_spread_width: cfg.spreads?.max_width ?? 10,
       });
       setSpreads(data.spreads || []);
       setUnderlyingPrice(data.underlying_price || 0);
       setTotalValid(data.total_valid || 0);
       if (data.underlying_price) setCandles(generateCandles(data.underlying_price));
+      listRecommendations(symbol).then(setRecommendations);
     } catch (err) {
       setError(err.message || 'Failed to fetch analysis');
       setSpreads([]);
@@ -146,6 +151,13 @@ export default function VerticalsPage() {
   useEffect(() => {
     if (activeSymbol) runAnalysis(activeSymbol);
   }, [activeSymbol, runAnalysis]);
+
+  // Re-fetch recommendations when agent panel closes (new deep-dive may have run)
+  useEffect(() => {
+    if (!agentOpen && activeSymbol) {
+      listRecommendations(activeSymbol).then(setRecommendations);
+    }
+  }, [agentOpen, activeSymbol]);
 
   // ─── Sorting ─────────────────────────────────────────────────
   const handleSort = (key) => {
@@ -268,31 +280,35 @@ export default function VerticalsPage() {
 
       {!loading && !error && sortedSpreads.length > 0 && (
         <div className="table-wrap">
-          {selectedIds.size > 0 && (
-            <div style={{ padding: '6px 0 8px', display: 'flex', alignItems: 'center', gap: 10 }}>
-              <button
-                onClick={() => openAgent(
-                  sortedSpreads.filter(s => selectedIds.has(`${s.long_strike}-${s.short_strike}-${s.expiration}`)).map(buildAgentTrade),
-                  getMarketContext()
-                )}
-                style={{
-                  padding: '6px 14px', borderRadius: 6, fontSize: 12.5, fontWeight: 700,
-                  cursor: 'pointer', border: `1px solid ${C.claudeBorder}`,
-                  backgroundColor: C.claudeDim, color: C.claudeAccent,
-                }}>
-                ✦ Ask Claude ({selectedIds.size})
-              </button>
+          <div style={{ padding: '6px 0 8px', display: 'flex', alignItems: 'center', gap: 10 }}>
+            <button
+              disabled={selectedIds.size === 0}
+              onClick={() => openAgent(
+                sortedSpreads.filter(s => selectedIds.has(`${s.long_strike}-${s.short_strike}-${s.expiration}`)).map(buildAgentTrade),
+                getMarketContext()
+              )}
+              style={{
+                padding: '6px 14px', borderRadius: 6, fontSize: 12.5, fontWeight: 700,
+                cursor: selectedIds.size > 0 ? 'pointer' : 'default',
+                border: `1px solid ${selectedIds.size > 0 ? C.claudeBorder : C.border}`,
+                backgroundColor: selectedIds.size > 0 ? C.claudeDim : 'transparent',
+                color: selectedIds.size > 0 ? C.claudeAccent : C.textMuted,
+                transition: 'all 0.15s',
+              }}>
+              ✦ Ask Claude ({selectedIds.size})
+            </button>
+            {selectedIds.size > 0 && (
               <button onClick={() => setSelectedIds(new Set())}
                 style={{ background: 'none', border: 'none', color: C.textDim, fontSize: 11, cursor: 'pointer' }}>
                 Clear
               </button>
-            </div>
-          )}
+            )}
+          </div>
           <table>
             <thead>
               <tr>
-                <th style={{ width: 28 }}></th>
-                <th style={{ width: 32 }}></th>
+                <th colSpan={2} style={{ fontSize: 10, color: C.textDim, fontWeight: 600, whiteSpace: 'nowrap' }}>Claude</th>
+                <th style={{ width: 28, fontSize: 10, color: C.textDim, fontWeight: 600 }}>Fav</th>
                 <SortTh label="Type" sortKey="spread_type" currentSort={sort} onSort={handleSort} />
                 <SortTh label="Long / Short" sortKey="long_strike" currentSort={sort} onSort={handleSort} style={{ textAlign: 'center' }} />
                 <SortTh label="Exp" sortKey="expiration" currentSort={sort} onSort={handleSort} style={{ textAlign: 'center' }} />
@@ -304,7 +320,7 @@ export default function VerticalsPage() {
                 <SortTh label="Prob %" sortKey="prob_of_profit" currentSort={sort} onSort={handleSort} num />
                 <SortTh label="EV" sortKey="ev_raw" currentSort={sort} onSort={handleSort} num />
                 <SortTh label="Score" sortKey="composite_score" currentSort={sort} onSort={handleSort} />
-                <th style={{ width: 60 }}></th>
+                <th style={{ width: 36 }}></th>
               </tr>
             </thead>
             <tbody>
@@ -312,6 +328,9 @@ export default function VerticalsPage() {
                 const isBull = s.spread_type === 'bull_call';
                 const rowId = `${s.long_strike}-${s.short_strike}-${s.expiration}`;
                 const isChecked = selectedIds.has(rowId);
+                const agentTrade = buildAgentTrade(s);
+                const tradeKey = `${activeSymbol}:${agentTrade.spread_label}:${s.expiration}`;
+                const priorRec = recommendations.get(tradeKey);
                 return (
                   <tr key={i} style={{ borderLeft: `2px solid ${isChecked ? C.claudeAccent : 'transparent'}` }}>
                     <td>
@@ -323,6 +342,18 @@ export default function VerticalsPage() {
                         })}
                         style={{ cursor: 'pointer', accentColor: C.claudeAccent }}
                       />
+                    </td>
+                    <td>
+                      <button
+                        onClick={e => { e.stopPropagation(); openAgent([agentTrade], getMarketContext()); }}
+                        title={priorRec ? `Claude: ${priorRec.verdict} — click to re-evaluate` : 'Ask Claude about this trade'}
+                        style={{
+                          background: 'none', border: 'none', padding: '2px 4px',
+                          cursor: 'pointer', lineHeight: 1, fontSize: 16,
+                          color: priorRec ? C.claudeAccent : C.textDim,
+                          transition: 'color 0.2s',
+                        }}
+                      >{priorRec ? '✦' : '✧'}</button>
                     </td>
                     <td><StarButton trade={buildFavTrade(s)} /></td>
                     <td><span className={`type-badge ${isBull ? 'type-bull' : 'type-bear'}`}>{isBull ? 'Bull Call' : 'Bear Put'}</span></td>
@@ -337,12 +368,8 @@ export default function VerticalsPage() {
                     <td className={`mono ${s.ev_raw >= 0 ? 'text-green' : 'text-red'}`}>{s.ev_raw.toFixed(2)}</td>
                     <td><ScoreBar score={s.composite_score} /></td>
                     <td>
-                      <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-                        <button onClick={(e) => { e.stopPropagation(); openAgent([buildAgentTrade(s)], getMarketContext()); }}
-                          title="Ask Claude" style={{ padding: '3px 7px', borderRadius: 4, border: `1px solid ${C.claudeBorder}`, backgroundColor: C.claudeDim, color: C.claudeAccent, fontSize: 12, fontWeight: 700, cursor: 'pointer', lineHeight: 1 }}>✦</button>
-                        <button onClick={(e) => { e.stopPropagation(); setFormulaTrade(buildFormulaTrade(s)); setFormulaOpen(true); }}
-                          title="View scoring formula" style={{ padding: '3px 7px', borderRadius: 4, border: `1px solid ${C.accent}30`, backgroundColor: `${C.accent}10`, color: C.accent, fontSize: 10, fontWeight: 600, cursor: 'pointer', fontFamily: mono, lineHeight: 1 }}>ƒx</button>
-                      </div>
+                      <button onClick={(e) => { e.stopPropagation(); setFormulaTrade(buildFormulaTrade(s)); setFormulaOpen(true); }}
+                        title="View scoring formula" style={{ padding: '3px 7px', borderRadius: 4, border: `1px solid ${C.accent}30`, backgroundColor: `${C.accent}10`, color: C.accent, fontSize: 10, fontWeight: 600, cursor: 'pointer', fontFamily: mono, lineHeight: 1 }}>ƒx</button>
                     </td>
                   </tr>
                 );

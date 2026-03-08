@@ -133,6 +133,8 @@ Verdicts:
 ```
 Evaluate this trade in depth.
 
+Current date: {{current_date}}
+
 === MARKET CONTEXT ===
 Asset: {{symbol}} | Price: ${{current_price}}
 SMA 8: ${{sma_8}} | SMA 21: ${{sma_21}} | SMA 50: ${{sma_50}}

@@ -14,7 +14,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
-import { analyzeLongCalls } from '../api/client';
+import { analyzeLongCalls, listRecommendations } from '../api/client';
 import StarButton from '../components/StarButton';
 import ScoreBar from '../components/ScoreBar';
 import QuoteBar from '../components/QuoteBar';
@@ -58,7 +58,7 @@ function SortTh({ label, sortKey, currentSort, onSort, style, num }) {
 }
 
 export default function NakedOptionsPage() {
-  const { activeSymbol, configOpen, setConfigOpen, openAgent } = useApp();
+  const { activeSymbol, configOpen, setConfigOpen, openAgent, agentOpen } = useApp();
 
   const [results, setResults] = useState([]);
   const [underlyingPrice, setUnderlyingPrice] = useState(0);
@@ -75,6 +75,7 @@ export default function NakedOptionsPage() {
 
   // Multi-select for agent
   const [selectedIds, setSelectedIds] = useState(new Set());
+  const [recommendations, setRecommendations] = useState(new Map());
 
   // Formula breakdown slideout
   const [formulaOpen, setFormulaOpen] = useState(false);
@@ -123,6 +124,7 @@ export default function NakedOptionsPage() {
     const cfg = configRef.current;
     setLoading(true);
     setError(null);
+    setSelectedIds(new Set());
     try {
       const option_types = [];
       if (showCalls) option_types.push('call');
@@ -134,6 +136,7 @@ export default function NakedOptionsPage() {
       setUnderlyingPrice(data.underlying_price || 0);
       setTotalValid(data.total_valid || 0);
       if (data.underlying_price) setCandles(generateCandles(data.underlying_price));
+      listRecommendations(symbol).then(setRecommendations);
     } catch (err) {
       setError(err.message || 'Failed to fetch analysis');
       setResults([]);
@@ -145,6 +148,13 @@ export default function NakedOptionsPage() {
   useEffect(() => {
     if (activeSymbol) runAnalysis(activeSymbol);
   }, [activeSymbol, runAnalysis]);
+
+  // Re-fetch recommendations when agent panel closes (new deep-dive may have run)
+  useEffect(() => {
+    if (!agentOpen && activeSymbol) {
+      listRecommendations(activeSymbol).then(setRecommendations);
+    }
+  }, [agentOpen, activeSymbol]);
 
   // ─── Sorting ─────────────────────────────────────────────────
   const handleSort = (key) => {
@@ -188,7 +198,7 @@ export default function NakedOptionsPage() {
       spread_type: type === 'put' ? 'long_put' : 'long_call',
       spread_label: `${c.strike} ${type === 'put' ? 'Put' : 'Call'}`,
       expiration: c.expiration,
-      dte: c.theta_runway_days || 0,
+      dte: Math.max(0, Math.round((new Date(c.expiration) - new Date()) / 86400000)),
       net_debit: c.premium_dollars,
       max_profit: null,
       reward_risk_ratio: null,
@@ -326,31 +336,35 @@ export default function NakedOptionsPage() {
 
       {!loading && !error && sortedResults.length > 0 && (
         <div className="table-wrap">
-          {selectedIds.size > 0 && (
-            <div style={{ padding: '6px 0 8px', display: 'flex', alignItems: 'center', gap: 10 }}>
-              <button
-                onClick={() => openAgent(
-                  sortedResults.filter(c => selectedIds.has(`${c.strike}-${c.expiration}-${c.option_type || 'call'}`)).map(buildAgentTrade),
-                  getMarketContext()
-                )}
-                style={{
-                  padding: '6px 14px', borderRadius: 6, fontSize: 12.5, fontWeight: 700,
-                  cursor: 'pointer', border: `1px solid ${C.claudeBorder}`,
-                  backgroundColor: C.claudeDim, color: C.claudeAccent,
-                }}>
-                ✦ Ask Claude ({selectedIds.size})
-              </button>
+          <div style={{ padding: '6px 0 8px', display: 'flex', alignItems: 'center', gap: 10 }}>
+            <button
+              disabled={selectedIds.size === 0}
+              onClick={() => openAgent(
+                sortedResults.filter(c => selectedIds.has(`${c.strike}-${c.expiration}-${c.option_type || 'call'}`)).map(buildAgentTrade),
+                getMarketContext()
+              )}
+              style={{
+                padding: '6px 14px', borderRadius: 6, fontSize: 12.5, fontWeight: 700,
+                cursor: selectedIds.size > 0 ? 'pointer' : 'default',
+                border: `1px solid ${selectedIds.size > 0 ? C.claudeBorder : C.border}`,
+                backgroundColor: selectedIds.size > 0 ? C.claudeDim : 'transparent',
+                color: selectedIds.size > 0 ? C.claudeAccent : C.textMuted,
+                transition: 'all 0.15s',
+              }}>
+              ✦ Ask Claude ({selectedIds.size})
+            </button>
+            {selectedIds.size > 0 && (
               <button onClick={() => setSelectedIds(new Set())}
                 style={{ background: 'none', border: 'none', color: C.textDim, fontSize: 11, cursor: 'pointer' }}>
                 Clear
               </button>
-            </div>
-          )}
+            )}
+          </div>
           <table>
             <thead>
               <tr>
-                <th style={{ width: 28 }}></th>
-                <th style={{ width: 32 }}></th>
+                <th colSpan={2} style={{ fontSize: 10, color: C.textDim, fontWeight: 600, whiteSpace: 'nowrap' }}>Claude</th>
+                <th style={{ width: 28, fontSize: 10, color: C.textDim, fontWeight: 600 }}>Fav</th>
                 <SortTh label="Type" sortKey="option_type" currentSort={sort} onSort={handleSort} />
                 <SortTh label="Strike" sortKey="strike" currentSort={sort} onSort={handleSort} style={{ textAlign: 'center' }} />
                 <SortTh label="Exp" sortKey="expiration" currentSort={sort} onSort={handleSort} style={{ textAlign: 'center' }} />
@@ -361,7 +375,7 @@ export default function NakedOptionsPage() {
                 <SortTh label="IV" sortKey="iv" currentSort={sort} onSort={handleSort} num />
                 <SortTh label="Breakeven" sortKey="breakeven" currentSort={sort} onSort={handleSort} num />
                 <SortTh label="Score" sortKey="composite_score" currentSort={sort} onSort={handleSort} />
-                <th style={{ width: 70 }}></th>
+                <th style={{ width: 36 }}></th>
               </tr>
             </thead>
             <tbody>
@@ -369,6 +383,9 @@ export default function NakedOptionsPage() {
                 const type = c.option_type || 'call';
                 const rowId = `${c.strike}-${c.expiration}-${type}`;
                 const isChecked = selectedIds.has(rowId);
+                const agentTrade = buildAgentTrade(c);
+                const tradeKey = `${activeSymbol}:${agentTrade.spread_label}:${c.expiration}`;
+                const priorRec = recommendations.get(tradeKey);
                 return (
                 <tr key={i} style={{ borderLeft: `2px solid ${isChecked ? C.claudeAccent : 'transparent'}` }}>
                   <td>
@@ -380,6 +397,18 @@ export default function NakedOptionsPage() {
                       })}
                       style={{ cursor: 'pointer', accentColor: C.claudeAccent }}
                     />
+                  </td>
+                  <td>
+                    <button
+                      onClick={e => { e.stopPropagation(); openAgent([agentTrade], getMarketContext()); }}
+                      title={priorRec ? `Claude: ${priorRec.verdict} — click to re-evaluate` : 'Ask Claude about this trade'}
+                      style={{
+                        background: 'none', border: 'none', padding: '2px 4px',
+                        cursor: 'pointer', lineHeight: 1, fontSize: 16,
+                        color: priorRec ? C.claudeAccent : C.textDim,
+                        transition: 'color 0.2s',
+                      }}
+                    >{priorRec ? '✦' : '✧'}</button>
                   </td>
                   <td><StarButton trade={buildFavTrade(c)} /></td>
                   <td><span className={`type-badge ${type === 'call' ? 'type-bull' : 'type-bear'}`}>{type === 'call' ? 'Call' : 'Put'}</span></td>
@@ -393,12 +422,8 @@ export default function NakedOptionsPage() {
                   <td className="mono">{c.breakeven.toFixed(2)}</td>
                   <td><ScoreBar score={c.composite_score} /></td>
                   <td>
-                    <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-                      <button onClick={(e) => { e.stopPropagation(); openAgent([buildAgentTrade(c)], getMarketContext()); }}
-                        title="Ask Claude" style={{ padding: '3px 7px', borderRadius: 4, border: `1px solid ${C.claudeBorder}`, backgroundColor: C.claudeDim, color: C.claudeAccent, fontSize: 12, fontWeight: 700, cursor: 'pointer', lineHeight: 1 }}>✦</button>
-                      <button onClick={(e) => { e.stopPropagation(); setFormulaTrade(buildFormulaTrade(c)); setFormulaOpen(true); }}
-                        title="View scoring formula" style={{ padding: '3px 7px', borderRadius: 4, border: `1px solid ${C.accent}30`, backgroundColor: `${C.accent}10`, color: C.accent, fontSize: 10, fontWeight: 600, cursor: 'pointer', fontFamily: mono, lineHeight: 1 }}>ƒx</button>
-                    </div>
+                    <button onClick={(e) => { e.stopPropagation(); setFormulaTrade(buildFormulaTrade(c)); setFormulaOpen(true); }}
+                      title="View scoring formula" style={{ padding: '3px 7px', borderRadius: 4, border: `1px solid ${C.accent}30`, backgroundColor: `${C.accent}10`, color: C.accent, fontSize: 10, fontWeight: 600, cursor: 'pointer', fontFamily: mono, lineHeight: 1 }}>ƒx</button>
                   </td>
                 </tr>
                 );

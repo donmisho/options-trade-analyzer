@@ -42,7 +42,10 @@ async function apiFetch(path, options = {}) {
 
     if (!response.ok) {
       const errorBody = await response.json().catch(() => ({}));
-      const message = errorBody.detail || `API error: ${response.status}`;
+      const detail = errorBody.detail;
+      const message = Array.isArray(detail)
+        ? `Validation error: ${detail.map(d => d.msg || JSON.stringify(d)).join('; ')}`
+        : (detail || `API error: ${response.status}`);
       throw new Error(message);
     }
 
@@ -298,7 +301,7 @@ export async function deepDiveTrade(trade, marketContext, priceTarget, runId) {
       ma_alignment: marketContext.ma_alignment,
       vix: marketContext.vix || null,
       direction: trade.direction || "Bullish",
-      timeframe_days: dte,
+      timeframe_days: Math.round(dte),
       price_target: priceTarget ? parseFloat(priceTarget) : null,
       conviction: "Medium",
       spread_type_label: trade.spread_label || trade.spread_type,
@@ -319,7 +322,7 @@ export async function deepDiveTrade(trade, marketContext, priceTarget, runId) {
       exit_scale_out: parseFloat((debit * 1.60).toFixed(2)),
       exit_full_profit: parseFloat((maxProfit * 0.75).toFixed(2)),
       exit_underlying_stop: parseFloat(Math.min(sma8, price - price * 0.015).toFixed(2)),
-      exit_time_stop: Math.max(0, dte - 10),
+      exit_time_stop: Math.round(Math.max(0, dte - 10)),
       run_id: runId || null,
     }),
   });
@@ -342,6 +345,23 @@ export async function followupTrade(trade, verdict, verdictSummary, question, ru
       run_id: runId || null,
     }),
   });
+}
+
+/**
+ * List all saved recommendations for a symbol.
+ * Returns a Map keyed by trade_key for O(1) lookup in the results table.
+ */
+export async function listRecommendations(symbol) {
+  try {
+    const results = await apiFetch(`/agent/recommendations?symbol=${encodeURIComponent(symbol)}`);
+    const map = new Map();
+    for (const rec of (results || [])) {
+      map.set(rec.trade_key, rec);
+    }
+    return map;
+  } catch {
+    return new Map();
+  }
 }
 
 /**
