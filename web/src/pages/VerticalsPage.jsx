@@ -41,12 +41,20 @@ function computeAlignment(price, smaShort, smaMid, smaLong) {
   return "mixed";
 }
 
+// --- Spread type display config (supports all 4 vertical types) ---
+const TYPE_CONFIG = {
+  bull_call: { label: 'Bull Call', className: 'type-bull' },
+  bear_put:  { label: 'Bear Put',  className: 'type-bear' },
+  bull_put:  { label: 'Bull Put',  className: 'type-bull' },
+  bear_call: { label: 'Bear Call', className: 'type-bear' },
+};
+
 // --- Sortable header helper (shared pattern with NakedOptionsPage) ---
-function SortTh({ label, sortKey, currentSort, onSort, style, num }) {
+function SortTh({ label, sortKey, currentSort, onSort, style, title }) {
   const isActive = currentSort.key === sortKey;
   const arrow = isActive ? (currentSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
   return (
-    <th onClick={() => onSort(sortKey)} style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap', ...(num ? { textAlign: 'right' } : {}), ...style }}>
+    <th onClick={() => onSort(sortKey)} title={title} style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap', textAlign: 'center', ...style }}>
       {label}{arrow && <span style={{ fontSize: 9, opacity: 0.7 }}>{arrow}</span>}
     </th>
   );
@@ -181,7 +189,31 @@ export default function VerticalsPage() {
 
   // ─── Trade builders ──────────────────────────────────────────
   function buildClaudeTrade(s) {
-    return { symbol: activeSymbol, spread_type: s.spread_type, long_strike: s.long_strike, short_strike: s.short_strike, expiration: s.expiration, option_type: s.spread_type === 'bull_call' ? 'call' : 'put', net_debit: s.net_debit, max_profit: s.max_profit, max_loss: s.net_debit, reward_risk_ratio: s.reward_risk_ratio, prob_of_profit: s.prob_of_profit, composite_score: s.composite_score };
+    const buyStrike = s.buy_strike ?? s.long_strike;
+    const sellStrike = s.sell_strike ?? s.short_strike;
+    const netCost = s.net_cost ?? s.net_debit;
+    const isCredit = netCost < 0;
+    const optType = s.option_type || (['bull_call', 'bear_call'].includes(s.spread_type) ? 'call' : 'put');
+    return {
+      symbol: activeSymbol,
+      spread_type: s.spread_type,
+      strategy_label: TYPE_CONFIG[s.spread_type]?.label || s.spread_type,
+      is_credit: isCredit,
+      buy_strike: buyStrike,
+      sell_strike: sellStrike,
+      long_strike: s.long_strike,
+      short_strike: s.short_strike,
+      option_type: optType,
+      expiration: s.expiration,
+      net_cost: netCost,
+      net_debit: s.net_debit,
+      max_profit: s.max_profit,
+      max_loss: s.max_loss ?? Math.abs(netCost),
+      breakeven: s.breakeven,
+      reward_risk_ratio: s.reward_risk_ratio,
+      prob_of_profit: s.prob_of_profit,
+      composite_score: s.composite_score,
+    };
   }
 
   function buildAgentTrade(s) {
@@ -307,25 +339,28 @@ export default function VerticalsPage() {
           <table>
             <thead>
               <tr>
-                <th colSpan={2} style={{ fontSize: 10, color: C.textDim, fontWeight: 600, whiteSpace: 'nowrap' }}>Claude</th>
-                <th style={{ width: 28, fontSize: 10, color: C.textDim, fontWeight: 600 }}>Fav</th>
-                <SortTh label="Type" sortKey="spread_type" currentSort={sort} onSort={handleSort} />
-                <SortTh label="Long / Short" sortKey="long_strike" currentSort={sort} onSort={handleSort} style={{ textAlign: 'center' }} />
-                <SortTh label="Exp" sortKey="expiration" currentSort={sort} onSort={handleSort} style={{ textAlign: 'center' }} />
-                <th style={{ textAlign: 'right', cursor: 'default', whiteSpace: 'nowrap' }}>DTE</th>
-                <SortTh label="Debit" sortKey="net_debit" currentSort={sort} onSort={handleSort} num />
-                <SortTh label="Max Profit" sortKey="max_profit" currentSort={sort} onSort={handleSort} num />
-                <SortTh label="R:R" sortKey="reward_risk_ratio" currentSort={sort} onSort={handleSort} num />
-                <SortTh label="Breakeven" sortKey="breakeven" currentSort={sort} onSort={handleSort} num />
-                <SortTh label="Prob %" sortKey="prob_of_profit" currentSort={sort} onSort={handleSort} num />
-                <SortTh label="EV" sortKey="ev_raw" currentSort={sort} onSort={handleSort} num />
-                <SortTh label="Score" sortKey="composite_score" currentSort={sort} onSort={handleSort} />
+                <th colSpan={2} title="Select and evaluate with Claude" style={{ fontSize: 10, color: C.claudeAccent, fontWeight: 600, whiteSpace: 'nowrap', textAlign: 'center', backgroundColor: C.claudeDim, borderRight: `1px solid ${C.claudeBorder}` }}>Claude</th>
+                <th title="Save trade to favorites" style={{ width: 28, fontSize: 10, color: C.textDim, fontWeight: 600, textAlign: 'center' }}>FAV</th>
+                <SortTh label="Type" sortKey="spread_type" currentSort={sort} onSort={handleSort} title="Spread direction and structure" />
+                <SortTh label="BUY / SELL" sortKey="long_strike" currentSort={sort} onSort={handleSort} title="Strike prices to buy and sell" />
+                <SortTh label="Exp" sortKey="expiration" currentSort={sort} onSort={handleSort} title="Option expiration date" />
+                <th title="Days until expiration" style={{ textAlign: 'center', cursor: 'default', whiteSpace: 'nowrap' }}>DTE</th>
+                <SortTh label="NET" sortKey="net_debit" currentSort={sort} onSort={handleSort} title="Net debit or credit per share" />
+                <SortTh label="Max Profit" sortKey="max_profit" currentSort={sort} onSort={handleSort} title="Maximum gain per share" />
+                <SortTh label="R:R" sortKey="reward_risk_ratio" currentSort={sort} onSort={handleSort} title="Reward to risk ratio" />
+                <SortTh label="Breakeven" sortKey="breakeven" currentSort={sort} onSort={handleSort} title="Underlying price to break even" />
+                <SortTh label="Prob %" sortKey="prob_of_profit" currentSort={sort} onSort={handleSort} title="Probability of profit at expiration" />
+                <SortTh label="EV" sortKey="ev_raw" currentSort={sort} onSort={handleSort} title="Expected value in dollars" />
+                <SortTh label="Score" sortKey="composite_score" currentSort={sort} onSort={handleSort} title="Composite weighted score 0–100" />
                 <th style={{ width: 36 }}></th>
               </tr>
             </thead>
             <tbody>
               {sortedSpreads.map((s, i) => {
                 const isBull = s.spread_type === 'bull_call';
+                const typeInfo = TYPE_CONFIG[s.spread_type] || { label: s.spread_type, className: '' };
+                const netCost = s.net_cost ?? s.net_debit;
+                const isCredit = netCost < 0;
                 const rowId = `${s.long_strike}-${s.short_strike}-${s.expiration}`;
                 const isChecked = selectedIds.has(rowId);
                 const agentTrade = buildAgentTrade(s);
@@ -343,10 +378,10 @@ export default function VerticalsPage() {
                         style={{ cursor: 'pointer', accentColor: C.claudeAccent }}
                       />
                     </td>
-                    <td>
+                    <td style={{ borderRight: `1px solid ${C.claudeBorder}` }}>
                       <button
                         onClick={e => { e.stopPropagation(); openAgent([agentTrade], getMarketContext()); }}
-                        title={priorRec ? `Claude: ${priorRec.verdict} — click to re-evaluate` : 'Ask Claude about this trade'}
+                        title={priorRec ? `Claude agent: ${priorRec.verdict} — click to re-evaluate` : 'Run Claude agent on this trade'}
                         style={{
                           background: 'none', border: 'none', padding: '2px 4px',
                           cursor: 'pointer', lineHeight: 1, fontSize: 16,
@@ -356,16 +391,18 @@ export default function VerticalsPage() {
                       >{priorRec ? '✦' : '✧'}</button>
                     </td>
                     <td><StarButton trade={buildFavTrade(s)} /></td>
-                    <td><span className={`type-badge ${isBull ? 'type-bull' : 'type-bear'}`}>{isBull ? 'Bull Call' : 'Bear Put'}</span></td>
+                    <td><span className={`type-badge ${typeInfo.className}`}>{typeInfo.label}</span></td>
                     <td className="mono" style={{ textAlign: 'center' }}>{s.long_strike} / {s.short_strike}</td>
                     <td className="mono text-muted" style={{ textAlign: 'center' }}>{s.expiration}</td>
-                    <td className="mono">{Math.max(0, Math.round((new Date(s.expiration) - new Date()) / 86400000))}</td>
-                    <td className="mono">{s.net_debit.toFixed(2)}</td>
-                    <td className="mono text-green">{s.max_profit.toFixed(2)}</td>
-                    <td className="mono">{s.reward_risk_ratio.toFixed(2)}</td>
-                    <td className="mono">{s.breakeven.toFixed(2)}</td>
-                    <td className="mono">{(s.prob_of_profit * 100).toFixed(0)}%</td>
-                    <td className={`mono ${s.ev_raw >= 0 ? 'text-green' : 'text-red'}`}>{s.ev_raw.toFixed(2)}</td>
+                    <td className="mono" style={{ textAlign: 'center' }}>{Math.max(0, Math.round((new Date(s.expiration) - new Date()) / 86400000))}</td>
+                    <td className="mono" style={{ textAlign: 'center', color: isCredit ? '#4ade80' : undefined }}>
+                      {isCredit ? `(${Math.abs(netCost).toFixed(2)})` : netCost.toFixed(2)}
+                    </td>
+                    <td className="mono text-green" style={{ textAlign: 'center' }}>{s.max_profit.toFixed(2)}</td>
+                    <td className="mono" style={{ textAlign: 'center' }}>{s.reward_risk_ratio.toFixed(2)}:1</td>
+                    <td className="mono" style={{ textAlign: 'center' }}>{s.breakeven.toFixed(2)}</td>
+                    <td className="mono" style={{ textAlign: 'center' }}>{(s.prob_of_profit * 100).toFixed(2)}%</td>
+                    <td className={`mono ${s.ev_raw >= 0 ? 'text-green' : 'text-red'}`} style={{ textAlign: 'center' }}>{s.ev_raw.toFixed(2)}</td>
                     <td><ScoreBar score={s.composite_score} /></td>
                     <td>
                       <button onClick={(e) => { e.stopPropagation(); setFormulaTrade(buildFormulaTrade(s)); setFormulaOpen(true); }}
@@ -379,15 +416,52 @@ export default function VerticalsPage() {
         </div>
       )}
 
-      {!loading && !error && spreads.length === 0 && (
-        <div className="empty-state">
-          <div className="empty-icon">📊</div>
-          <h3>No spreads found</h3>
-          <p>No valid vertical spreads matched the current filters for {activeSymbol}. Try a different symbol or adjust the filter settings.</p>
-        </div>
-      )}
+      {!loading && !error && spreads.length === 0 && (() => {
+        const price = underlyingPrice;
+        const pct = config.strikes.range_pct / 100;
+        const strikeMin = price > 0 ? (price * (1 - pct)).toFixed(2) : null;
+        const strikeMax = price > 0 ? (price * (1 + pct)).toFixed(2) : null;
+        const today = new Date();
+        const fmtDate = d => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        const dteMinDate = new Date(today); dteMinDate.setDate(today.getDate() + config.dte.min);
+        const dteMaxDate = new Date(today); dteMaxDate.setDate(today.getDate() + config.dte.max);
+        const dim = '#8b90a0', lit = '#e4e7ef', act = '#f59e0b';
+        const Row = ({ label, filter, actual }) => (
+          <tr>
+            <td style={{ color: dim, paddingRight: 16, paddingBottom: 5 }}>{label}</td>
+            <td style={{ color: lit, paddingRight: 16, paddingBottom: 5 }}>{filter}</td>
+            <td style={{ color: act, paddingBottom: 5, fontWeight: actual ? 600 : 400 }}>{actual || ''}</td>
+          </tr>
+        );
+        return (
+          <div className="empty-state">
+            <div className="empty-icon">📊</div>
+            <h3>No spreads found for {activeSymbol}</h3>
+            <p style={{ marginBottom: 12 }}>No vertical spreads passed all filters. Active filters that commonly exclude trades:</p>
+            <table style={{ fontSize: 12, borderCollapse: 'collapse', margin: '0 auto', textAlign: 'left' }}>
+              <thead>
+                <tr>
+                  <th style={{ color: dim, paddingRight: 16, paddingBottom: 6, fontWeight: 600, fontSize: 10, textTransform: 'uppercase', letterSpacing: 1 }}>Filter</th>
+                  <th style={{ color: dim, paddingRight: 16, paddingBottom: 6, fontWeight: 600, fontSize: 10, textTransform: 'uppercase', letterSpacing: 1 }}>Setting</th>
+                  <th style={{ color: dim, paddingBottom: 6, fontWeight: 600, fontSize: 10, textTransform: 'uppercase', letterSpacing: 1 }}>Actual</th>
+                </tr>
+              </thead>
+              <tbody>
+                <Row label="Types" filter={[config.spreadTypes?.bull_call && 'Bull Call', config.spreadTypes?.bear_put && 'Bear Put'].filter(Boolean).join(', ') || 'None'} actual={null} />
+                <Row label="DTE" filter={`${config.dte.min}–${config.dte.max} days`} actual={`${fmtDate(dteMinDate)} – ${fmtDate(dteMaxDate)}`} />
+                <Row label="Strike range" filter={`±${config.strikes.range_pct}% of price`} actual={strikeMin ? `${strikeMin} – ${strikeMax}` : null} />
+                <Row label="Spread width" filter={`${config.spreads.min_width}–${config.spreads.max_width} strikes`} actual={null} />
+                <Row label="Short delta" filter={`${config.greeks.min_short_delta}–${config.greeks.max_short_delta}`} actual={null} />
+                <Row label="Min OI / volume" filter={`${config.strikes.min_open_interest} / ${config.strikes.min_volume}`} actual={null} />
+              </tbody>
+            </table>
+            <p style={{ marginTop: 12, fontSize: 12, color: '#555b6e' }}>Click ⚙ Config to relax any of these filters.</p>
+          </div>
+        );
+      })()}
 
       <FormulaBreakdownPanel open={formulaOpen} onClose={() => setFormulaOpen(false)} trade={formulaTrade} symbol={activeSymbol} weights={config.weights} />
+
 
       <ConfigDrawer
         mode="verticals"

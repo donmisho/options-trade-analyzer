@@ -52,10 +52,7 @@ class Settings(BaseSettings):
     tradier_environment: str = "sandbox"  # "sandbox" or "production"
 
     # --- Schwab (non-secret settings) ---
-    # App key and secret can also come from SecretsManager / Key Vault
-    # These .env values are the fallback for local dev
-    schwab_app_key: Optional[str] = None
-    schwab_app_secret: Optional[str] = None
+    # App key and secret come from Key Vault ("schwab-app-key", "schwab-app-secret")
     schwab_callback_url: str = "https://127.0.0.1:8000/api/v1/auth/schwab/callback"
 
     # --- SSL for local HTTPS (Schwab OAuth requires it) ---
@@ -81,10 +78,15 @@ class Settings(BaseSettings):
     # --- Anthropic Direct ---
     anthropic_api_key: Optional[str] = None
 
-    # --- Azure Foundry ---
+    # --- Azure Foundry (SDK-based, used by agent routes) ---
     foundry_resource: Optional[str] = None
     foundry_deployment: str = "claude-sonnet-4-6"
     foundry_api_key: Optional[str] = None
+
+    # --- Azure Foundry (httpx-based, used by evaluation routes for structured output) ---
+    # Full URL: https://<resource>.services.ai.azure.com/anthropic/v1/messages
+    foundry_endpoint: Optional[str] = None
+    foundry_model: str = "claude-sonnet-4-6"
 
     model_config = {
         "env_file": ".env",

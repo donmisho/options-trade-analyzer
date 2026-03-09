@@ -273,28 +273,22 @@ class SchwabTokenManager:
     # ------------------------------------------------------------------
 
     def _get_app_key(self) -> str:
-        """Retrieve Schwab app key from secrets or config."""
-        key = (
-            self.secrets.get("schwab-app-key")
-            or settings.schwab_app_key
-        )
+        """Retrieve Schwab app key from Key Vault (falls back to SCHWAB_APP_KEY env var)."""
+        key = self.secrets.get("schwab-app-key")
         if not key:
             raise Exception(
                 "Schwab app key not configured. "
-                "Set SCHWAB_APP_KEY in .env or add schwab-app-key to Key Vault."
+                "Add schwab-app-key to Key Vault."
             )
         return key
 
     def _get_app_secret(self) -> str:
-        """Retrieve Schwab app secret from secrets or config."""
-        secret = (
-            self.secrets.get("schwab-app-secret")
-            or settings.schwab_app_secret
-        )
+        """Retrieve Schwab app secret from Key Vault (falls back to SCHWAB_APP_SECRET env var)."""
+        secret = self.secrets.get("schwab-app-secret")
         if not secret:
             raise Exception(
                 "Schwab app secret not configured. "
-                "Set SCHWAB_APP_SECRET in .env or add schwab-app-secret to Key Vault."
+                "Add schwab-app-secret to Key Vault."
             )
         return secret
 

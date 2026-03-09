@@ -359,9 +359,12 @@ async def deep_dive(
     user_id = user.get("sub")
     trade_key = _make_trade_key(request.symbol, request.spread_label, request.expiration)
 
-    # Check for prior recommendation
+    # Check for prior recommendation scoped to this user
     result_prior = await db.execute(
-        select(TradeRecommendation).where(TradeRecommendation.trade_key == trade_key)
+        select(TradeRecommendation).where(
+            TradeRecommendation.trade_key == trade_key,
+            TradeRecommendation.user_id == user_id,
+        )
     )
     prior = result_prior.scalar_one_or_none()
     had_prior = prior is not None
@@ -480,8 +483,8 @@ async def deep_dive(
         prior.prompt_version = skill.prompt_version
         prior.updated_at = now
     else:
-        parts = trade_key.split(":", 2)
         db.add(TradeRecommendation(
+            user_id=user_id,
             trade_key=trade_key,
             symbol=request.symbol,
             spread_label=request.spread_label,
@@ -651,8 +654,9 @@ async def list_recommendations(
     user: dict = Depends(require_read),
     db: AsyncSession = Depends(get_db),
 ):
-    """List saved trade verdicts, optionally filtered by symbol."""
-    q = select(TradeRecommendation)
+    """List saved trade verdicts for the current user, optionally filtered by symbol."""
+    user_id = user.get("sub")
+    q = select(TradeRecommendation).where(TradeRecommendation.user_id == user_id)
     if symbol:
         q = q.where(TradeRecommendation.symbol == symbol.upper())
     q = q.order_by(TradeRecommendation.updated_at.desc())
@@ -666,8 +670,8 @@ async def get_recommendation(
     user: dict = Depends(require_read),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get a single saved verdict by trade key."""
-    row = await _fetch_rec(db, trade_key)
+    """Get a single saved verdict by trade key for the current user."""
+    row = await _fetch_rec(db, trade_key, user_id=user.get("sub"))
     if not row:
         raise HTTPException(status_code=404, detail=f"No recommendation for {trade_key}")
     return _rec_to_out(row)
@@ -686,8 +690,8 @@ async def save_recommendation(
     user: dict = Depends(require_read),
     db: AsyncSession = Depends(get_db),
 ):
-    """Manually save or update a verdict for a trade key."""
-    row = await _fetch_rec(db, trade_key)
+    """Manually save or update a verdict for a trade key for the current user."""
+    row = await _fetch_rec(db, trade_key, user_id=user.get("sub"))
     if not row:
         raise HTTPException(status_code=404, detail=f"No recommendation for {trade_key}")
     row.verdict = body.verdict
@@ -715,10 +719,11 @@ async def delete_recommendation(
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
-async def _fetch_rec(db: AsyncSession, trade_key: str) -> Optional[TradeRecommendation]:
-    result = await db.execute(
-        select(TradeRecommendation).where(TradeRecommendation.trade_key == trade_key)
-    )
+async def _fetch_rec(db: AsyncSession, trade_key: str, user_id: Optional[str] = None) -> Optional[TradeRecommendation]:
+    q = select(TradeRecommendation).where(TradeRecommendation.trade_key == trade_key)
+    if user_id:
+        q = q.where(TradeRecommendation.user_id == user_id)
+    result = await db.execute(q)
     return result.scalar_one_or_none()
 
 

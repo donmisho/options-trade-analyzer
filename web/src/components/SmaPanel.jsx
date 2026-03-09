@@ -112,7 +112,7 @@ export default function SmaPanel({ candles, smaPeriods, onPeriodsChange, symbol 
               <div key={k} style={{ display: "flex", alignItems: "center", gap: 5 }}>
                 <div style={{ width: 10, height: 2.5, borderRadius: 1, backgroundColor: c }} />
                 <span style={{ fontSize: 10, color: C.textDim }}>{l}</span>
-                <input type="number" value={smaPeriods[k]} min={2} max={500} onChange={(e) => { const v = parseInt(e.target.value); if (!isNaN(v) && v >= 2) onPeriodsChange({ ...smaPeriods, [k]: v }); }}
+                <input type="number" value={smaPeriods[k]} onChange={(e) => { const v = parseInt(e.target.value); if (!isNaN(v)) onPeriodsChange({ ...smaPeriods, [k]: v }); }}
                   style={{ width: 48, padding: "3px 5px", borderRadius: 4, border: `1px solid ${C.border}`, backgroundColor: C.bg, color: c, fontSize: 12, fontFamily: mono, outline: "none", textAlign: "center" }} />
               </div>))}
             <span style={{ fontSize: 10, color: C.textMuted }}>Common: 8/21/50 · 10/50/200</span>

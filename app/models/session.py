@@ -93,15 +93,18 @@ async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit
 
 async def init_db():
     """
-    Create all tables. Called once at app startup.
+    Create all tables then run additive migrations. Called once at app startup.
 
     WHY run_sync: SQLAlchemy's metadata.create_all is synchronous,
     so we need to wrap it in run_sync to call it from async context.
     """
+    from app.models.migrations import run_migrations
     try:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         logger.info("Database tables initialized successfully")
+        await run_migrations(engine)
+        logger.info("Database migrations applied")
     except Exception as e:
         logger.error(f"Failed to initialize database: {e}")
         raise

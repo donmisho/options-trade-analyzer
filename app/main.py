@@ -42,6 +42,7 @@ from app.api.user_routes import router as user_router
 from app.api.entra_auth_routes import router as entra_auth_router
 from app.api.agent_routes import router as agent_router, init_agent_routes
 from app.providers.ai import AnthropicAdapter, FoundryAdapter
+from app.ai.foundry_adapter import FoundryEvalAdapter
 from app.agents.telemetry import init_agent_telemetry
 
 
@@ -158,29 +159,44 @@ async def lifespan(app: FastAPI):
 
     logger.info(f"Provider factory initialized. Available: {provider_factory.list_providers()}")
 
-    # 6. Initialize AI provider (for trade evaluations)
+    # 6. Initialize AI provider for agent routes (SDK-based: triage, deep-dive, followup)
     if settings.ai_provider == "foundry":
         ai_provider = FoundryAdapter(
             resource=settings.foundry_resource,
             deployment=settings.foundry_deployment,
-            api_key=settings.foundry_api_key,
+            api_key=secrets_manager.get("foundry-api-key"),
         )
-        logger.info(f"AI provider: Azure Foundry ({settings.foundry_resource})")
+        logger.info(f"Agent AI provider: Azure Foundry SDK ({settings.foundry_resource})")
     else:
-        api_key = (
-            settings.anthropic_api_key
-            or secrets_manager.get("anthropic-api-key")
-        )
+        api_key = secrets_manager.get("anthropic-api-key")
         if not api_key:
-            logger.warning("AI provider: No API key found — trade evaluation disabled")
+            logger.warning("Agent AI provider: No API key found — agent routes disabled")
             ai_provider = None
         else:
             ai_provider = AnthropicAdapter(api_key=api_key)
-            logger.info("AI provider: Anthropic (direct)")
+            logger.info("Agent AI provider: Anthropic (direct)")
 
     if ai_provider:
-        init_evaluation_routes(ai_provider)
         init_agent_routes(ai_provider)
+
+    # 6b. Initialize evaluation adapter (httpx-based, structured outputs via output_format)
+    #     API key comes from Key Vault ("foundry-api-key") — no .env needed
+    #     Endpoint is non-secret config: set FOUNDRY_ENDPOINT in .env or App Service settings
+    foundry_endpoint = settings.foundry_endpoint
+    foundry_api_key = secrets_manager.get("foundry-api-key")
+    if foundry_endpoint and foundry_api_key:
+        eval_adapter = FoundryEvalAdapter(
+            api_key=foundry_api_key,
+            endpoint=foundry_endpoint,
+            model=settings.foundry_model,
+        )
+        init_evaluation_routes(eval_adapter)
+        logger.info(f"Evaluation AI provider: Foundry httpx ({foundry_endpoint})")
+    else:
+        logger.warning(
+            "Evaluation AI provider: FOUNDRY_ENDPOINT or FOUNDRY_API_KEY not set — "
+            "/evaluate/trade will return 503"
+        )
 
     # 7. Initialize OpenTelemetry → Application Insights (agent observability)
     appinsights_cs = secrets_manager.get("applicationinsights-connection-string")

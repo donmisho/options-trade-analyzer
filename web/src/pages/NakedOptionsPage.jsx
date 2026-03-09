@@ -47,11 +47,11 @@ function computeAlignment(price, smaShort, smaMid, smaLong) {
 }
 
 // --- Sortable header ---
-function SortTh({ label, sortKey, currentSort, onSort, style, num }) {
+function SortTh({ label, sortKey, currentSort, onSort, style, title }) {
   const isActive = currentSort.key === sortKey;
   const arrow = isActive ? (currentSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
   return (
-    <th onClick={() => onSort(sortKey)} style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap', ...(num ? { textAlign: 'right' } : {}), ...style }}>
+    <th onClick={() => onSort(sortKey)} title={title} style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap', textAlign: 'center', ...style }}>
       {label}{arrow && <span style={{ fontSize: 9, opacity: 0.7 }}>{arrow}</span>}
     </th>
   );
@@ -363,18 +363,18 @@ export default function NakedOptionsPage() {
           <table>
             <thead>
               <tr>
-                <th colSpan={2} style={{ fontSize: 10, color: C.textDim, fontWeight: 600, whiteSpace: 'nowrap' }}>Claude</th>
-                <th style={{ width: 28, fontSize: 10, color: C.textDim, fontWeight: 600 }}>Fav</th>
-                <SortTh label="Type" sortKey="option_type" currentSort={sort} onSort={handleSort} />
-                <SortTh label="Strike" sortKey="strike" currentSort={sort} onSort={handleSort} style={{ textAlign: 'center' }} />
-                <SortTh label="Exp" sortKey="expiration" currentSort={sort} onSort={handleSort} style={{ textAlign: 'center' }} />
-                <SortTh label="DTE" sortKey="days_to_exp" currentSort={sort} onSort={handleSort} num />
-                <SortTh label="Premium" sortKey="premium_dollars" currentSort={sort} onSort={handleSort} num />
-                <SortTh label="Delta" sortKey="delta" currentSort={sort} onSort={handleSort} num />
-                <SortTh label="Theta/day" sortKey="theta_per_day_dollars" currentSort={sort} onSort={handleSort} num />
-                <SortTh label="IV" sortKey="iv" currentSort={sort} onSort={handleSort} num />
-                <SortTh label="Breakeven" sortKey="breakeven" currentSort={sort} onSort={handleSort} num />
-                <SortTh label="Score" sortKey="composite_score" currentSort={sort} onSort={handleSort} />
+                <th colSpan={2} title="Select and evaluate with Claude" style={{ fontSize: 10, color: C.claudeAccent, fontWeight: 600, whiteSpace: 'nowrap', textAlign: 'center', backgroundColor: C.claudeDim, borderRight: `1px solid ${C.claudeBorder}` }}>Claude</th>
+                <th title="Save trade to favorites" style={{ width: 28, fontSize: 10, color: C.textDim, fontWeight: 600, textAlign: 'center' }}>FAV</th>
+                <SortTh label="Type" sortKey="option_type" currentSort={sort} onSort={handleSort} title="Call or put option" />
+                <SortTh label="Strike" sortKey="strike" currentSort={sort} onSort={handleSort} title="Option strike price" />
+                <SortTh label="Exp" sortKey="expiration" currentSort={sort} onSort={handleSort} title="Option expiration date" />
+                <SortTh label="DTE" sortKey="days_to_exp" currentSort={sort} onSort={handleSort} title="Days until expiration" />
+                <SortTh label="Premium" sortKey="premium_dollars" currentSort={sort} onSort={handleSort} title="Option cost per share" />
+                <SortTh label="Delta" sortKey="delta" currentSort={sort} onSort={handleSort} title="Price sensitivity to underlying" />
+                <SortTh label="Theta/day" sortKey="theta_per_day_dollars" currentSort={sort} onSort={handleSort} title="Daily time decay cost" />
+                <SortTh label="IV" sortKey="iv" currentSort={sort} onSort={handleSort} title="Implied volatility" />
+                <SortTh label="Breakeven" sortKey="breakeven" currentSort={sort} onSort={handleSort} title="Underlying price to break even" />
+                <SortTh label="Score" sortKey="composite_score" currentSort={sort} onSort={handleSort} title="Composite weighted score 0–100" />
                 <th style={{ width: 36 }}></th>
               </tr>
             </thead>
@@ -398,7 +398,7 @@ export default function NakedOptionsPage() {
                       style={{ cursor: 'pointer', accentColor: C.claudeAccent }}
                     />
                   </td>
-                  <td>
+                  <td style={{ borderRight: `1px solid ${C.claudeBorder}` }}>
                     <button
                       onClick={e => { e.stopPropagation(); openAgent([agentTrade], getMarketContext()); }}
                       title={priorRec ? `Claude: ${priorRec.verdict} — click to re-evaluate` : 'Ask Claude about this trade'}
@@ -414,12 +414,12 @@ export default function NakedOptionsPage() {
                   <td><span className={`type-badge ${type === 'call' ? 'type-bull' : 'type-bear'}`}>{type === 'call' ? 'Call' : 'Put'}</span></td>
                   <td className="mono text-cyan" style={{ textAlign: 'center' }}>{c.strike}</td>
                   <td className="mono text-muted" style={{ textAlign: 'center' }}>{c.expiration}</td>
-                  <td className="mono">{c.days_to_exp}</td>
-                  <td className="mono">{c.premium_dollars.toFixed(2)}</td>
-                  <td className="mono text-green">{c.delta.toFixed(2)}</td>
-                  <td className="mono text-red">−{c.theta_per_day_dollars.toFixed(2)}</td>
-                  <td className="mono">{c.iv.toFixed(1)}%</td>
-                  <td className="mono">{c.breakeven.toFixed(2)}</td>
+                  <td className="mono" style={{ textAlign: 'center' }}>{c.days_to_exp}</td>
+                  <td className="mono" style={{ textAlign: 'center' }}>{c.premium_dollars.toFixed(2)}</td>
+                  <td className="mono text-green" style={{ textAlign: 'center' }}>{c.delta.toFixed(2)}</td>
+                  <td className="mono text-red" style={{ textAlign: 'center' }}>−{c.theta_per_day_dollars.toFixed(2)}</td>
+                  <td className="mono" style={{ textAlign: 'center' }}>{c.iv.toFixed(1)}%</td>
+                  <td className="mono" style={{ textAlign: 'center' }}>{c.breakeven.toFixed(2)}</td>
                   <td><ScoreBar score={c.composite_score} /></td>
                   <td>
                     <button onClick={(e) => { e.stopPropagation(); setFormulaTrade(buildFormulaTrade(c)); setFormulaOpen(true); }}
@@ -433,13 +433,48 @@ export default function NakedOptionsPage() {
         </div>
       )}
 
-      {!loading && !error && results.length === 0 && (
-        <div className="empty-state">
-          <div className="empty-icon">📊</div>
-          <h3>No candidates found</h3>
-          <p>No options matched the current filters for {activeSymbol}.</p>
-        </div>
-      )}
+      {!loading && !error && results.length === 0 && (() => {
+        const price = underlyingPrice;
+        const pct = config.strikes.range_pct / 100;
+        const strikeMin = price > 0 ? (price * (1 - pct)).toFixed(2) : null;
+        const strikeMax = price > 0 ? (price * (1 + pct)).toFixed(2) : null;
+        const today = new Date();
+        const fmtDate = d => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        const dteMinDate = new Date(today); dteMinDate.setDate(today.getDate() + config.dte.min);
+        const dteMaxDate = new Date(today); dteMaxDate.setDate(today.getDate() + config.dte.max);
+        const dim = '#8b90a0', lit = '#e4e7ef', act = '#f59e0b';
+        const Row = ({ label, filter, actual }) => (
+          <tr>
+            <td style={{ color: dim, paddingRight: 16, paddingBottom: 5 }}>{label}</td>
+            <td style={{ color: lit, paddingRight: 16, paddingBottom: 5 }}>{filter}</td>
+            <td style={{ color: act, paddingBottom: 5, fontWeight: actual ? 600 : 400 }}>{actual || ''}</td>
+          </tr>
+        );
+        return (
+          <div className="empty-state">
+            <div className="empty-icon">📊</div>
+            <h3>No candidates found for {activeSymbol}</h3>
+            <p style={{ marginBottom: 12 }}>No options passed all filters. Active filters that commonly exclude trades:</p>
+            <table style={{ fontSize: 12, borderCollapse: 'collapse', margin: '0 auto', textAlign: 'left' }}>
+              <thead>
+                <tr>
+                  <th style={{ color: dim, paddingRight: 16, paddingBottom: 6, fontWeight: 600, fontSize: 10, textTransform: 'uppercase', letterSpacing: 1 }}>Filter</th>
+                  <th style={{ color: dim, paddingRight: 16, paddingBottom: 6, fontWeight: 600, fontSize: 10, textTransform: 'uppercase', letterSpacing: 1 }}>Setting</th>
+                  <th style={{ color: dim, paddingBottom: 6, fontWeight: 600, fontSize: 10, textTransform: 'uppercase', letterSpacing: 1 }}>Actual</th>
+                </tr>
+              </thead>
+              <tbody>
+                <Row label="Types" filter={[showCalls && 'Calls', showPuts && 'Puts'].filter(Boolean).join(', ') || 'None'} actual={null} />
+                <Row label="DTE" filter={`${config.dte.min}–${config.dte.max} days`} actual={`${fmtDate(dteMinDate)} – ${fmtDate(dteMaxDate)}`} />
+                <Row label="Strike range" filter={`±${config.strikes.range_pct}% of price`} actual={strikeMin ? `${strikeMin} – ${strikeMax}` : null} />
+                <Row label="Delta" filter={`${config.greeks.min_short_delta}–${config.greeks.max_short_delta}`} actual={null} />
+                <Row label="Min OI / volume" filter={`${config.strikes.min_open_interest} / ${config.strikes.min_volume}`} actual={null} />
+              </tbody>
+            </table>
+            <p style={{ marginTop: 12, fontSize: 12, color: '#555b6e' }}>Click ⚙ Config to relax any of these filters.</p>
+          </div>
+        );
+      })()}
 
       {/* Formula Breakdown slideout */}
       <FormulaBreakdownPanel open={formulaOpen} onClose={() => setFormulaOpen(false)} trade={formulaTrade} symbol={activeSymbol} weights={config.weights} />

@@ -329,7 +329,7 @@ class AgentRunLog(Base):
 
 class TradeRecommendation(Base):
     """
-    Persisted AI recommendations, one row per trade key.
+    Persisted AI recommendations, one row per (user, trade_key).
 
     WHY: The agent_run_log stores every invocation. This table stores the
     current recommendation for each trade — the "what Claude said last" record.
@@ -337,11 +337,16 @@ class TradeRecommendation(Base):
     before asking for a new one (enabling triage vs deep-dive stage logic).
 
     Linked back to agent_run_log via run_id for full traceability.
+
+    NOTE: user_id was added in migration v2. Existing rows have user_id=NULL.
+    The unique constraint on trade_key is kept for backward compat; the
+    application layer now scopes queries by user_id when available.
     """
     __tablename__ = "trade_recommendations"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    trade_key = Column(String(255), nullable=False, unique=True, index=True)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=True, index=True)
+    trade_key = Column(String(255), nullable=False, index=True)
     symbol = Column(String(20), nullable=False)
     spread_label = Column(String(100), nullable=False)
     expiration = Column(String(20), nullable=False)
@@ -358,3 +363,183 @@ class TradeRecommendation(Base):
 
     evaluated_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "trade_key", name="uq_trade_recommendations_user_key"),
+        Index("ix_trade_recommendations_user_symbol", "user_id", "symbol"),
+    )
+
+
+# ─── Market Data Persistence ──────────────────────────────────────────────────
+
+
+class SymbolQuote(Base):
+    """
+    Snapshot of a stock quote at the moment it was requested.
+
+    Every call to GET /market/quote/{symbol} writes one row. This creates
+    a price history keyed to the user who requested it, enabling later
+    analysis of how price moved relative to trade decisions.
+    """
+    __tablename__ = "symbol_quotes"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    symbol = Column(String(10), nullable=False)
+
+    price = Column(Float, nullable=True)
+    bid = Column(Float, nullable=True)
+    ask = Column(Float, nullable=True)
+    change = Column(Float, nullable=True)
+    change_pct = Column(Float, nullable=True)
+    volume = Column(Integer, nullable=True)
+    provider = Column(String(50), nullable=True)
+
+    captured_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_symbol_quotes_user_symbol_time", "user_id", "symbol", "captured_at"),
+        Index("ix_symbol_quotes_symbol_time", "symbol", "captured_at"),
+    )
+
+
+class OptionChainSnapshot(Base):
+    """
+    Full raw option chain captured at the time of an analysis request.
+
+    Stored as a JSON blob alongside the underlying price and metadata.
+    Referenced by AnalysisRun so the exact input data can be reconstructed
+    for any historical analysis — critical for algorithm backtesting.
+    """
+    __tablename__ = "option_chain_snapshots"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    symbol = Column(String(10), nullable=False)
+    underlying_price = Column(Float, nullable=True)
+    provider = Column(String(50), nullable=True)
+    contract_count = Column(Integer, nullable=True)  # len(contracts) for quick filtering
+    chain_data = Column(JSON, nullable=False)          # full list of contracts
+    captured_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_option_chain_snapshots_user_symbol", "user_id", "symbol", "captured_at"),
+        Index("ix_option_chain_snapshots_symbol_time", "symbol", "captured_at"),
+    )
+
+
+# ─── Analysis Run Persistence ─────────────────────────────────────────────────
+
+
+class AnalysisRun(Base):
+    """
+    One row per call to the analysis engine (/analyze/verticals or /analyze/long-calls).
+
+    Records the exact config and scoring weights used so results can be
+    reproduced and compared as the algorithm evolves. The filter_params
+    and scoring_weights columns are the "why these trades scored this way"
+    record — essential for algorithm quality measurement.
+    """
+    __tablename__ = "analysis_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    symbol = Column(String(10), nullable=False)
+    analysis_type = Column(String(20), nullable=False)  # "verticals" | "naked"
+    underlying_price = Column(Float, nullable=True)
+    provider = Column(String(50), nullable=True)
+
+    # FK to the raw chain used — nullable because chain capture can fail independently
+    chain_snapshot_id = Column(Integer, ForeignKey("option_chain_snapshots.id"), nullable=True)
+
+    # Exact parameters used (snapshot so algo changes don't alter historical records)
+    scoring_weights = Column(JSON, nullable=False)
+    filter_params = Column(JSON, nullable=False)
+
+    # Outcome counts
+    result_count = Column(Integer, nullable=True)   # rows returned to frontend (capped)
+    total_valid = Column(Integer, nullable=True)    # total that passed filters before cap
+
+    ran_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    # Relationships
+    analyzed_trades = relationship("AnalyzedTrade", back_populates="run")
+
+    __table_args__ = (
+        Index("ix_analysis_runs_user_symbol", "user_id", "symbol", "ran_at"),
+        Index("ix_analysis_runs_symbol_time", "symbol", "ran_at"),
+    )
+
+
+class AnalyzedTrade(Base):
+    """
+    Every individual trade scored during an analysis run.
+
+    This is the core algorithm quality dataset. By storing the full score
+    breakdown (each component score before weighting) alongside the weights
+    used, we can:
+      - Replay any historical analysis exactly
+      - Measure how composite scores correlated with actual price outcomes
+      - A/B test different weighting schemes against the same chain data
+      - Track how a specific strike/expiration scored across multiple sessions
+
+    Covers both vertical spreads and naked options in one table.
+    Type-specific fields are nullable (e.g. short_strike is NULL for naked options).
+    """
+    __tablename__ = "analyzed_trades"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(Integer, ForeignKey("analysis_runs.id"), nullable=False, index=True)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    symbol = Column(String(10), nullable=False)
+    analysis_type = Column(String(20), nullable=False)  # "vertical" | "naked"
+
+    # Trade identity
+    spread_type = Column(String(20), nullable=True)    # bull_call | bear_put | long_call | long_put
+    long_strike = Column(Float, nullable=True)          # buy leg (verticals) or strike (naked)
+    short_strike = Column(Float, nullable=True)         # sell leg (verticals only)
+    option_type = Column(String(10), nullable=True)     # call | put
+    expiration = Column(String(20), nullable=True)
+    dte = Column(Integer, nullable=True)
+
+    # Market context at time of analysis
+    underlying_price = Column(Float, nullable=True)
+
+    # Pricing (vertical spreads)
+    net_debit = Column(Float, nullable=True)
+    max_profit = Column(Float, nullable=True)
+    max_loss = Column(Float, nullable=True)
+    breakeven = Column(Float, nullable=True)
+    rr_ratio = Column(Float, nullable=True)
+    prob_of_profit = Column(Float, nullable=True)
+    ev_raw = Column(Float, nullable=True)
+
+    # Naked option specifics
+    premium_dollars = Column(Float, nullable=True)
+    delta = Column(Float, nullable=True)
+    theta_per_day = Column(Float, nullable=True)
+    iv = Column(Float, nullable=True)
+
+    # Liquidity
+    long_volume = Column(Integer, nullable=True)
+    short_volume = Column(Integer, nullable=True)
+    long_oi = Column(Integer, nullable=True)
+    short_oi = Column(Integer, nullable=True)
+
+    # Scores — the full breakdown before weighting, not just the composite
+    composite_score = Column(Float, nullable=False)
+    score_breakdown = Column(JSON, nullable=False)
+    # score_breakdown shape (verticals): {ev_score, rr_score, prob_score, liquidity_score, theta_score}
+    # score_breakdown shape (naked):     {delta_score, theta_score, iv_score, rr_score, liquidity_score}
+    scoring_weights = Column(JSON, nullable=False)  # weights used (duplicated from run for self-contained rows)
+
+    captured_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    # Relationships
+    run = relationship("AnalysisRun", back_populates="analyzed_trades")
+
+    __table_args__ = (
+        Index("ix_analyzed_trades_run", "run_id"),
+        Index("ix_analyzed_trades_user_symbol", "user_id", "symbol", "captured_at"),
+        Index("ix_analyzed_trades_symbol_expiry", "symbol", "expiration"),
+    )

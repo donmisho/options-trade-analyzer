@@ -29,10 +29,9 @@ PROVIDER_REGISTRY = {
     "tradier": {
         "capabilities": ["market_data", "account", "trading"],
         "market_data": lambda secrets, user_id, env: TradierMarketData(
-            token=secrets.get("tradier-api-token", user_id=user_id) 
-                    or secrets.get("tradier-api-token")
-                    or secrets.get("tradier_api_token"),  # Also check underscore variant from .env
-                    environment=env or settings.tradier_environment,
+            token=secrets.get("tradier-api-token", user_id=user_id)
+                    or secrets.get("tradier-api-token"),
+            environment=env or settings.tradier_environment,
         ),
         # Account and Trading adapters will be added later
         # "account": lambda secrets, user_id, env: TradierAccount(...),

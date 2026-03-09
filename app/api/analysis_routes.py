@@ -18,12 +18,17 @@ too complex for query strings and semantically these are "compute
 this for me" requests, not simple resource retrievals.
 """
 
+import logging
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from typing import Optional
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require_read
 from app.providers.factory import ProviderFactory
+from app.models.session import get_db
+from app.models.database import OptionChainSnapshot, AnalysisRun, AnalyzedTrade
 from app.analysis.vertical_engine import (
     VerticalSpreadEngine, ScoringWeights, SpreadFilters
 )
@@ -31,6 +36,8 @@ from app.analysis.long_call_engine import (
     LongCallEngine, LongCallWeights, LongCallFilters
 )
 from app.analysis.directional_engine import DirectionalEngine, Thesis
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/analyze", tags=["Analysis"])
 
@@ -117,17 +124,18 @@ async def _fetch_chain(
     max_dte: int = 60,
     strike_range_pct: float = 10.0,
     option_type: Optional[str] = None,
-) -> tuple[list[dict], float]:
+) -> tuple[list[dict], float, dict]:
     """
     Fetch options chain and underlying price from the provider.
-    Returns (contracts, underlying_price).
-    
+    Returns (contracts, underlying_price, raw_chain_dict).
+
     WHY this is a shared helper: All three endpoints need chain data.
     Extracting it avoids duplicating the provider lookup + error handling.
+    The raw chain dict is returned so callers can persist it.
     """
     factory = _get_factory()
     provider = factory.get_market_data("tradier", user_id=user.get("sub"))
-    
+
     try:
         chain_data = await provider.get_chain(
             symbol=symbol.upper(),
@@ -138,10 +146,10 @@ async def _fetch_chain(
         )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Provider error: {str(e)}")
-    
+
     contracts = chain_data.get("contracts", [])
     underlying_price = chain_data.get("underlying_price", 0)
-    
+
     if not contracts:
         raise HTTPException(
             status_code=404,
@@ -152,8 +160,38 @@ async def _fetch_chain(
             status_code=502,
             detail=f"Could not determine underlying price for {symbol.upper()}"
         )
-    
-    return contracts, underlying_price
+
+    return contracts, underlying_price, chain_data
+
+
+async def _persist_chain_snapshot(
+    db: AsyncSession,
+    user_id: str,
+    symbol: str,
+    underlying_price: float,
+    chain_data: dict,
+    provider: str = "unknown",
+) -> Optional[int]:
+    """
+    Persist an option chain snapshot and return its id.
+    Returns None if persistence fails (never blocks the response).
+    """
+    try:
+        contracts = chain_data.get("contracts", [])
+        snapshot = OptionChainSnapshot(
+            user_id=user_id,
+            symbol=symbol,
+            underlying_price=underlying_price,
+            provider=provider,
+            contract_count=len(contracts),
+            chain_data=contracts,
+        )
+        db.add(snapshot)
+        await db.flush()  # gets the id without committing
+        return snapshot.id
+    except Exception as e:
+        log.warning(f"Failed to persist chain snapshot for {symbol}: {e}")
+        return None
 
 
 # ─── Endpoints ────────────────────────────────────────────────────
@@ -162,21 +200,26 @@ async def _fetch_chain(
 async def analyze_verticals(
     req: VerticalRequest,
     user: dict = Depends(require_read),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Score and rank all valid vertical spreads for a symbol.
-    
+
     Replaces the "Vertical Spreads" sheet from the Excel tool.
     Returns spreads ranked by composite score (weighted combination
     of EV, reward:risk, probability, liquidity, and theta efficiency).
+    Every run persists the chain snapshot, run parameters, and all scored trades.
     """
-    contracts, price = await _fetch_chain(
+    user_id = user.get("sub")
+    sym = req.symbol.upper()
+
+    contracts, price, chain_data = await _fetch_chain(
         req.symbol, user,
         min_dte=req.min_dte,
         max_dte=req.max_dte,
         strike_range_pct=req.strike_range_pct,
     )
-    
+
     # Build weights (use overrides if provided, else defaults)
     weights = ScoringWeights()
     if req.ev_weight is not None:
@@ -189,25 +232,103 @@ async def analyze_verticals(
         weights.liquidity = req.liq_weight
     if req.theta_weight is not None:
         weights.theta_efficiency = req.theta_weight
-    
+
     try:
         weights.validate()
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
-    
+
     filters = SpreadFilters(
         spread_types=req.spread_types,
         max_spread_width=req.max_spread_width,
     )
     engine = VerticalSpreadEngine(weights=weights, filters=filters)
-    
+
     result = engine.analyze(
         contracts=contracts,
         underlying_price=price,
         max_results=req.max_results,
     )
-    
-    result["symbol"] = req.symbol.upper()
+    result["symbol"] = sym
+
+    # ── Persist analysis data (never block the response on failure) ──
+    try:
+        now = datetime.now(timezone.utc)
+        weights_dict = {
+            "expected_value": weights.expected_value,
+            "reward_risk": weights.reward_risk,
+            "probability": weights.probability,
+            "liquidity": weights.liquidity,
+            "theta_efficiency": weights.theta_efficiency,
+        }
+        filter_dict = {
+            "spread_types": req.spread_types,
+            "min_dte": req.min_dte,
+            "max_dte": req.max_dte,
+            "strike_range_pct": req.strike_range_pct,
+            "min_spread_width": req.min_spread_width,
+            "max_spread_width": req.max_spread_width,
+        }
+
+        chain_id = await _persist_chain_snapshot(db, user_id, sym, price, chain_data)
+
+        spreads = result.get("spreads", [])
+        run = AnalysisRun(
+            user_id=user_id,
+            symbol=sym,
+            analysis_type="verticals",
+            underlying_price=price,
+            chain_snapshot_id=chain_id,
+            scoring_weights=weights_dict,
+            filter_params=filter_dict,
+            result_count=len(spreads),
+            total_valid=result.get("total_valid", len(spreads)),
+            ran_at=now,
+        )
+        db.add(run)
+        await db.flush()
+
+        for s in spreads:
+            db.add(AnalyzedTrade(
+                run_id=run.id,
+                user_id=user_id,
+                symbol=sym,
+                analysis_type="vertical",
+                spread_type=s.get("spread_type"),
+                long_strike=s.get("long_strike"),
+                short_strike=s.get("short_strike"),
+                option_type=s.get("option_type"),
+                expiration=s.get("expiration"),
+                dte=s.get("dte"),
+                underlying_price=price,
+                net_debit=s.get("net_debit"),
+                max_profit=s.get("max_profit"),
+                max_loss=s.get("net_debit"),
+                breakeven=s.get("breakeven"),
+                rr_ratio=s.get("reward_risk_ratio"),
+                prob_of_profit=s.get("prob_of_profit"),
+                ev_raw=s.get("ev_raw"),
+                long_volume=s.get("long_volume"),
+                short_volume=s.get("short_volume"),
+                long_oi=s.get("long_oi"),
+                short_oi=s.get("short_oi"),
+                composite_score=s.get("composite_score", 0),
+                score_breakdown={
+                    "ev_score": s.get("ev_score"),
+                    "rr_score": s.get("rr_score"),
+                    "prob_score": s.get("prob_score"),
+                    "liquidity_score": s.get("liquidity_score"),
+                    "theta_score": s.get("theta_score"),
+                },
+                scoring_weights=weights_dict,
+                captured_at=now,
+            ))
+
+        await db.commit()
+    except Exception as e:
+        log.warning(f"Failed to persist vertical analysis run for {sym}: {e}")
+        await db.rollback()
+
     return result
 
 
@@ -215,26 +336,31 @@ async def analyze_verticals(
 async def analyze_long_calls(
     req: LongCallRequest,
     user: dict = Depends(require_read),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Score and rank long call candidates for a symbol.
-    
+
     Replaces the "Naked Calls" sheet from the Excel tool.
     Returns calls ranked by composite score (weighted combination
     of delta alignment, theta efficiency, IV value, R:R, liquidity).
+    Every run persists the chain snapshot, run parameters, and all scored trades.
     """
+    user_id = user.get("sub")
+    sym = req.symbol.upper()
+
     chain_type = None
     if len(req.option_types) == 1:
         chain_type = req.option_types[0]
-    
-    contracts, price = await _fetch_chain(
+
+    contracts, price, chain_data = await _fetch_chain(
         req.symbol, user,
         min_dte=req.min_dte,
         max_dte=req.max_dte,
         strike_range_pct=req.strike_range_pct,
         option_type=chain_type,
     )
-    
+
     filters = LongCallFilters(
         max_premium=req.max_premium or 1500.0,
         min_days_to_exp=req.min_dte,
@@ -242,14 +368,88 @@ async def analyze_long_calls(
         option_types=req.option_types,
     )
     engine = LongCallEngine(filters=filters)
-    
+
     result = engine.analyze(
         contracts=contracts,
         underlying_price=price,
         max_results=req.max_results,
     )
-    
-    result["symbol"] = req.symbol.upper()
+    result["symbol"] = sym
+
+    # ── Persist analysis data (never block the response on failure) ──
+    try:
+        now = datetime.now(timezone.utc)
+        # LongCallEngine uses default weights internally — capture them
+        default_lc_weights = {
+            "delta": 0.30,
+            "theta_efficiency": 0.25,
+            "iv_value": 0.20,
+            "reward_risk": 0.15,
+            "liquidity": 0.10,
+        }
+        filter_dict = {
+            "option_types": req.option_types,
+            "min_dte": req.min_dte,
+            "max_dte": req.max_dte,
+            "strike_range_pct": req.strike_range_pct,
+            "max_premium": req.max_premium,
+        }
+
+        chain_id = await _persist_chain_snapshot(db, user_id, sym, price, chain_data)
+
+        options = result.get("calls") or result.get("options", [])
+        run = AnalysisRun(
+            user_id=user_id,
+            symbol=sym,
+            analysis_type="naked",
+            underlying_price=price,
+            chain_snapshot_id=chain_id,
+            scoring_weights=default_lc_weights,
+            filter_params=filter_dict,
+            result_count=len(options),
+            total_valid=result.get("total_valid", len(options)),
+            ran_at=now,
+        )
+        db.add(run)
+        await db.flush()
+
+        for o in options:
+            opt_type = o.get("option_type", chain_type or "call")
+            db.add(AnalyzedTrade(
+                run_id=run.id,
+                user_id=user_id,
+                symbol=sym,
+                analysis_type="naked",
+                spread_type=f"long_{opt_type}",
+                long_strike=o.get("strike"),
+                option_type=opt_type,
+                expiration=o.get("expiration"),
+                dte=o.get("days_to_exp"),
+                underlying_price=price,
+                premium_dollars=o.get("premium_dollars"),
+                delta=o.get("delta"),
+                theta_per_day=o.get("theta_per_day_dollars"),
+                iv=o.get("iv"),
+                breakeven=o.get("breakeven"),
+                long_volume=o.get("volume"),
+                long_oi=o.get("open_interest"),
+                composite_score=o.get("composite_score", 0),
+                score_breakdown={
+                    "delta_score": o.get("delta_score"),
+                    "theta_score": o.get("theta_score"),
+                    "iv_score": o.get("iv_score"),
+                    "rr_score": o.get("rr_score"),
+                    "liquidity_score": o.get("liquidity_score"),
+                },
+                scoring_weights=default_lc_weights,
+                captured_at=now,
+            ))
+
+        await db.commit()
+    except Exception as e:
+        log.warning(f"Failed to persist naked analysis run for {sym}: {e}")
+        await db.rollback()
+
     return result
 
 

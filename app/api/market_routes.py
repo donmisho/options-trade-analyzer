@@ -8,8 +8,11 @@ MCP tools will call these endpoints too.
 import logging
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import Optional
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.schemas import Quote, OptionChainResponse
+from app.models.session import get_db
+from app.models.database import SymbolQuote
 from app.auth.dependencies import require_read
 from app.providers.factory import ProviderFactory
 from app.core.config import settings
@@ -50,11 +53,13 @@ def _get_provider(factory: ProviderFactory, user_id: Optional[str]):
 async def get_quote(
     symbol: str,
     user: dict = Depends(require_read),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Get current price data for a symbol.
 
     Uses Schwab if connected (includes earnings/dividend dates), falls back to Tradier.
+    Every successful quote is persisted to symbol_quotes for historical analysis.
     """
     factory = _get_factory()
     user_id = user.get("sub")
@@ -63,9 +68,27 @@ async def get_quote(
     try:
         provider = _get_provider(factory, user_id)
         data = await provider.get_quote(sym)
-        return Quote(**data)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Provider error: {str(e)}")
+
+    # Persist quote snapshot (fire-and-forget — never fail the request over this)
+    try:
+        db.add(SymbolQuote(
+            user_id=user_id,
+            symbol=sym,
+            price=data.get("price"),
+            bid=data.get("bid"),
+            ask=data.get("ask"),
+            change=data.get("change"),
+            change_pct=data.get("change_pct"),
+            volume=data.get("volume"),
+            provider=data.get("provider", "unknown"),
+        ))
+        await db.commit()
+    except Exception as e:
+        log.warning(f"Failed to persist quote for {sym}: {e}")
+
+    return Quote(**data)
 
 
 @router.get("/chain/{symbol}", response_model=OptionChainResponse)
