@@ -25,10 +25,10 @@ import Toast from './Toast';
 import TradeAgentPanel from './TradeAgentPanel';
 import './Layout.css';
 
-export default function Layout() {
+export default function Layout({ activeStrategy, setActiveStrategy }) {
   return (
     <div className="app-layout">
-      <Header />
+      <Header activeStrategy={activeStrategy} setActiveStrategy={setActiveStrategy} />
       <Watchlist />
       <main className="main-content">
         <Outlet />

@@ -14,6 +14,7 @@
 import { useState } from 'react';
 import { useMsal } from '@azure/msal-react';
 import { loginRequest } from '../auth/msalConfig';
+import logoSrc from '../assets/options-analyzer-logo.png';
 
 export default function LoginPage() {
   const { instance } = useMsal();
@@ -34,9 +35,12 @@ export default function LoginPage() {
 
   return (
     <div style={styles.page}>
+      <div style={styles.logoWrapper}>
+        <img src={logoSrc} alt="Options Analyzer" style={styles.logo} />
+      </div>
+
       <div style={styles.card}>
-        <h1 style={styles.title}>Options Analyzer</h1>
-        <p style={styles.subtitle}>Internal trading tools — sign in to continue</p>
+        <p style={styles.subtitle}>Property of TM Technologies, LLC.</p>
 
         <button
           onClick={handleSignIn}
@@ -74,6 +78,7 @@ const styles = {
   page: {
     minHeight: '100vh',
     display: 'flex',
+    flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
     background: '#0f1117',
@@ -82,23 +87,26 @@ const styles = {
     background: '#1a1d27',
     border: '1px solid #2a2d3a',
     borderRadius: 12,
-    padding: '48px 40px',
+    padding: '40px 40px',
     width: '100%',
     maxWidth: 400,
     textAlign: 'center',
     boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
   },
-  title: {
-    margin: '0 0 8px',
-    fontSize: 26,
-    fontWeight: 700,
-    color: '#e8eaf0',
-    letterSpacing: '-0.5px',
-  },
   subtitle: {
-    margin: '0 0 36px',
-    fontSize: 14,
+    margin: '0 0 28px',
+    fontSize: 13,
     color: '#6b7280',
+  },
+  logoWrapper: {
+    display: 'flex',
+    justifyContent: 'center',
+    marginBottom: 48,
+  },
+  logo: {
+    width: 960,
+    height: 'auto',
+    display: 'block',
   },
   btn: {
     display: 'flex',

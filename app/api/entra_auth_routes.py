@@ -28,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import get_auth_service
 from app.auth.service import AuthService
 from app.core.config import settings
-from app.models.database import User
+from app.models.database import User, UserConfig
 from app.models.session import get_db
 
 logger = logging.getLogger(__name__)
@@ -168,6 +168,7 @@ async def exchange_entra_token(
             mfa_verified=False,
         )
         db.add(user)
+        db.add(UserConfig(user_id=oid))  # Default config — required for /config to work
         await db.commit()
         await db.refresh(user)
         logger.info(f"Created Entra user: {email} (role={role})")

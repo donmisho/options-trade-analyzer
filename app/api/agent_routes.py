@@ -321,6 +321,9 @@ class DeepDiveRequest(BaseModel):
     exit_underlying_stop: float
     exit_time_stop: int
 
+    # System variable snapshot — records which exit thresholds were active for this eval
+    system_vars: Optional[dict] = None
+
     # Session linkage
     run_id: Optional[str] = None
 
@@ -444,6 +447,7 @@ async def deep_dive(
         "reward_risk_ratio": request.reward_risk_ratio,
         "prob_of_profit": request.prob_of_profit,
         "composite_score": request.composite_score,
+        **({"system_vars": request.system_vars} if request.system_vars else {}),
     }
 
     async with invoke_with_tracing(
@@ -719,10 +723,11 @@ async def delete_recommendation(
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
-async def _fetch_rec(db: AsyncSession, trade_key: str, user_id: Optional[str] = None) -> Optional[TradeRecommendation]:
-    q = select(TradeRecommendation).where(TradeRecommendation.trade_key == trade_key)
-    if user_id:
-        q = q.where(TradeRecommendation.user_id == user_id)
+async def _fetch_rec(db: AsyncSession, trade_key: str, user_id: str) -> Optional[TradeRecommendation]:
+    q = select(TradeRecommendation).where(
+        TradeRecommendation.trade_key == trade_key,
+        TradeRecommendation.user_id == user_id,
+    )
     result = await db.execute(q)
     return result.scalar_one_or_none()
 

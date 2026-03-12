@@ -125,25 +125,14 @@ class PreScreenFlag(BaseModel):
     msg: str
 
 
-class ExitPlanResponse(BaseModel):
-    underlying_alerts: List[dict]
-    spread_value_alerts: List[dict]
-    time_rules: List[str]
-
-
 class EvaluateTradeResponse(BaseModel):
-    # Structured verdict fields (typed — not free text)
-    verdict: str
-    verdict_rationale: str
-    thesis_alignment: str
-    risk_reward_quality: str
-    probability_assessment: str
-    red_flags: List[str]
-    alternatives: List[str]
-    exit_plan: dict
+    # Phase 2.7 Thesis Matrix format
+    verdict: str                 # "EXECUTE" | "WAIT"
+    thesisInsights: dict         # ThesisInsights: 5 grouped rows
+    executionPlan: dict          # ExecutionPlan: criteria + alerts or ladder
 
     # Meta
-    pre_screen_flags: List[PreScreenFlag]
+    pre_screen_flags: List[PreScreenFlag] = []
     provider: str = "foundry"
 
 
@@ -269,13 +258,8 @@ async def evaluate_trade(request: EvaluateTradeRequest, user=Depends(require_rea
 
     return EvaluateTradeResponse(
         verdict=verdict.verdict,
-        verdict_rationale=verdict.verdict_rationale,
-        thesis_alignment=verdict.thesis_alignment,
-        risk_reward_quality=verdict.risk_reward_quality,
-        probability_assessment=verdict.probability_assessment,
-        red_flags=verdict.red_flags,
-        alternatives=verdict.alternatives,
-        exit_plan=verdict.exit_plan.model_dump(),
+        thesisInsights=verdict.thesisInsights.model_dump(),
+        executionPlan=verdict.executionPlan.model_dump(),
         pre_screen_flags=[PreScreenFlag(**f) for f in flags],
         provider="foundry",
     )

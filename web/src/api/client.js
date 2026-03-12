@@ -102,6 +102,10 @@ export async function getQuotes(symbols) {
   return results;
 }
 
+export async function getHistoricalClose(symbol, date) {
+  return apiFetch(`/market/history/${symbol.toUpperCase()}?date=${encodeURIComponent(date)}`);
+}
+
 export async function getOptionChain(symbol, params = {}) {
   const query = new URLSearchParams();
   if (params.min_dte !== undefined) query.set("min_dte", params.min_dte);
@@ -179,6 +183,14 @@ export async function followUpQuestion(question, conversationHistory = []) {
  */
 export async function checkAiHealth() {
   return apiFetch("/evaluate/health");
+}
+
+/**
+ * Generic authenticated POST — used by OptionsTerminal strategy configs
+ * so the terminal doesn't need to know each strategy's named function.
+ */
+export async function apiPost(path, data) {
+  return apiFetch(path, { method: 'POST', body: JSON.stringify(data) });
 }
 
 
@@ -283,12 +295,30 @@ export async function triageTrades(trades, marketContext) {
  * exit_levels are pre-calculated here (per SKILL.md formula) so Claude
  * doesn't have to do math.
  */
-export async function deepDiveTrade(trade, marketContext, priceTarget, runId) {
+export async function deepDiveTrade(trade, marketContext, priceTarget, runId, riskConfig) {
   const debit = trade.net_debit || 0;
   const maxProfit = trade.max_profit || 0;
   const dte = trade.dte || 30;
   const price = marketContext.underlying_price;
   const sma8 = marketContext.sma_8;
+
+  // Risk config from user settings — fall back to SKILL.md defaults if not provided
+  const riskBudget           = riskConfig?.max_risk_per_trade ?? 500;
+  const stopLossPct          = (riskConfig?.stop_loss_pct    ?? 50)  / 100;
+  const profitTargetPct      = (riskConfig?.profit_target_pct ?? 75) / 100;
+
+  // System variables — configurable exit level thresholds
+  const sv = riskConfig?.systemVars || {};
+  const exitWarningPct       = sv.exit_warning_pct          ?? 67;
+  const exitScaleOutPct      = sv.exit_scale_out_pct        ?? 160;
+  const exitUnderlyingStopPct = sv.exit_underlying_stop_pct ?? 1.5;
+  const exitTimeStopDays     = sv.exit_time_stop_days       ?? 10;
+
+  // Exit levels derived from user config + system variables
+  const stopLossDebit    = parseFloat((debit * stopLossPct).toFixed(2));
+  const warningDebit     = parseFloat((debit * (exitWarningPct / 100)).toFixed(2));
+  const scaleOutDebit    = parseFloat((debit * (exitScaleOutPct / 100)).toFixed(2));
+  const fullProfitAmount = parseFloat((maxProfit * profitTargetPct).toFixed(2));
 
   return apiFetch("/agent/deep-dive", {
     method: "POST",
@@ -313,16 +343,22 @@ export async function deepDiveTrade(trade, marketContext, priceTarget, runId) {
       reward_risk_ratio: trade.reward_risk_ratio || 0,
       prob_of_profit: trade.prob_of_profit || 0,
       composite_score: trade.composite_score || null,
-      risk_budget: 500,
+      risk_budget: riskBudget,
       num_contracts: 1,
       total_cost: debit * 100,
-      // Pre-calculated exit levels (SKILL.md formula)
-      exit_stop_loss: parseFloat((debit * 0.50).toFixed(2)),
-      exit_warning: parseFloat((debit * 0.67).toFixed(2)),
-      exit_scale_out: parseFloat((debit * 1.60).toFixed(2)),
-      exit_full_profit: parseFloat((maxProfit * 0.75).toFixed(2)),
-      exit_underlying_stop: parseFloat(Math.min(sma8, price - price * 0.015).toFixed(2)),
-      exit_time_stop: Math.round(Math.max(0, dte - 10)),
+      // Pre-calculated exit levels derived from user risk config
+      exit_stop_loss:       stopLossDebit,
+      exit_warning:         warningDebit,
+      exit_scale_out:       scaleOutDebit,
+      exit_full_profit:     fullProfitAmount,
+      exit_underlying_stop: parseFloat(Math.min(sma8, price - price * (exitUnderlyingStopPct / 100)).toFixed(2)),
+      exit_time_stop:       Math.round(Math.max(0, dte - exitTimeStopDays)),
+      system_vars: {
+        exit_warning_pct:          exitWarningPct,
+        exit_scale_out_pct:        exitScaleOutPct,
+        exit_underlying_stop_pct:  exitUnderlyingStopPct,
+        exit_time_stop_days:       exitTimeStopDays,
+      },
       run_id: runId || null,
     }),
   });

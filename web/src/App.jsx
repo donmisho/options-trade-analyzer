@@ -10,17 +10,24 @@
  * HOW ROUTING WORKS:
  * React Router v6 nested layout: <Layout> renders header + watchlist + <Outlet>.
  * /login and /connect render outside Layout (no header/watchlist).
+ *
+ * Phase 2.7: /verticals and /naked-options now both render OptionsTerminal.
+ * activeStrategy state (lives here) controls which config the terminal uses.
+ * Header tabs set activeStrategy; OptionsTerminal reads it.
  */
 
+import { useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { MsalProvider } from '@azure/msal-react';
 import { msalInstance } from './auth/msalConfig';
 import { AppProvider } from './context/AppContext';
 import Layout from './components/Layout';
-import VerticalsPage from './pages/VerticalsPage';
-import NakedOptionsPage from './pages/NakedOptionsPage';
+import OptionsTerminal from './pages/OptionsTerminal';
+// import VerticalsPage from './pages/VerticalsPage';      // DEPRECATED — retained for reference
+// import NakedOptionsPage from './pages/NakedOptionsPage'; // DEPRECATED — retained for reference
 import DirectionalPage from './pages/DirectionalPage';
 import FavoritesPage from './pages/FavoritesPage';
+import DashboardPage from './pages/DashboardPage';
 import LoginPage from './pages/LoginPage';
 import BrokerConnectPage from './pages/BrokerConnectPage';
 
@@ -49,6 +56,9 @@ function RequireAuth({ children }) {
 }
 
 export default function App() {
+  // activeStrategy drives OptionsTerminal — tabs in Header write to this state
+  const [activeStrategy, setActiveStrategy] = useState('verticals');
+
   return (
     <MsalProvider instance={msalInstance}>
       <BrowserRouter>
@@ -69,17 +79,24 @@ export default function App() {
             element={
               <RequireAuth>
                 <AppProvider>
-                  <Layout />
+                  <Layout activeStrategy={activeStrategy} setActiveStrategy={setActiveStrategy} />
                 </AppProvider>
               </RequireAuth>
             }
           >
-            <Route path="/verticals" element={<VerticalsPage />} />
-            <Route path="/naked-options" element={<NakedOptionsPage />} />
+            {/* Dashboard — default home */}
+            <Route path="/dashboard" element={<DashboardPage />} />
+
+            {/* Strategy routes — all handled by OptionsTerminal */}
+            <Route path="/verticals"     element={<OptionsTerminal activeStrategy={activeStrategy} />} />
+            <Route path="/naked-options" element={<OptionsTerminal activeStrategy={activeStrategy} />} />
+
+            {/* Other pages — unchanged */}
             <Route path="/directional" element={<DirectionalPage />} />
-            <Route path="/favorites" element={<FavoritesPage />} />
-            {/* Default route → Vertical Spreads */}
-            <Route path="*" element={<Navigate to="/verticals" replace />} />
+            <Route path="/favorites"   element={<FavoritesPage />} />
+
+            {/* Default route → Dashboard */}
+            <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Route>
         </Routes>
       </BrowserRouter>

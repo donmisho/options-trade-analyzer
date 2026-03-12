@@ -228,6 +228,30 @@ class TradierMarketData(MarketDataProvider):
         except Exception:
             return False
 
+    async def get_daily_close(self, symbol: str, date: str) -> Optional[float]:
+        """
+        GET /v1/markets/history — returns the closing price on a specific date.
+
+        Used for YTD return calculations. `date` is YYYY-MM-DD.
+        Returns None if the market was closed or data is unavailable.
+        """
+        resp = await self._client.get(
+            "/v1/markets/history",
+            params={"symbol": symbol, "interval": "daily", "start": date, "end": date},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        history = data.get("history")
+        if not history or history == "null":
+            return None
+        day = history.get("day")
+        if isinstance(day, list):
+            day = day[0] if day else None
+        if not day:
+            return None
+        return day.get("close")
+
     # ------------------------------------------------------------------
     # Private: normalization
     # ------------------------------------------------------------------

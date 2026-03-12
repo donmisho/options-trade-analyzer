@@ -41,6 +41,17 @@
   white-space: nowrap;
 }
 
+/* Reset for <button> elements used as strategy tabs */
+button.nav-tab {
+  background: none;
+  border-top: none;
+  border-left: none;
+  border-right: none;
+  cursor: pointer;
+  font-family: inherit;
+  line-height: inherit;
+}
+
 .nav-tab:hover {
   color: var(--text-primary, #e0e0e0);
 }

@@ -37,34 +37,23 @@ from app.ai.prompts import TRADE_EVALUATION_SYSTEM_PROMPT, FOLLOW_UP_SYSTEM_PROM
 logger = logging.getLogger(__name__)
 
 
-def _build_json_schema(model_class) -> dict:
+def _extract_json(text: str) -> str:
     """
-    Convert a Pydantic model to the JSON schema format required by
-    the Anthropic structured output API.
+    Extract the JSON object from Claude's response text.
 
-    WHY we do this manually instead of using the SDK's .parse() method:
-    We're calling via HTTP (through Foundry), not the Python SDK directly.
-    So we need to build the output_format payload ourselves.
-
-    Anthropic requires:
-      - additionalProperties: false at all object levels
-      - all properties listed in required
+    Claude occasionally wraps JSON in markdown code fences even when told
+    not to. This strips them and returns the raw JSON string.
     """
-    schema = model_class.model_json_schema()
-
-    def _enforce_strict(s):
-        if s.get("type") == "object" and "properties" in s:
-            s["additionalProperties"] = False
-            s["required"] = list(s["properties"].keys())
-            for prop in s["properties"].values():
-                _enforce_strict(prop)
-        if s.get("type") == "array" and "items" in s:
-            _enforce_strict(s["items"])
-        for def_schema in s.get("$defs", {}).values():
-            _enforce_strict(def_schema)
-        return s
-
-    return _enforce_strict(schema)
+    text = text.strip()
+    # Strip ```json ... ``` or ``` ... ``` fences
+    if text.startswith("```"):
+        lines = text.splitlines()
+        # Drop first line (```json or ```) and last line (```)
+        inner = lines[1:] if lines[-1].strip() == "```" else lines[1:]
+        text = "\n".join(inner).strip()
+        if text.endswith("```"):
+            text = text[:-3].strip()
+    return text
 
 
 class FoundryEvalAdapter:
@@ -112,20 +101,10 @@ class FoundryEvalAdapter:
         payload = {
             "model": self.model,
             "max_tokens": 2000,
-            "system": [
-                {
-                    "type": "text",
-                    "text": TRADE_EVALUATION_SYSTEM_PROMPT,
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ],
+            "system": TRADE_EVALUATION_SYSTEM_PROMPT,
             "messages": [
                 {"role": "user", "content": user_message}
             ],
-            "output_format": {
-                "type": "json_schema",
-                "schema": _build_json_schema(TradeVerdict),
-            },
         }
 
         response = await self._client.post(self.endpoint, json=payload)
@@ -142,16 +121,7 @@ class FoundryEvalAdapter:
                 text = block["text"]
                 break
 
-        verdict = TradeVerdict.model_validate_json(text)
-
-        usage = data.get("usage", {})
-        cache_read = usage.get("cache_read_input_tokens", 0)
-        cache_write = usage.get("cache_creation_input_tokens", 0)
-        if cache_read > 0:
-            logger.info(f"FoundryEvalAdapter: Cache HIT — {cache_read} tokens read from cache")
-        elif cache_write > 0:
-            logger.info(f"FoundryEvalAdapter: Cache MISS — {cache_write} tokens written to cache")
-
+        verdict = TradeVerdict.model_validate_json(_extract_json(text))
         return verdict
 
     async def follow_up(
@@ -178,20 +148,10 @@ FOLLOW-UP QUESTION:
         payload = {
             "model": self.model,
             "max_tokens": 1000,
-            "system": [
-                {
-                    "type": "text",
-                    "text": FOLLOW_UP_SYSTEM_PROMPT,
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ],
+            "system": FOLLOW_UP_SYSTEM_PROMPT,
             "messages": [
                 {"role": "user", "content": user_message}
             ],
-            "output_format": {
-                "type": "json_schema",
-                "schema": _build_json_schema(FollowUpResponse),
-            },
         }
 
         response = await self._client.post(self.endpoint, json=payload)
@@ -207,7 +167,7 @@ FOLLOW-UP QUESTION:
                 text = block["text"]
                 break
 
-        return FollowUpResponse.model_validate_json(text)
+        return FollowUpResponse.model_validate_json(_extract_json(text))
 
     async def health_check(self) -> bool:
         """Test connectivity to the Foundry endpoint."""

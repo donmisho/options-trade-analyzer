@@ -9,13 +9,13 @@ agent routes). This adapter calls the Foundry endpoint directly
 via httpx, which is required to use the output_format parameter.
 """
 
-from .schemas import TradeVerdict, FollowUpResponse, PriceAlert, ExitPlan
+from .schemas import TradeVerdict, FollowUpResponse, ThesisInsights, ExecutionPlan
 from .foundry_adapter import FoundryEvalAdapter
 
 __all__ = [
     "TradeVerdict",
     "FollowUpResponse",
-    "PriceAlert",
-    "ExitPlan",
+    "ThesisInsights",
+    "ExecutionPlan",
     "FoundryEvalAdapter",
 ]

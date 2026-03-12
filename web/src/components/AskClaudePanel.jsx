@@ -1,226 +1,281 @@
 /**
- * AskClaudePanel — Single-trade evaluation using structured output.
+ * AskClaudePanel — Thesis Matrix design.
  *
- * @deprecated
- * This panel and the /evaluate/trade backend endpoint have been superseded
- * by the TradeAgentPanel flow (triage → deep-dive → follow-up via agent routes).
- * Retained for reference and potential future use (e.g. direct Foundry vs.
- * Anthropic latency comparisons). Do not wire into new pages without discussion.
+ * Phase 2.7 overhaul: replaced flat text sections with:
+ *   Section 1 — Sticky header: verdict banner + metadata row + close button
+ *   Section 2 — Table 1: Thesis Matrix (5 collapsible groups, 14 rows)
+ *   Section 3 — Table 2: Action Command Center (WAIT vs EXECUTE shape)
+ *   Section 4 — Sticky footer: primary CTA + Ask Follow-up
  *
- * Last active: VerticalsPage (removed March 2026 — eval button dropped in favour
- * of the ✦ Ask Claude agent flow).
+ * Props unchanged: open, onClose, trade, smaData, smaPeriods
+ * Bug fix: useEffect resets state when a different trade is selected.
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { evaluateTrade } from '../api/client';
-import { C } from '../styles/tokens';
+import { C, mono } from '../styles/tokens';
 
-// ─── Constants ───────────────────────────────────────────────────
+// ─── Color constants ──────────────────────────────────────────────────────────
 
-const VERDICT_COLORS = {
-  EXECUTE: { bg: C.greenBg,  border: '#22c55e', text: '#4ade80' },
-  WAIT:    { bg: C.amberBg,  border: C.amber,   text: '#fbbf24' },
-  PASS:    { bg: C.redBg,    border: C.red,     text: '#f87171' },
+// Verdict banner backgrounds (spec colors)
+const VERDICT_BG    = { EXECUTE: '#20C997', WAIT: '#FF9E43' };
+const VERDICT_ICON  = { EXECUTE: '⚡', WAIT: '⏳' };
+
+// Status pip colors
+const PIP = {
+  pass:    C.green,   // #26a69a  — favorable
+  caution: C.amber,   // #f59e0b  — marginal
+  risk:    C.red,     // #ef5350  — warning
+  alt:     C.purple,  // #a855f7  — suggestion
 };
 
-// ─── Sub-components ──────────────────────────────────────────────
+// ─── Tiny shared components ────────────────────────────────────────────────────
 
-function VerdictBanner({ verdict, rationale, note }) {
-  const colors = VERDICT_COLORS[verdict] || VERDICT_COLORS.WAIT;
-  const icon = verdict === 'EXECUTE' ? '✦' : verdict === 'WAIT' ? '⏳' : '✗';
+function Pip({ status }) {
   return (
     <div style={{
-      backgroundColor: colors.bg, border: `1px solid ${colors.border}`,
-      borderRadius: 8, padding: '12px 16px', marginBottom: 12,
+      width: 8, height: 8, borderRadius: '50%', flexShrink: 0, marginTop: 4,
+      backgroundColor: PIP[status] || C.textMuted,
+    }} />
+  );
+}
+
+function SectionLabel({ children }) {
+  return (
+    <div style={{
+      fontSize: 9, fontWeight: 700, color: C.textMuted,
+      textTransform: 'uppercase', letterSpacing: '0.08em',
+      marginTop: 18, marginBottom: 8,
     }}>
-      <div style={{ fontSize: 19, fontWeight: 800, color: colors.text, letterSpacing: 2 }}>
-        {icon} {verdict}
-        {note && <span style={{ fontSize: 12, fontWeight: 400, marginLeft: 10, opacity: 0.7 }}>{note}</span>}
-      </div>
-      {rationale && (
-        <div style={{ fontSize: 13, color: colors.text, opacity: 0.85, marginTop: 4, lineHeight: 1.5 }}>
-          {rationale}
-        </div>
-      )}
+      {children}
     </div>
   );
 }
 
-function CollapsibleSection({ title, children, defaultOpen = true }) {
+// ─── Thesis Matrix ─────────────────────────────────────────────────────────────
+
+function ThesisGroup({ title, rows, defaultOpen = false }) {
   const [open, setOpen] = useState(defaultOpen);
+  if (!rows?.length) return null;
   return (
-    <div style={{ borderBottom: `1px solid ${C.border}`, marginBottom: 4 }}>
-      <button onClick={() => setOpen(o => !o)} style={{
-        background: 'none', border: 'none', width: '100%', textAlign: 'left',
-        color: C.text, fontSize: 13, fontWeight: 600, cursor: 'pointer',
-        padding: '8px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-      }}>
+    <div style={{ borderBottom: `1px solid ${C.borderSubtle}` }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{
+          width: '100%', background: 'none', border: 'none', cursor: 'pointer',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          padding: '7px 0', color: C.textDim, fontSize: 11, fontWeight: 600,
+          textTransform: 'uppercase', letterSpacing: '0.06em',
+        }}
+      >
         {title}
-        <span style={{ opacity: 0.4, fontSize: 10 }}>{open ? '▲' : '▼'}</span>
+        <span style={{ fontSize: 10, opacity: 0.5 }}>{open ? '▲' : '▼'}</span>
       </button>
-      {open && (
-        <div style={{ fontSize: 13, color: C.textDim, lineHeight: 1.65, paddingBottom: 10, paddingLeft: 4 }}>
-          {children}
-        </div>
-      )}
-    </div>
-  );
-}
 
-function BulletList({ items, color }) {
-  if (!items?.length) return null;
-  return (
-    <ul style={{ margin: 0, paddingLeft: 16 }}>
-      {items.map((item, i) => (
-        <li key={i} style={{ color: color || C.textDim, marginBottom: 4 }}>{item}</li>
+      {open && rows.map((row, i) => (
+        <div key={i} style={{
+          display: 'flex', gap: 8, alignItems: 'flex-start', padding: '6px 4px',
+          borderTop: i > 0 ? `1px solid ${C.borderSubtle}` : 'none',
+        }}>
+          <span style={{
+            color: C.textDim, fontSize: 11, width: 124, flexShrink: 0, lineHeight: 1.4,
+          }}>
+            {row.label}
+          </span>
+          <Pip status={row.status} />
+          <span style={{ color: C.text, fontSize: 12, lineHeight: 1.5, flex: 1 }}>
+            {row.text || '—'}
+          </span>
+        </div>
       ))}
-    </ul>
-  );
-}
-
-function AlertTable({ alerts }) {
-  if (!alerts?.length) return null;
-  return (
-    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-      <tbody>
-        {alerts.map((a, i) => (
-          <tr key={i} style={{ borderBottom: `1px solid ${C.border}` }}>
-            <td style={{ padding: '4px 6px', color: C.textDim, whiteSpace: 'nowrap' }}>{a.label}</td>
-            <td style={{ padding: '4px 6px', color: C.accent, fontWeight: 700, whiteSpace: 'nowrap' }}>{a.price_or_value}</td>
-            <td style={{ padding: '4px 6px', color: C.text }}>{a.action}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-}
-
-function ExitPlanCard({ exitPlan }) {
-  if (!exitPlan) return null;
-  return (
-    <div style={{ fontSize: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {exitPlan.underlying_alerts?.length > 0 && (
-        <div>
-          <div style={{ color: C.textMuted, fontWeight: 600, marginBottom: 4, textTransform: 'uppercase', fontSize: 10, letterSpacing: 1 }}>
-            📊 Underlying Price Alerts
-          </div>
-          <AlertTable alerts={exitPlan.underlying_alerts} />
-        </div>
-      )}
-      {exitPlan.spread_value_alerts?.length > 0 && (
-        <div>
-          <div style={{ color: C.textMuted, fontWeight: 600, marginBottom: 4, textTransform: 'uppercase', fontSize: 10, letterSpacing: 1 }}>
-            💰 Spread Value Alerts
-          </div>
-          <AlertTable alerts={exitPlan.spread_value_alerts} />
-        </div>
-      )}
-      {exitPlan.time_rules?.length > 0 && (
-        <div>
-          <div style={{ color: C.textMuted, fontWeight: 600, marginBottom: 4, textTransform: 'uppercase', fontSize: 10, letterSpacing: 1 }}>
-            ⏰ Time Rules
-          </div>
-          <BulletList items={exitPlan.time_rules} />
-        </div>
-      )}
     </div>
   );
 }
 
-// ─── Structured response renderer ────────────────────────────────
-
-function StructuredEvaluation({ result }) {
+function ThesisMatrix({ insights }) {
+  if (!insights) return null;
   return (
     <div>
-      <CollapsibleSection title="Thesis Alignment">
-        {result.thesis_alignment}
-      </CollapsibleSection>
-      <CollapsibleSection title="Risk / Reward Quality">
-        {result.risk_reward_quality}
-      </CollapsibleSection>
-      <CollapsibleSection title="Probability & Expected Move">
-        {result.probability_assessment}
-      </CollapsibleSection>
-      {result.red_flags?.length > 0 && (
-        <CollapsibleSection title={`🚩 Red Flags (${result.red_flags.length})`}>
-          <BulletList items={result.red_flags} color="#f87171" />
-        </CollapsibleSection>
-      )}
-      {result.alternatives?.length > 0 && (
-        <CollapsibleSection title="💡 Alternatives">
-          <BulletList items={result.alternatives} color="#60a5fa" />
-        </CollapsibleSection>
-      )}
-      {result.exit_plan && (
-        <CollapsibleSection title="Exit Plan">
-          <ExitPlanCard exitPlan={result.exit_plan} />
-        </CollapsibleSection>
-      )}
+      <SectionLabel>Thesis Matrix</SectionLabel>
+      <ThesisGroup
+        title="Verdict & Directional Thesis"
+        rows={insights.verdictAndThesis}
+        defaultOpen
+      />
+      <ThesisGroup title="Trade Structure Quality"      rows={insights.tradeStructure} />
+      <ThesisGroup title="Probability & Volatility"    rows={insights.probabilityAndVolatility} />
+      <ThesisGroup title="Risk & Execution Flags"      rows={insights.riskAndExecution} />
+      <ThesisGroup title="Alternate Considerations"    rows={insights.alternateConsiderations} />
     </div>
   );
 }
 
-// ─── Legacy free-text renderer (backward compat) ─────────────────
+// ─── Action Command Center ─────────────────────────────────────────────────────
 
-function LegacyTextEvaluation({ text }) {
+function ActionCommandCenter({ plan, verdict }) {
+  if (!plan) return null;
+  const isExecute = verdict === 'EXECUTE';
+
   return (
-    <div style={{
-      fontSize: 13, color: C.textDim, lineHeight: 1.65,
-      whiteSpace: 'pre-wrap', fontFamily: 'inherit',
-    }}>
-      {text}
+    <div>
+      <SectionLabel>Action Command Center</SectionLabel>
+
+      {/* Criteria card */}
+      {plan.criteria?.length > 0 && (
+        <div style={{
+          backgroundColor: isExecute ? '#20C99712' : '#FF9E4312',
+          border: `1px solid ${isExecute ? '#20C99730' : '#FF9E4330'}`,
+          borderRadius: 6, padding: '10px 12px', marginBottom: 12,
+        }}>
+          <div style={{
+            fontSize: 9, fontWeight: 700, letterSpacing: '0.08em',
+            textTransform: 'uppercase', marginBottom: 6,
+            color: isExecute ? '#20C997' : '#FF9E43',
+          }}>
+            {isExecute ? 'Entry Confirmation' : 'Wait Criteria'}
+          </div>
+          {plan.criteria.map((c, i) => (
+            <div key={i} style={{
+              color: C.text, fontSize: 12, marginBottom: 4,
+              display: 'flex', gap: 6, alignItems: 'flex-start',
+            }}>
+              <span style={{ color: isExecute ? '#20C997' : '#FF9E43', flexShrink: 0 }}>
+                {isExecute ? '✓' : '◆'}
+              </span>
+              {c}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Watch alerts table — WAIT only */}
+      {!isExecute && plan.alerts?.length > 0 && (
+        <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 12 }}>
+          <tbody>
+            {plan.alerts.map((a, i) => (
+              <tr key={i} style={{ borderBottom: `1px solid ${C.borderSubtle}` }}>
+                <td style={{ padding: '7px 4px', color: C.textDim, fontSize: 11, width: '42%' }}>
+                  {a.label}
+                </td>
+                <td style={{
+                  padding: '7px 4px', fontFamily: mono, fontWeight: 700, fontSize: 13,
+                  color: a.type === 'confirm' ? C.green : C.red,
+                }}>
+                  {a.price != null ? a.price.toFixed(2) : '—'}
+                </td>
+                <td style={{ padding: '7px 4px', textAlign: 'right' }}>
+                  <button style={{
+                    padding: '2px 10px', borderRadius: 4, fontSize: 11,
+                    border: `1px solid ${C.border}`, background: 'none',
+                    color: C.textDim, cursor: 'pointer',
+                  }} title="Set alert">
+                    +
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {/* Exit ladder — EXECUTE only */}
+      {isExecute && plan.ladder?.length > 0 && (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{
+            fontSize: 9, fontWeight: 700, color: C.textMuted,
+            textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6,
+          }}>
+            Exit Ladder
+          </div>
+          {plan.ladder.map((rung, i) => {
+            const isStop = rung.label.toLowerCase().includes('stop');
+            return (
+              <div key={i} style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                padding: '6px 8px', borderRadius: 4,
+                backgroundColor: i % 2 === 0 ? C.card : 'transparent',
+              }}>
+                <span style={{ color: C.textDim, fontSize: 11 }}>{rung.label}</span>
+                <span style={{
+                  fontFamily: mono, fontWeight: 700, fontSize: 13,
+                  color: isStop ? C.red : C.green,
+                }}>
+                  {rung.price != null ? rung.price.toFixed(2) : '—'}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Planning insight — WAIT only */}
+      {!isExecute && (
+        <div style={{
+          fontSize: 11, color: C.textDim, paddingTop: 8,
+          borderTop: `1px solid ${C.borderSubtle}`, lineHeight: 1.5,
+        }}>
+          If within 10 DTE without a trigger hit, roll to the next expiration cycle to preserve optionality.
+        </div>
+      )}
     </div>
   );
 }
 
-// ─── Main component ───────────────────────────────────────────────
+// ─── Main component ────────────────────────────────────────────────────────────
 
-export default function AskClaudePanel({ open, onClose, trade, smaData }) {
-  const [direction, setDirection] = useState(
-    trade?.spread_type?.includes('bear') ? 'Bearish' : 'Bullish'
-  );
-  const [priceTarget, setPriceTarget] = useState('');
+export default function AskClaudePanel({ open, onClose, trade, smaData, smaPeriods, riskConfig }) {
+  // ── Thesis form state ──────────────────────────────────────────────────────
+  const [direction,     setDirection]     = useState('Bullish');
+  const [priceTarget,   setPriceTarget]   = useState('');
   const [timeframeDays, setTimeframeDays] = useState(30);
-  const [conviction, setConviction] = useState('Medium');
-  const [riskBudget, setRiskBudget] = useState(500);
+  const [conviction,    setConviction]    = useState('Medium');
+  const [riskBudget,    setRiskBudget]    = useState(() => riskConfig?.max_risk_per_trade ?? 500);
 
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [result, setResult] = useState(null);
+  // ── Evaluation state ───────────────────────────────────────────────────────
+  const [loading,        setLoading]       = useState(false);
+  const [error,          setError]         = useState(null);
+  const [result,         setResult]        = useState(null);
   const [originalContext, setOriginalContext] = useState('');
+  const [activeVerdict,  setActiveVerdict] = useState(null);
 
-  const [followUpText, setFollowUpText] = useState('');
+  // ── Follow-up state ────────────────────────────────────────────────────────
+  const [followUpOpen,    setFollowUpOpen]    = useState(false);
+  const [followUpText,    setFollowUpText]    = useState('');
   const [followUpLoading, setFollowUpLoading] = useState(false);
-  const [followUpResult, setFollowUpResult] = useState(null);
-  const [activeVerdict, setActiveVerdict] = useState(null);
+  const [followUpHistory, setFollowUpHistory] = useState([]);
+
+  // ── Reset when the selected trade changes ─────────────────────────────────
+  useEffect(() => {
+    setResult(null);
+    setError(null);
+    setFollowUpOpen(false);
+    setFollowUpText('');
+    setFollowUpHistory([]);
+    setActiveVerdict(null);
+    setOriginalContext('');
+    if (trade?.spread_type) {
+      setDirection(trade.spread_type.includes('bear') ? 'Bearish' : 'Bullish');
+    }
+  }, [trade?.long_strike, trade?.short_strike, trade?.expiration, trade?.spread_type]);
 
   if (!open || !trade) return null;
 
-  // ── Derived trade display values ──────────────────────────────
-  const netCost = trade.net_cost ?? trade.net_debit ?? 0;
-  const isCredit = netCost < 0;
-  const netLabel = isCredit ? 'CREDIT' : 'NET';
-  const netDisplay = isCredit ? `($${Math.abs(netCost).toFixed(2)})` : `$${netCost.toFixed(2)}`;
+  // ── Derived display values ─────────────────────────────────────────────────
+  const netCost      = trade.net_cost ?? trade.net_debit ?? 0;
+  const isCredit     = netCost < 0;
+  const netLabel     = isCredit ? 'CREDIT' : 'NET';
+  const netDisplay   = isCredit ? `(${Math.abs(netCost).toFixed(2)})` : netCost.toFixed(2);
   const strategyLabel = trade.strategy_label || trade.spread_type || '';
-  const buyStrike = trade.buy_strike ?? trade.long_strike;
-  const sellStrike = trade.sell_strike ?? trade.short_strike;
-  const optType = trade.option_type || 'option';
+  const buyStrike    = trade.buy_strike ?? trade.long_strike;
+  const sellStrike   = trade.sell_strike ?? trade.short_strike;
+  const optType      = trade.option_type || 'option';
+  const currentVerdict = activeVerdict || result?.verdict;
+  const verdictBg    = VERDICT_BG[currentVerdict] || C.amberBg;
 
-  // ── Detect response format ────────────────────────────────────
-  const isStructured = result && typeof result === 'object' && typeof result.verdict === 'string';
-  const legacyText = !isStructured && result
-    ? (typeof result === 'string' ? result : result?.analysis || result?.text || null)
-    : null;
-  const currentVerdict = activeVerdict || (isStructured ? result.verdict : null);
-
-  // ── Handlers ─────────────────────────────────────────────────
+  // ── Handlers ───────────────────────────────────────────────────────────────
   const handleEvaluate = async () => {
     setLoading(true);
     setError(null);
-    setResult(null);
-    setFollowUpResult(null);
-    setActiveVerdict(null);
-
     try {
       const payload = {
         symbol: trade.symbol,
@@ -253,15 +308,13 @@ export default function AskClaudePanel({ open, onClose, trade, smaData }) {
           risk_budget: riskBudget,
         },
       };
-
       const data = await evaluateTrade(payload);
       setResult(data);
       setActiveVerdict(data.verdict);
-
       setOriginalContext(
         `${trade.symbol} ${strategyLabel} — Buy ${buyStrike} / Sell ${sellStrike} ${optType} ` +
-        `exp ${trade.expiration} | Net: ${netDisplay} | Max profit: $${trade.max_profit?.toFixed(2)} ` +
-        `| R:R: ${trade.reward_risk_ratio?.toFixed(2)} | Direction: ${direction} | Target: ${priceTarget || 'unset'}`
+        `exp ${trade.expiration} | Net: ${netDisplay} | R:R: ${trade.reward_risk_ratio?.toFixed(2)} ` +
+        `| Direction: ${direction} | Target: ${priceTarget || 'unset'} | Conviction: ${conviction}`
       );
     } catch (err) {
       setError(err.message || 'Evaluation failed');
@@ -272,37 +325,53 @@ export default function AskClaudePanel({ open, onClose, trade, smaData }) {
 
   const handleFollowUp = async () => {
     if (!followUpText.trim() || !result) return;
+    const question = followUpText.trim();
     setFollowUpLoading(true);
-    setFollowUpResult(null);
-
+    setFollowUpText('');
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_BASE_URL || ''}/api/v1/evaluate/follow-up`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(localStorage.getItem('ota_token') ? { Authorization: `Bearer ${localStorage.getItem('ota_token')}` } : {}),
-        },
-        body: JSON.stringify({
-          question: followUpText,
-          original_trade_context: originalContext,
-          original_verdict: currentVerdict || 'WAIT',
-        }),
-      });
+      const res = await fetch(
+        `${import.meta.env.VITE_API_BASE_URL || ''}/api/v1/evaluate/follow-up`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(localStorage.getItem('ota_token')
+              ? { Authorization: `Bearer ${localStorage.getItem('ota_token')}` }
+              : {}),
+          },
+          body: JSON.stringify({
+            question,
+            original_trade_context: originalContext,
+            original_verdict: currentVerdict || 'WAIT',
+          }),
+        }
+      );
       if (!res.ok) throw new Error(`Follow-up failed: ${res.status}`);
       const data = await res.json();
-      setFollowUpResult(data);
+      setFollowUpHistory(prev => [...prev, {
+        question,
+        answer: data.answer,
+        updated_verdict: data.updated_verdict,
+        updated_rationale: data.updated_rationale,
+      }]);
       if (data.updated_verdict) setActiveVerdict(data.updated_verdict);
-      setFollowUpText('');
     } catch (err) {
-      setFollowUpResult({ answer: `Error: ${err.message}` });
+      setFollowUpHistory(prev => [...prev, { question, answer: `Error: ${err.message}` }]);
     } finally {
       setFollowUpLoading(false);
     }
   };
 
-  const reset = () => { setResult(null); setFollowUpResult(null); setActiveVerdict(null); setError(null); };
+  const reset = () => {
+    setResult(null);
+    setError(null);
+    setFollowUpOpen(false);
+    setFollowUpText('');
+    setFollowUpHistory([]);
+    setActiveVerdict(null);
+  };
 
-  // ── Render ───────────────────────────────────────────────────
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div style={{
       position: 'fixed', right: 0, top: 0, bottom: 0, width: 500,
@@ -310,51 +379,245 @@ export default function AskClaudePanel({ open, onClose, trade, smaData }) {
       zIndex: 200, display: 'flex', flexDirection: 'column',
       boxShadow: '-4px 0 24px rgba(0,0,0,0.5)',
     }}>
-      {/* Header */}
-      <div style={{
-        padding: '14px 16px', borderBottom: `1px solid ${C.border}`,
-        display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
-        backgroundColor: C.bg, flexShrink: 0,
-      }}>
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 700, color: C.claudeAccent, marginBottom: 2 }}>
-            ✦ Ask Claude — {trade.symbol} {strategyLabel}
-          </div>
-          <div style={{ fontSize: 12, color: C.textDim }}>
-            Buy {buyStrike} / Sell {sellStrike} {optType} · {trade.expiration}
-          </div>
-        </div>
-        <button onClick={onClose} style={{
-          background: 'none', border: 'none', color: C.textDim,
-          fontSize: 18, cursor: 'pointer', lineHeight: 1, paddingLeft: 8,
-        }}>✕</button>
-      </div>
 
-      {/* Body */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
-
-        {/* Trade stats card */}
-        <div style={{
-          backgroundColor: C.bg, border: `1px solid ${C.border}`,
-          borderRadius: 6, padding: '10px 14px', marginBottom: 16,
-          display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '4px 8px',
-        }}>
-          {[
-            [netLabel, netDisplay, isCredit ? '#4ade80' : C.text],
-            ['MAX PROFIT', `$${trade.max_profit?.toFixed(2)}`, '#4ade80'],
-            ['R:R', trade.reward_risk_ratio?.toFixed(2), C.text],
-            ['PROB', `${(trade.prob_of_profit * 100).toFixed(0)}%`, C.text],
-          ].map(([label, value, color]) => (
-            <div key={label} style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: 9, color: C.textMuted, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 2 }}>{label}</div>
-              <div style={{ fontSize: 13, fontWeight: 700, color, fontFamily: "'IBM Plex Mono', monospace" }}>{value}</div>
+      {result ? (
+        // ── POST-EVALUATION VIEW ───────────────────────────────────────────────
+        <>
+          {/* Section 1: Sticky header */}
+          <div style={{ flexShrink: 0 }}>
+            {/* Verdict banner */}
+            <div style={{
+              backgroundColor: verdictBg,
+              padding: '10px 16px',
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            }}>
+              <span style={{ fontSize: 15, fontWeight: 800, color: '#000', letterSpacing: '0.05em' }}>
+                {VERDICT_ICON[currentVerdict] || '◆'} {currentVerdict}
+              </span>
+              <button onClick={onClose} style={{
+                background: 'none', border: 'none', color: 'rgba(0,0,0,0.5)',
+                fontSize: 18, cursor: 'pointer', lineHeight: 1,
+              }}>✕</button>
             </div>
-          ))}
-        </div>
 
-        {/* Thesis form (hidden after evaluation) */}
-        {!result && (
-          <div>
+            {/* Metadata row */}
+            <div style={{
+              padding: '7px 16px', backgroundColor: C.bg,
+              borderBottom: `1px solid ${C.border}`,
+              display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap',
+              fontSize: 11, color: C.textDim,
+            }}>
+              <span style={{ fontFamily: mono, fontWeight: 700, color: C.text }}>{trade.symbol}</span>
+              <span>·</span>
+              <span>{strategyLabel || `${buyStrike}/${sellStrike}`}</span>
+              <span>·</span>
+              <span>{trade.expiration}</span>
+              {priceTarget && (
+                <>
+                  <span>·</span>
+                  <span>Target <span style={{ fontFamily: mono, color: C.text }}>{priceTarget}</span></span>
+                </>
+              )}
+              <span>·</span>
+              <span>{direction} · {conviction}</span>
+            </div>
+          </div>
+
+          {/* Scrollable body */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: '4px 16px 16px' }}>
+
+            {/* Pre-screen flags */}
+            {result.pre_screen_flags?.length > 0 && (
+              <div style={{ marginTop: 12, marginBottom: 4 }}>
+                {result.pre_screen_flags.map((f, i) => (
+                  <div key={i} style={{
+                    fontSize: 12, padding: '4px 10px', borderRadius: 4, marginBottom: 4,
+                    backgroundColor: f.level === 'alert' ? C.redBg : C.amberBg,
+                    color: f.level === 'alert' ? '#f87171' : '#fbbf24',
+                    border: `1px solid ${f.level === 'alert' ? '#ef444430' : '#f59e0b30'}`,
+                  }}>
+                    {f.level === 'alert' ? '⚠ ' : '⚡ '}{f.msg}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Section 2: Thesis Matrix */}
+            <ThesisMatrix insights={result.thesisInsights} />
+
+            {/* Section 3: Action Command Center */}
+            <ActionCommandCenter plan={result.executionPlan} verdict={currentVerdict} />
+
+            {/* Re-evaluate link */}
+            <button onClick={reset} style={{
+              marginTop: 14, background: 'none', border: 'none',
+              color: C.textMuted, fontSize: 11, cursor: 'pointer',
+              padding: 0, textDecoration: 'underline',
+            }}>
+              ← Re-evaluate with different thesis
+            </button>
+
+            {/* Follow-up conversation history */}
+            {followUpHistory.length > 0 && (
+              <div style={{ marginTop: 16, borderTop: `1px solid ${C.border}`, paddingTop: 12 }}>
+                <div style={{
+                  fontSize: 9, fontWeight: 700, color: C.textMuted,
+                  textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8,
+                }}>
+                  Follow-up Thread
+                </div>
+                {followUpHistory.map((entry, i) => (
+                  <div key={i} style={{ marginBottom: 12 }}>
+                    <div style={{
+                      backgroundColor: C.card, borderRadius: 6, padding: '7px 10px',
+                      fontSize: 12, color: C.textDim, marginBottom: 4,
+                    }}>
+                      💬 {entry.question}
+                    </div>
+                    <div style={{
+                      padding: '8px 12px', backgroundColor: C.bg,
+                      border: `1px solid ${C.border}`, borderRadius: 6,
+                      fontSize: 12, color: C.text, lineHeight: 1.6,
+                    }}>
+                      {entry.answer}
+                      {entry.updated_verdict && (
+                        <div style={{
+                          marginTop: 6, fontSize: 11,
+                          color: VERDICT_BG[entry.updated_verdict] || C.amber,
+                        }}>
+                          Verdict updated → {entry.updated_verdict}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Inline follow-up input */}
+            {followUpOpen && (
+              <div style={{ marginTop: 12, borderTop: `1px solid ${C.border}`, paddingTop: 12 }}>
+                <textarea
+                  value={followUpText}
+                  onChange={e => setFollowUpText(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleFollowUp();
+                    }
+                  }}
+                  placeholder="e.g. What if VIX spikes next week?"
+                  rows={2}
+                  autoFocus
+                  style={{
+                    width: '100%', padding: '6px 8px', borderRadius: 4,
+                    boxSizing: 'border-box', border: `1px solid ${C.border}`,
+                    backgroundColor: C.bg, color: C.text, fontSize: 12,
+                    resize: 'none', outline: 'none',
+                  }}
+                />
+                <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+                  <button
+                    onClick={handleFollowUp}
+                    disabled={followUpLoading || !followUpText.trim()}
+                    style={{
+                      padding: '6px 16px', borderRadius: 4, fontSize: 12,
+                      border: `1px solid ${C.claudeBorder}`, backgroundColor: C.claudeDim,
+                      color: C.claudeAccent, cursor: followUpLoading ? 'wait' : 'pointer',
+                      opacity: followUpLoading || !followUpText.trim() ? 0.5 : 1,
+                    }}
+                  >
+                    {followUpLoading ? 'Asking…' : 'Ask'}
+                  </button>
+                  <button
+                    onClick={() => { setFollowUpOpen(false); setFollowUpText(''); }}
+                    style={{
+                      padding: '6px 10px', borderRadius: 4, fontSize: 12,
+                      border: `1px solid ${C.border}`, background: 'none',
+                      color: C.textMuted, cursor: 'pointer',
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Section 4: Sticky footer */}
+          <div style={{
+            flexShrink: 0, padding: '12px 16px',
+            borderTop: `1px solid ${C.border}`, backgroundColor: C.bg,
+            display: 'flex', gap: 8,
+          }}>
+            <button style={{
+              flex: 1, padding: '9px 0', borderRadius: 6,
+              backgroundColor: verdictBg, border: 'none',
+              color: '#000', fontSize: 12, fontWeight: 700, cursor: 'pointer',
+            }}>
+              {currentVerdict === 'EXECUTE' ? '⚡ Draft Order in Broker' : '🔔 Set All Triggers'}
+            </button>
+            <button
+              onClick={() => setFollowUpOpen(o => !o)}
+              style={{
+                padding: '9px 14px', borderRadius: 6, whiteSpace: 'nowrap',
+                border: `1px solid ${C.claudeBorder}`, backgroundColor: C.claudeDim,
+                color: C.claudeAccent, fontSize: 12, cursor: 'pointer',
+              }}
+            >
+              💬 Ask Follow-up
+            </button>
+          </div>
+        </>
+
+      ) : (
+        // ── PRE-EVALUATION VIEW (thesis form — unchanged) ──────────────────────
+        <>
+          {/* Header */}
+          <div style={{
+            padding: '14px 16px', borderBottom: `1px solid ${C.border}`,
+            display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
+            backgroundColor: C.bg, flexShrink: 0,
+          }}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: C.claudeAccent, marginBottom: 2 }}>
+                ✦ Ask Claude — {trade.symbol} {strategyLabel}
+              </div>
+              <div style={{ fontSize: 12, color: C.textDim }}>
+                Buy {buyStrike} / Sell {sellStrike} {optType} · {trade.expiration}
+              </div>
+            </div>
+            <button onClick={onClose} style={{
+              background: 'none', border: 'none', color: C.textDim,
+              fontSize: 18, cursor: 'pointer', lineHeight: 1, paddingLeft: 8,
+            }}>✕</button>
+          </div>
+
+          {/* Body */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
+
+            {/* Trade stats card */}
+            <div style={{
+              backgroundColor: C.bg, border: `1px solid ${C.border}`,
+              borderRadius: 6, padding: '10px 14px', marginBottom: 16,
+              display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '4px 8px',
+            }}>
+              {[
+                [netLabel, netDisplay, isCredit ? C.green : C.text],
+                ['MAX PROFIT', trade.max_profit?.toFixed(2), C.green],
+                ['R:R', trade.reward_risk_ratio?.toFixed(2), C.text],
+                ['PROB', `${((trade.prob_of_profit || 0) * 100).toFixed(0)}%`, C.text],
+              ].map(([label, value, color]) => (
+                <div key={label} style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: 9, color: C.textMuted, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 2 }}>
+                    {label}
+                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color, fontFamily: mono }}>{value}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Thesis form */}
             <div style={{ fontSize: 11, fontWeight: 600, color: C.textMuted, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>
               Your Thesis
             </div>
@@ -376,150 +639,79 @@ export default function AskClaudePanel({ open, onClose, trade, smaData }) {
             <input
               type="number" step="0.5"
               placeholder={`e.g. ${((smaData?.price || 100) * (direction === 'Bearish' ? 0.97 : 1.03)).toFixed(0)}`}
-              value={priceTarget} onChange={e => setPriceTarget(e.target.value)}
+              value={priceTarget}
+              onChange={e => setPriceTarget(e.target.value)}
               style={{
                 width: '100%', padding: '6px 8px', borderRadius: 4, boxSizing: 'border-box',
                 border: `1px solid ${C.border}`, backgroundColor: C.bg,
-                color: C.text, fontSize: 13, marginBottom: 14,
+                color: C.text, fontSize: 13, marginBottom: 14, outline: 'none',
               }}
             />
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
               <div>
                 <label style={{ fontSize: 12, color: C.textDim, display: 'block', marginBottom: 4 }}>Timeframe (days)</label>
-                <input type="number" min={1} max={365} value={timeframeDays}
+                <input
+                  type="number" min={1} max={365} value={timeframeDays}
                   onChange={e => setTimeframeDays(parseInt(e.target.value) || 30)}
-                  style={{ width: '100%', padding: '6px 8px', borderRadius: 4, boxSizing: 'border-box', border: `1px solid ${C.border}`, backgroundColor: C.bg, color: C.text, fontSize: 13 }}
+                  style={{ width: '100%', padding: '6px 8px', borderRadius: 4, boxSizing: 'border-box', border: `1px solid ${C.border}`, backgroundColor: C.bg, color: C.text, fontSize: 13, outline: 'none' }}
                 />
               </div>
               <div>
                 <label style={{ fontSize: 12, color: C.textDim, display: 'block', marginBottom: 4 }}>Risk Budget ($)</label>
-                <input type="number" min={50} step={50} value={riskBudget}
+                <input
+                  type="number" min={50} step={50} value={riskBudget}
                   onChange={e => setRiskBudget(parseFloat(e.target.value) || 500)}
-                  style={{ width: '100%', padding: '6px 8px', borderRadius: 4, boxSizing: 'border-box', border: `1px solid ${C.border}`, backgroundColor: C.bg, color: C.text, fontSize: 13 }}
+                  style={{ width: '100%', padding: '6px 8px', borderRadius: 4, boxSizing: 'border-box', border: `1px solid ${C.border}`, backgroundColor: C.bg, color: C.text, fontSize: 13, outline: 'none' }}
                 />
               </div>
             </div>
 
             <label style={{ fontSize: 12, color: C.textDim, display: 'block', marginBottom: 6 }}>Conviction</label>
             <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-              {['Low', 'Medium', 'High'].map(c => (
-                <button key={c} onClick={() => setConviction(c)} style={{
+              {['Low', 'Medium', 'High'].map(conv => (
+                <button key={conv} onClick={() => setConviction(conv)} style={{
                   padding: '5px 14px', borderRadius: 4, fontSize: 12,
-                  border: `1px solid ${conviction === c ? C.claudeBorder : C.border}`,
-                  backgroundColor: conviction === c ? C.claudeDim : 'transparent',
-                  color: conviction === c ? C.claudeAccent : C.textDim,
+                  border: `1px solid ${conviction === conv ? C.claudeBorder : C.border}`,
+                  backgroundColor: conviction === conv ? C.claudeDim : 'transparent',
+                  color: conviction === conv ? C.claudeAccent : C.textDim,
                   cursor: 'pointer',
-                }}>{c}</button>
+                }}>{conv}</button>
               ))}
             </div>
 
-            <button onClick={handleEvaluate} disabled={loading} style={{
-              width: '100%', padding: '10px 0', borderRadius: 6, fontSize: 13, fontWeight: 700,
-              border: `1px solid ${C.claudeBorder}`, backgroundColor: C.claudeDim,
-              color: C.claudeAccent, cursor: loading ? 'wait' : 'pointer',
-              opacity: loading ? 0.6 : 1,
-            }}>
-              {loading ? 'Evaluating…' : '✦ Evaluate This Trade'}
-            </button>
-          </div>
-        )}
-
-        {/* Error */}
-        {error && (
-          <div style={{
-            color: '#f87171', fontSize: 13, padding: '8px 12px',
-            backgroundColor: C.redBg, borderRadius: 6, marginBottom: 12,
-          }}>
-            {error}
-            <button onClick={reset} style={{
-              marginLeft: 12, background: 'none', border: 'none',
-              color: '#f87171', cursor: 'pointer', fontSize: 12,
-            }}>Try again</button>
-          </div>
-        )}
-
-        {/* Evaluation result */}
-        {result && (
-          <div>
-            {/* Verdict banner — shows updated verdict if follow-up changed it */}
-            <VerdictBanner
-              verdict={activeVerdict}
-              rationale={
-                followUpResult?.updated_verdict
-                  ? followUpResult.updated_rationale
-                  : (isStructured ? result.verdict_rationale : null)
-              }
-              note={followUpResult?.updated_verdict ? `(updated from ${result.verdict})` : null}
-            />
-
-            {/* Pre-screen flags */}
-            {isStructured && result.pre_screen_flags?.length > 0 && (
-              <div style={{ marginBottom: 12 }}>
-                {result.pre_screen_flags.map((f, i) => (
-                  <div key={i} style={{
-                    fontSize: 12, padding: '4px 10px', borderRadius: 4, marginBottom: 4,
-                    backgroundColor: f.level === 'alert' ? C.redBg : C.amberBg,
-                    color: f.level === 'alert' ? '#f87171' : '#fbbf24',
-                    border: `1px solid ${f.level === 'alert' ? '#ef444430' : '#f59e0b30'}`,
-                  }}>
-                    {f.level === 'alert' ? '⚠ ' : '⚡ '}{f.msg}
-                  </div>
-                ))}
+            {/* Error */}
+            {error && (
+              <div style={{
+                color: '#f87171', fontSize: 13, padding: '8px 12px',
+                backgroundColor: C.redBg, borderRadius: 6, marginBottom: 12,
+              }}>
+                {error}
+                <button onClick={() => setError(null)} style={{
+                  marginLeft: 12, background: 'none', border: 'none',
+                  color: '#f87171', cursor: 'pointer', fontSize: 12,
+                }}>
+                  Dismiss
+                </button>
               </div>
             )}
 
-            {/* Analysis sections */}
-            {isStructured ? <StructuredEvaluation result={result} /> : <LegacyTextEvaluation text={legacyText} />}
-
-            <button onClick={reset} style={{
-              marginTop: 14, padding: '5px 12px', borderRadius: 4, fontSize: 12,
-              border: `1px solid ${C.border}`, backgroundColor: 'transparent',
-              color: C.textDim, cursor: 'pointer',
-            }}>
-              ← Re-evaluate
-            </button>
-
-            {/* Follow-up */}
-            <div style={{ marginTop: 16, borderTop: `1px solid ${C.border}`, paddingTop: 14 }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: C.textMuted, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
-                Follow-up
-              </div>
-              <textarea
-                value={followUpText}
-                onChange={e => setFollowUpText(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleFollowUp(); } }}
-                placeholder="e.g. What if VIX spikes next week?"
-                rows={2}
-                style={{
-                  width: '100%', padding: '6px 8px', borderRadius: 4, boxSizing: 'border-box',
-                  border: `1px solid ${C.border}`, backgroundColor: C.bg,
-                  color: C.text, fontSize: 12, resize: 'vertical',
-                }}
-              />
-              <button onClick={handleFollowUp} disabled={followUpLoading || !followUpText.trim()} style={{
-                marginTop: 6, padding: '6px 16px', borderRadius: 4, fontSize: 12,
+            <button
+              onClick={handleEvaluate}
+              disabled={loading}
+              style={{
+                width: '100%', padding: '10px 0', borderRadius: 6,
+                fontSize: 13, fontWeight: 700,
                 border: `1px solid ${C.claudeBorder}`, backgroundColor: C.claudeDim,
-                color: C.claudeAccent, cursor: followUpLoading ? 'wait' : 'pointer',
-                opacity: followUpLoading || !followUpText.trim() ? 0.5 : 1,
-              }}>
-                {followUpLoading ? 'Asking…' : 'Ask'}
-              </button>
-
-              {followUpResult && (
-                <div style={{
-                  marginTop: 10, padding: '10px 12px', backgroundColor: C.bg,
-                  borderRadius: 6, border: `1px solid ${C.border}`,
-                }}>
-                  <div style={{ fontSize: 13, color: C.text, lineHeight: 1.65 }}>
-                    {followUpResult.answer}
-                  </div>
-                </div>
-              )}
-            </div>
+                color: C.claudeAccent, cursor: loading ? 'wait' : 'pointer',
+                opacity: loading ? 0.6 : 1,
+              }}
+            >
+              {loading ? 'Evaluating…' : '✦ Evaluate This Trade'}
+            </button>
           </div>
-        )}
-      </div>
+        </>
+      )}
     </div>
   );
 }

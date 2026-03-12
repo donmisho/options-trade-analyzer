@@ -36,8 +36,11 @@ function generateCandles(price, count = 120) {
 
 function computeAlignment(price, smaShort, smaMid, smaLong) {
   if (!price || !smaShort || !smaMid || !smaLong) return "mixed";
-  if (price > smaShort && price > smaMid && price > smaLong) return "bullish";
-  if (price < smaShort && price < smaMid && price < smaLong) return "bearish";
+  // Use SMA stacking order to match the chart badge in SmaPanel:
+  // bullish = short > mid > long (SMAs fanning upward)
+  // bearish = short < mid < long (SMAs fanning downward)
+  if (smaShort > smaMid && smaMid > smaLong) return "bullish";
+  if (smaShort < smaMid && smaMid < smaLong) return "bearish";
   return "mixed";
 }
 
@@ -89,7 +92,7 @@ export default function VerticalsPage() {
     strikes: { range_pct: activePreset.strikes?.range_pct || 10, min_open_interest: 50, min_volume: 5 },
     spreads: { min_width: activePreset.spreads?.min_width || 1, max_width: activePreset.spreads?.max_width || 10 },
     risk: { max_risk_per_trade: activePreset.risk?.max_risk || 500, profit_target_pct: 75, stop_loss_pct: 50 },
-    spreadTypes: { bull_call: true, bear_put: true },
+    spreadTypes: { bull_call: true, bear_put: true, bull_put: false, bear_call: false },
     greeks: { min_short_delta: 0.15, max_short_delta: 0.45, min_net_delta: 0, max_net_theta: 0 },
     smaPeriods: { short: 8, mid: 21, long: 50 },
   });
@@ -125,6 +128,8 @@ export default function VerticalsPage() {
     const spreadTypesArr = [];
     if (cfg.spreadTypes?.bull_call) spreadTypesArr.push('bull_call');
     if (cfg.spreadTypes?.bear_put) spreadTypesArr.push('bear_put');
+    if (cfg.spreadTypes?.bull_put) spreadTypesArr.push('bull_put');
+    if (cfg.spreadTypes?.bear_call) spreadTypesArr.push('bear_call');
     if (spreadTypesArr.length === 0) spreadTypesArr.push('bull_call', 'bear_put');
 
     try {
@@ -222,7 +227,7 @@ export default function VerticalsPage() {
       trade_id: `${activeSymbol}-${s.long_strike}-${s.short_strike}-${s.expiration}`,
       symbol: activeSymbol,
       spread_type: s.spread_type,
-      spread_label: `${s.long_strike}/${s.short_strike} ${s.spread_type === 'bull_call' ? 'Call' : 'Put'} Spread`,
+      spread_label: `${s.long_strike}/${s.short_strike} ${['bull_call', 'bear_call'].includes(s.spread_type) ? 'Call' : 'Put'} Spread`,
       expiration: s.expiration,
       dte,
       net_debit: s.net_debit,
@@ -230,7 +235,8 @@ export default function VerticalsPage() {
       reward_risk_ratio: s.reward_risk_ratio,
       prob_of_profit: s.prob_of_profit,
       composite_score: s.composite_score,
-      direction: s.spread_type === 'bull_call' ? 'bullish' : 'bearish',
+      direction: ['bull_call', 'bull_put'].includes(s.spread_type) ? 'bullish' : 'bearish',
+      ev_raw: s.ev_raw,
     };
   }
 
@@ -251,7 +257,7 @@ export default function VerticalsPage() {
   }
 
   function buildFavTrade(spread) {
-    const typeLabel = spread.spread_type === 'bull_call' ? 'Bull Call' : 'Bear Put';
+    const typeLabel = TYPE_CONFIG[spread.spread_type]?.label || spread.spread_type;
     const strikes = `${spread.long_strike}/${spread.short_strike}`;
     return { id: `vs-${activeSymbol}-${spread.spread_type}-${strikes}-${spread.expiration}`, symbol: activeSymbol, label: `${typeLabel} ${strikes}`, expiration: spread.expiration, source: 'vertical', score: spread.composite_score, originalPrice: `Debit: ${spread.net_debit.toFixed(2)}`, originalDebit: spread.net_debit, maxProfit: spread.max_profit, rewardRisk: spread.reward_risk_ratio, probOfProfit: spread.prob_of_profit };
   }

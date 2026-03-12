@@ -296,7 +296,7 @@ export default function TradeAgentPanel() {
     setLoading(true);
     setError(null);
     try {
-      const result = await deepDiveTrade(trade, agentMarketContext, priceTarget, runId);
+      const result = await deepDiveTrade(trade, agentMarketContext, priceTarget, runId, agentMarketContext?.riskConfig);
       setVerdictData(result);
       setRunId(result.run_id);
       setAgentState('verdict');

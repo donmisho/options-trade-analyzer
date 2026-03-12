@@ -92,7 +92,7 @@ class FoundryAdapter(AIProvider):
         """
         if self._client is None:
             try:
-                from anthropic import AnthropicFoundry
+                from anthropic import AsyncAnthropicFoundry
             except ImportError:
                 raise RuntimeError(
                     "The 'anthropic' package is required for the Foundry adapter. "
@@ -105,7 +105,7 @@ class FoundryAdapter(AIProvider):
                     f"FoundryAdapter: Connecting to {self.resource} "
                     f"with API key auth"
                 )
-                self._client = AnthropicFoundry(
+                self._client = AsyncAnthropicFoundry(
                     api_key=self._api_key,
                     resource=self.resource,
                 )
@@ -133,7 +133,7 @@ class FoundryAdapter(AIProvider):
                     DefaultAzureCredential(),
                     "https://cognitiveservices.azure.com/.default",
                 )
-                self._client = AnthropicFoundry(
+                self._client = AsyncAnthropicFoundry(
                     resource=self.resource,
                     azure_ad_token_provider=token_provider,
                 )
