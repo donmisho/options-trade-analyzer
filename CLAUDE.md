@@ -77,8 +77,10 @@ The core architectural decision is the **adapter pattern** for data sources. All
 **Why**: Adding a new brokerage requires writing one adapter class that implements these interfaces. Zero changes to API endpoints or analysis engines.
 
 **Current providers**:
-- `TradierMarketData` (app/providers/tradier.py) — sandbox and production market data
-- `SchwabMarketData` (app/providers/schwab.py) — OAuth-based market data with auto-refreshing tokens
+- `SchwabMarketData` (app/providers/schwab.py) — **primary provider**; OAuth-based with auto-refreshing tokens
+- `TradierMarketData` (app/providers/tradier.py) — fallback only; retained for dev/testing without Schwab credentials
+
+**Routing rule**: `default_market_data_provider = "schwab"` in `config.py`. All API routes use `_get_provider()` or `settings.default_market_data_provider` — **never hardcode `"tradier"`** anywhere in the API layer.
 
 The `ProviderFactory` (app/providers/factory.py) creates provider instances based on user configuration and caches them by user_id to reuse HTTP clients.
 
@@ -126,37 +128,45 @@ app/
 
 ```
 web/src/
-├── App.jsx                   # Routes: /verticals, /naked-options, /directional, /favorites
-├── main.jsx                  # React root, wraps App in AppProvider
+├── App.jsx                          # Routes + activeStrategy state
+├── main.jsx                         # React root
 ├── context/
-│   └── AppContext.jsx        # Shared state: activeSymbol, watchlist, favorites, prices
+│   └── AppContext.jsx               # Shared: activeSymbol, watchlist, favorites, prices
 ├── api/
-│   └── client.js             # API client functions (getQuote, analyzeVerticals, etc.)
+│   └── client.js                    # API client (getQuote, analyzeVerticals, apiPost, etc.)
+├── strategy-configs/                # Strategy plugin system
+│   ├── index.js                     # Registry: maps key → config object
+│   ├── verticals.config.js          # Vertical spreads
+│   └── long-calls.config.js         # Puts & Calls (long calls/puts)
 ├── components/
-│   ├── Layout.jsx            # Header + Watchlist + <Outlet> for page content
-│   ├── Header.jsx            # Logo, tabs, Schwab status, config button
-│   ├── Watchlist.jsx         # Sidebar with live prices
-│   ├── QuoteBar.jsx          # Top bar showing active symbol price + 52w range
-│   ├── ResultsTable.jsx      # Sortable table of analyzed trades with star button
-│   ├── ConfigDrawer.jsx      # Settings slideout (SMA periods, score weights)
-│   ├── FormulaBreakdownPanel.jsx # Shows score formula + raw values
-│   ├── AskClaudePanel.jsx    # AI trade evaluation slideout
-│   └── ...                   # ScoreBar, Toast, SymbolInput, FavoritesTab, etc.
+│   ├── Layout.jsx                   # Header + Watchlist + <Outlet>
+│   ├── Header.jsx                   # Logo, dynamic strategy tabs, Schwab status
+│   ├── Watchlist.jsx                # Sidebar with live prices
+│   ├── QuoteBar.jsx                 # Active symbol price + 52w range
+│   ├── ResultsTable.jsx             # Legacy — superseded by OptionsTerminal grid
+│   ├── ConfigDrawer.jsx             # Settings slideout
+│   ├── FormulaBreakdownPanel.jsx    # Score formula transparency panel
+│   ├── AskClaudePanel.jsx           # AI trade evaluation drawer (single-trade)
+│   └── ...                          # ScoreBar, Toast, TradeAgentPanel, etc.
 └── pages/
-    ├── VerticalsPage.jsx     # Bull call / bear put spreads
-    ├── NakedOptionsPage.jsx  # Naked calls/puts
-    ├── DirectionalPage.jsx   # Long calls with directional momentum
-    └── FavoritesPage.jsx     # Saved trades with current vs. saved prices
+    ├── OptionsTerminal.jsx          # PRIMARY: reusable 4-stage analysis shell
+    ├── VerticalsPage.jsx            # DEPRECATED: retained for reference
+    ├── NakedOptionsPage.jsx         # DEPRECATED: retained for reference
+    ├── DirectionalPage.jsx          # Directional momentum (not yet migrated)
+    └── FavoritesPage.jsx            # Saved trades
 ```
 
 **State management**:
+- `activeStrategy` (string) lives in `App.jsx`, flows through `Layout` → `Header` (sets it) and directly into `OptionsTerminal` (reads it)
 - `AppContext` provides `activeSymbol`, `watchlist`, `favorites`, `prices`, `configOpen` to all components
 - `localStorage` persists watchlist, favorites (30-day TTL), and active symbol across sessions
-- Live prices fetched in parallel using `Promise.all` on mount and watchlist changes
+
+**Adding a new strategy**: Create a config file in `strategy-configs/`, register it in `index.js`. No other files need to change.
 
 **Routing**:
 - React Router v6 nested layout: `<Layout>` renders header + watchlist, child routes render in `<Outlet>`
-- Default route `/` redirects to `/verticals`
+- `/verticals` and `/naked-options` both render `<OptionsTerminal activeStrategy={activeStrategy} />`
+- Default route `/` and post-login redirect both go to `/dashboard` (not `/verticals`)
 
 ### Analysis Engines
 
@@ -166,6 +176,7 @@ Located in `app/analysis/`, these score option trades using a composite weighted
    - Generates all valid bull call and bear put spreads from an option chain
    - Scores each on: Expected Value (35%), Reward:Risk (25%), Probability (20%), Liquidity (15%), Theta Efficiency (5%)
    - Filters by delta range (0.15-0.45 short strike), min open interest (50), min volume (5), min R:R (0.5:1)
+   - `SpreadFilters.min_ev_threshold` (default 0.0) gates trades before scoring — configurable via system vars
    - Returns sorted by composite score (0-100)
 
 2. **LongCallEngine** (long_call_engine.py):
@@ -242,11 +253,14 @@ Production will swap to PostgreSQL by changing `DATABASE_URL` in .env.
 
 ### Adding a New Analysis Engine
 
+With the OptionsTerminal architecture (Phase 2.7), the frontend steps have changed:
+
 1. Create `app/analysis/your_engine.py` with a function that takes an option chain and returns scored trades
 2. Add route in `app/api/analysis_routes.py`
-3. Add frontend call in `web/src/api/client.js`
-4. Create page component in `web/src/pages/YourPage.jsx`
-5. Add route in `web/src/App.jsx`
+3. Add frontend call in `web/src/api/client.js` (or use the generic `apiPost`)
+4. **Create `web/src/strategy-configs/your-strategy.config.js`** (not a full page)
+5. **Register in `web/src/strategy-configs/index.js`**
+6. The tab appears in Header and the terminal renders it automatically. No new page file or routing changes needed.
 
 ### Adding a New API Endpoint
 
@@ -299,10 +313,17 @@ Trades can be starred from any analysis page. Favorites are stored in `localStor
 
 The FavoritesPage refetches current quotes and shows delta from saved price, allowing users to track if a trade idea improved or worsened since they bookmarked it.
 
+## House Style Rules
+
+- **No `$` in UI**: Never prefix prices, changes, or symbols with `$` in the frontend. Display `567.23` not `$567.23`, `+2.34` not `+$2.34`.
+- **Health pips**: Each pip is its own column (`pip_rr`, `pip_prob`, `pip_score` for verticals; same keys reused for naked options with different labels/titles). Never group pips in a single cell.
+- **`getHealthPips` signature**: Always `getHealthPips(trade, systemVars)` — both strategy configs accept systemVars as second param.
+- **System Variables**: All user-configurable thresholds live in `analysisConfig.systemVars` (14 fields per preset). ConfigDrawer System Variables section shows verticals or naked-options pip thresholds conditionally based on `mode` prop.
+- **Schwab index symbols**: `.DJI` displays as-is; API call uses `$DJI`. `.INX` displays as-is; API call uses `$SPX`. `NDX` → `$NDX`. `RUT` → `$RUT`. `VIX` → `$VIX`. Use `apiSymbol` field in INDICES array for this mapping.
+
 ## Known Limitations / Future Work
 
 - No backend tests yet (validation via Swagger UI in development)
-- SQLite in development; PostgreSQL for production
 - MCP integration (Phase 4) not started
 - Trading execution (Phase 5) not started
 - No persistent favorites/watchlist sync to backend (currently localStorage only)

@@ -183,3 +183,114 @@ All new resources follow `ota-` naming and carry the standard four tags.
 The first four steps are pure infrastructure and can be done in a single session before
 writing any agent logic. Getting telemetry flowing early means you have observability
 data from the first real test call.
+
+
+---
+
+## Phase 2.7 — Options Decision Terminal (Frontend Overhaul)
+
+### What Changed
+
+The per-strategy pages (VerticalsPage, NakedOptionsPage) have been replaced by a single
+reusable shell: `OptionsTerminal.jsx`. Each strategy is defined as a config object in
+`web/src/strategy-configs/`. The terminal reads the config and renders accordingly.
+
+### New Files
+
+| File | Purpose |
+|------|---------|
+| `web/src/pages/OptionsTerminal.jsx` | The reusable 4-stage analysis shell |
+| `web/src/strategy-configs/index.js` | Strategy registry — maps key → config object |
+| `web/src/strategy-configs/verticals.config.js` | Vertical spreads config |
+| `web/src/strategy-configs/long-calls.config.js` | Puts & Calls config |
+
+### The Plugin Pattern
+
+To add a new strategy (straddles, iron condors, etc.):
+1. Create `web/src/strategy-configs/your-strategy.config.js`
+2. Register it in `strategy-configs/index.js`
+3. The tab appears in Header automatically. The terminal renders it automatically.
+   No changes to OptionsTerminal.jsx or Header.jsx required.
+
+### Strategy Config Shape
+
+Each config answers 5 questions for the terminal:
+- **Identity**: label, tabLabel, key
+- **API**: endpoint, how to build params, which response key holds trades
+- **Grid**: column definitions with format functions
+- **Badges & Health**: how to render type badge and 3-pip health indicators
+- **Payoff**: payoffType ("spread" | "single_leg") and optional payoffFn
+- **Score Metrics**: scoreMetrics array for the inline Math Matrix in Stage 2
+
+### Active Strategy State
+
+`activeStrategy` string lives in `App.jsx`. Today it is set by tabs in `Header.jsx`.
+To change the navigation mechanism in the future (dropdown, URL param, mobile nav),
+only `Header.jsx` changes. `OptionsTerminal.jsx` is unaffected.
+
+### Terminal Stages
+
+- **Stage 0**: Ticker nav, market data ribbon, signal banner, candlestick chart with SMA 8/21/50
+- **Stage 1**: Master grid — ranked trades, dynamic columns from config
+- **Stage 2**: Inline expansion — math matrix + payoff diagram (placeholder for single-leg strategies)
+- **Stage 3**: Side drawer — AskClaudePanel for AI deep-dive
+
+### Deprecation
+
+`VerticalsPage.jsx` and `NakedOptionsPage.jsx` are retained but commented out of routing.
+They serve as reference implementations. Remove after one stable release cycle.
+
+### Dependencies Added
+
+- `recharts` — installed via npm for the candlestick chart and payoff diagram
+
+---
+
+## Phase 2.8 — Configurable System Variables, Dashboard, Schwab-Only Routing
+
+### OptionsTerminal Enhancements
+
+- **Market ribbon**: symbol cell (large/bold, first), SIGNAL badge (BULLISH/BEARISH/MIXED), LAST ANALYZED timestamp, then price/range/greek cells. No large signal banner.
+- **Candlestick chart**: SMA legend overlay (right side, absolute positioned), X-axis dates in MM/DD, configurable chart start date (default 90 trading days), date picker in legend panel.
+- **Health pips**: Replaced single grouped `health` column with 3 individual columns (`pip_rr`, `pip_prob`, `pip_score`). Each column is 36px wide with a tooltip title. Rendered via `pip_rr | pip_prob | pip_score` key check in OptionsTerminal.
+
+### Strategy Config Changes
+
+- `getHealthPips(trade, systemVars)` — both configs accept `systemVars` as second param.
+- **Verticals** pips: R:R, Probability, Composite Score — thresholds from `systemVars.pip_rr_*`, `pip_prob_*`, `pip_score_*`.
+- **Naked options** pips: Delta sweet spot, IV quality, Theta runway — thresholds from `systemVars.pip_delta_lo/hi`, `pip_iv_*`, `pip_runway_*`.
+- Expiration date format: `DD-MM-YYYY` (was `MM-DD`).
+
+### System Variables (ConfigDrawer)
+
+All previously hardcoded thresholds are now user-configurable via `analysisConfig.systemVars` (14 fields):
+
+| Group | Fields |
+|-------|--------|
+| Exit levels | `exit_warning_pct`, `exit_scale_out_pct`, `exit_underlying_stop_pct`, `exit_time_stop_days` |
+| Scoring filters | `min_reward_risk`, `min_ev_threshold` |
+| Verticals pips | `pip_rr_green/amber`, `pip_prob_green/amber`, `pip_score_green/amber` |
+| Naked options pips | `pip_delta_lo/hi`, `pip_iv_green/amber`, `pip_runway_green/amber` |
+
+ConfigDrawer System Variables section is **mode-conditional**: shows verticals pip thresholds when `mode="verticals"`, naked options thresholds when `mode="naked"`.
+
+All 4 built-in presets carry preset-appropriate defaults for all 14 fields.
+
+### Backend: Scoring Filter Surfaced
+
+- `SpreadFilters.min_ev_threshold: float = 0.0` — replaces the hardcoded `ev_raw >= 0` gate in vertical_engine.py line 203.
+- `VerticalRequest` accepts `min_reward_risk` and `min_ev_threshold`; both passed to `SpreadFilters` and recorded in `filter_dict`.
+
+### Provider Routing: Schwab as Default
+
+- `config.py`: `default_market_data_provider = "schwab"` (was `"tradier"`).
+- `analysis_routes.py`: chain fetch uses `settings.default_market_data_provider` — no hardcoded Tradier.
+- `market_routes.py`: historical close uses `_get_provider()` — no hardcoded Tradier.
+- **Rule**: Never hardcode `"tradier"` in API routes. Always use `_get_provider()` or `settings.default_market_data_provider`.
+
+### Dashboard Page
+
+- Post-login redirect: `/dashboard` (was `/verticals`). Nav tab: "Dashboard" (was "Home").
+- Market overview: 9 cards — `.DJI`, `.INX`, `NDX`, `RUT` (indices, first row) then `SPY`, `QQQ`, `DIA`, `IWM`, `VIX` (ETFs).
+- `apiSymbol` field maps display label → actual Schwab API symbol (e.g. `.INX` → `$SPX`, `VIX` → `$VIX`).
+- No `$` prefix on any price or change value (house style).
