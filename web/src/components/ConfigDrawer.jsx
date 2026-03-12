@@ -160,10 +160,11 @@ export default function ConfigDrawer({ mode = "verticals", open, onClose, config
   const [draft, setDraft] = useState(config);
   useEffect(() => { if (open) setDraft(config); }, [open, config]);
 
-  const { weights, dte, strikes, spreads, risk, spreadTypes, greeks, smaPeriods } = draft;
-  const st = spreadTypes || { bull_call: true, bear_put: true };
+  const { weights, dte, strikes, spreads, risk, spreadTypes, greeks, smaPeriods, systemVars } = draft;
+  const st = spreadTypes || { bull_call: true, bear_put: true, bull_put: false, bear_call: false };
   const gk = greeks || { min_short_delta: 0.15, max_short_delta: 0.45, min_net_delta: 0, max_net_theta: 0 };
   const sma = smaPeriods || { short: 8, mid: 21, long: 50 };
+  const sv = systemVars || { exit_warning_pct: 67, exit_scale_out_pct: 160, exit_underlying_stop_pct: 1.5, exit_time_stop_days: 10, min_reward_risk: 0.5, min_ev_threshold: 0, pip_rr_green: 1.5, pip_rr_amber: 1.0, pip_prob_green: 0.55, pip_prob_amber: 0.45, pip_score_green: 0.65, pip_score_amber: 0.45, pip_delta_lo: 0.30, pip_delta_hi: 0.65, pip_iv_green: 30, pip_iv_amber: 50, pip_runway_green: 30, pip_runway_amber: 15 };
 
   const ws = Object.values(weights).reduce((s, v) => s + v, 0);
   const wPct = Math.round(ws * 100);
@@ -223,13 +224,19 @@ export default function ConfigDrawer({ mode = "verticals", open, onClose, config
           <div style={{ marginBottom: 8 }}>
             <span style={{ fontSize: 11, color: C.textDim }}>SMA Signal: </span>
             <span style={{ fontSize: 11, fontWeight: 600, color: alignColor }}>{alignLabel}</span>
-            {recType && <span style={{ fontSize: 10, color: C.textMuted, marginLeft: 6 }}>— suggests {recType === "bull_call" ? "Bull Calls" : "Bear Puts"}</span>}
+            {recType && <span style={{ fontSize: 10, color: C.textMuted, marginLeft: 6 }}>— suggests {recType === "bull_call" ? "Bull Call / Bull Put" : "Bear Put / Bear Call"}</span>}
           </div>
-          <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+          <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 6 }}>Debit spreads (pay to enter):</div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
             <ToggleChip label="Bull Call" checked={st.bull_call} onChange={(v) => sd({ spreadTypes: { ...st, bull_call: v } })} color={C.green} />
             <ToggleChip label="Bear Put" checked={st.bear_put} onChange={(v) => sd({ spreadTypes: { ...st, bear_put: v } })} color={C.red} />
           </div>
-          {!st.bull_call && !st.bear_put && <p style={{ fontSize: 11, color: C.red, margin: "4px 0 0" }}>Select at least one spread type.</p>}
+          <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 6 }}>Credit spreads (collect premium):</div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+            <ToggleChip label="Bull Put" checked={!!st.bull_put} onChange={(v) => sd({ spreadTypes: { ...st, bull_put: v } })} color={C.green} />
+            <ToggleChip label="Bear Call" checked={!!st.bear_call} onChange={(v) => sd({ spreadTypes: { ...st, bear_call: v } })} color={C.red} />
+          </div>
+          {!st.bull_call && !st.bear_put && !st.bull_put && !st.bear_call && <p style={{ fontSize: 11, color: C.red, margin: "4px 0 0" }}>Select at least one spread type.</p>}
         </Sect>)}
 
         {/* SMA Periods — NEW */}
@@ -271,6 +278,48 @@ export default function ConfigDrawer({ mode = "verticals", open, onClose, config
           <SingleSlider label="Max Risk Per Trade" value={risk.max_risk_per_trade} min={50} max={5000} step={50} color={C.accent} onChange={v => sd({ risk: { ...risk, max_risk_per_trade: v } })} />
           <SingleSlider label="Profit Target" value={risk.profit_target_pct} min={0} max={500} step={5} unit="%" color={C.green} onChange={v => sd({ risk: { ...risk, profit_target_pct: v } })} />
           <SingleSlider label="Stop Loss" value={risk.stop_loss_pct} min={0} max={100} step={5} unit="%" color={C.red} onChange={v => sd({ risk: { ...risk, stop_loss_pct: v } })} />
+        </Sect>
+
+        <Sect title="System Variables" icon="&#9881;&#65039;">
+          <p style={{ fontSize: 11, color: C.textDim, margin: "4px 0 10px", lineHeight: 1.5 }}>
+            Exit level thresholds used in Claude trade evaluation. These control when to warn, scale out, and stop — expressed as a percentage of the spread debit or current price.
+          </p>
+          <SingleSlider label="Exit Warning Level" value={sv.exit_warning_pct} min={10} max={99} step={1} unit="% of debit" color={C.amber} onChange={v => sd({ systemVars: { ...sv, exit_warning_pct: v } })} />
+          <p style={{ fontSize: 10, color: C.textMuted, margin: "-8px 0 12px" }}>Alert threshold — e.g. 67% means warn when spread value drops to $0.67 on a $1.00 debit.</p>
+          <SingleSlider label="Exit Scale-Out Level" value={sv.exit_scale_out_pct} min={110} max={300} step={5} unit="% of debit" color={C.green} onChange={v => sd({ systemVars: { ...sv, exit_scale_out_pct: v } })} />
+          <p style={{ fontSize: 10, color: C.textMuted, margin: "-8px 0 12px" }}>Partial profit exit — e.g. 160% means begin scaling out when spread is worth $1.60 on a $1.00 debit.</p>
+          <NumInput label="Underlying Stop Buffer" value={sv.exit_underlying_stop_pct} onChange={v => sd({ systemVars: { ...sv, exit_underlying_stop_pct: v } })} min={0.1} max={10} step={0.1} unit="% below price" />
+          <p style={{ fontSize: 10, color: C.textMuted, margin: "-6px 0 12px" }}>Stock hard stop: min(SMA-short, price − buffer%). Exit the trade if stock falls here.</p>
+          <NumInput label="Time Stop (days before expiry)" value={sv.exit_time_stop_days} onChange={v => sd({ systemVars: { ...sv, exit_time_stop_days: v } })} min={1} max={60} step={1} unit="days" />
+          <p style={{ fontSize: 10, color: C.textMuted, margin: "-6px 0 16px" }}>Force exit when DTE falls below this threshold to avoid gamma risk near expiration.</p>
+
+          <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 14, marginTop: 4 }}>
+            <p style={{ fontSize: 10.5, color: C.textDim, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", margin: "0 0 10px" }}>Scoring Filters</p>
+            <p style={{ fontSize: 11, color: C.textDim, margin: "0 0 10px", lineHeight: 1.5 }}>Pre-scoring gates — spreads failing these are removed before scoring begins.</p>
+            <NumInput label="Min Reward:Risk" value={sv.min_reward_risk ?? 0.5} onChange={v => sd({ systemVars: { ...sv, min_reward_risk: v } })} min={0.1} max={5.0} step={0.1} unit=":1" />
+            <p style={{ fontSize: 10, color: C.textMuted, margin: "-6px 0 12px" }}>Minimum reward:risk ratio to consider. Default 0.5 = at least $0.50 profit per $1.00 risk.</p>
+            <NumInput label="Min Expected Value" value={sv.min_ev_threshold ?? 0} onChange={v => sd({ systemVars: { ...sv, min_ev_threshold: v } })} min={-10} max={10} step={0.05} unit="× debit" />
+            <p style={{ fontSize: 10, color: C.textMuted, margin: "-6px 0 4px" }}>Minimum EV expressed as a multiple of the debit. 0 = only show positive EV trades. Raise to require stronger edge.</p>
+          </div>
+
+          <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 14, marginTop: 12 }}>
+            <p style={{ fontSize: 10.5, color: C.textDim, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", margin: "0 0 10px" }}>Health Indicator Thresholds</p>
+            <p style={{ fontSize: 11, color: C.textDim, margin: "0 0 10px", lineHeight: 1.5 }}>Controls the green/amber/red pip color cutoffs in the trade grid.</p>
+            {isV ? (<>
+              <p style={{ fontSize: 10, color: C.textMuted, margin: "0 0 8px" }}>Verticals — R:R, Probability, Composite Score. Amber = lower cutoff, Green = higher cutoff.</p>
+              <DualRangeSlider label="R:R Pip (amber / green)" minVal={sv.pip_rr_amber ?? 1.0} maxVal={sv.pip_rr_green ?? 1.5} min={0.1} max={5.0} step={0.1} color={C.green} onChange={(a, b) => sd({ systemVars: { ...sv, pip_rr_amber: a, pip_rr_green: b } })} />
+              <DualRangeSlider label="Prob Pip (amber / green)" minVal={sv.pip_prob_amber ?? 0.45} maxVal={sv.pip_prob_green ?? 0.55} min={0.10} max={0.90} step={0.05} color={C.accent} onChange={(a, b) => sd({ systemVars: { ...sv, pip_prob_amber: a, pip_prob_green: b } })} />
+              <DualRangeSlider label="Score Pip (amber / green)" minVal={sv.pip_score_amber ?? 0.45} maxVal={sv.pip_score_green ?? 0.65} min={0.10} max={0.95} step={0.05} color={C.purple} onChange={(a, b) => sd({ systemVars: { ...sv, pip_score_amber: a, pip_score_green: b } })} />
+            </>) : (<>
+              <p style={{ fontSize: 10, color: C.textMuted, margin: "0 0 8px" }}>Puts &amp; Calls — Delta sweet spot, IV entry quality, Theta runway.</p>
+              <DualRangeSlider label="Delta Sweet Spot (lo / hi)" minVal={sv.pip_delta_lo ?? 0.30} maxVal={sv.pip_delta_hi ?? 0.65} min={0.05} max={0.95} step={0.05} color={C.accent} onChange={(a, b) => sd({ systemVars: { ...sv, pip_delta_lo: a, pip_delta_hi: b } })} />
+              <p style={{ fontSize: 10, color: C.textMuted, margin: "-8px 0 12px" }}>Green when delta is within this range. Amber within ±0.05 of either edge, red outside.</p>
+              <DualRangeSlider label="IV Pip (green / amber)" minVal={sv.pip_iv_green ?? 30} maxVal={sv.pip_iv_amber ?? 50} min={5} max={150} step={5} unit="%" color={C.amber} onChange={(a, b) => sd({ systemVars: { ...sv, pip_iv_green: a, pip_iv_amber: b } })} />
+              <p style={{ fontSize: 10, color: C.textMuted, margin: "-8px 0 12px" }}>Green when IV ≤ left value, amber when ≤ right value, red above.</p>
+              <DualRangeSlider label="Runway Pip (amber / green)" minVal={sv.pip_runway_amber ?? 15} maxVal={sv.pip_runway_green ?? 30} min={1} max={120} step={1} unit="d" color={C.green} onChange={(a, b) => sd({ systemVars: { ...sv, pip_runway_amber: a, pip_runway_green: b } })} />
+              <p style={{ fontSize: 10, color: C.textMuted, margin: "-8px 0 4px" }}>Green when runway ≥ right value, amber when ≥ left value, red below.</p>
+            </>)}
+          </div>
         </Sect>
       </div>
 

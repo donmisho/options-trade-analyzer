@@ -1,0 +1,1042 @@
+/**
+ * OptionsTerminal — Reusable 4-stage analysis shell.
+ *
+ * Receives a single prop: activeStrategy (string key from STRATEGY_CONFIGS).
+ * Looks up the config and renders accordingly — no hardcoded strategy knowledge.
+ *
+ * Stage 0: Ticker nav, market data ribbon, signal banner, candlestick chart
+ * Stage 1: Master grid — ranked trades, dynamic columns from config
+ * Stage 2: Inline expansion — math matrix + payoff diagram
+ * Stage 3: Side drawer — AskClaudePanel for AI deep-dive
+ */
+
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import {
+  ComposedChart, Bar, Line, ReferenceLine, XAxis, YAxis,
+  CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, Cell,
+} from 'recharts';
+import { STRATEGY_CONFIGS } from '../strategy-configs/index';
+import { apiPost, getQuote } from '../api/client';
+import { useApp } from '../context/AppContext';
+import AskClaudePanel from '../components/AskClaudePanel';
+import ConfigDrawer from '../components/ConfigDrawer';
+import ScoreBar from '../components/ScoreBar';
+import { C, mono, DEFAULT_PRESETS } from '../styles/tokens';
+
+// ─── Constants ───────────────────────────────────────────────────────────────
+
+const BG       = C.bg;
+const SURFACE  = C.surface;
+const BORDER   = C.border;
+const TEXT     = C.text;
+const DIM      = C.textDim;
+const MUTED    = C.textMuted;
+const GREEN    = C.candleGreen;  // #26a69a
+const AMBER    = C.amber;        // #f59e0b
+const RED      = C.red;          // #ef5350
+const ACCENT   = C.accent;       // #4f8ef7
+const CL_ACCENT = C.claudeAccent; // #f59e0b
+const SMA8_COLOR  = C.smaCyan;   // #00bcd4
+const SMA21_COLOR = C.smaOrange; // #ff9800
+const SMA50_COLOR = C.smaRed;    // #e8837c
+
+// ─── generateCandles — copied verbatim from VerticalsPage ────────────────────
+
+function generateCandles(price, count = 120) {
+  // Walk backwards from today (inclusive), skipping weekends.
+  // unshift() builds array oldest-first so index 0 = leftmost, last = today.
+  const dates = [];
+  const cursor = new Date();
+  cursor.setHours(0, 0, 0, 0);
+  while (dates.length < count) {
+    const dow = cursor.getDay();
+    if (dow !== 0 && dow !== 6) {
+      const mm = String(cursor.getMonth() + 1).padStart(2, '0');
+      const dd = String(cursor.getDate()).padStart(2, '0');
+      dates.unshift(`${mm}/${dd}`);
+    }
+    cursor.setDate(cursor.getDate() - 1);
+  }
+
+  const candles = [];
+  let p = price * 0.95;
+  for (let i = 0; i < count; i++) {
+    const change = (Math.random() - 0.48) * price * 0.012;
+    const open = p; const close = p + change;
+    const high = Math.max(open, close) + Math.random() * price * 0.005;
+    const low = Math.min(open, close) - Math.random() * price * 0.005;
+    candles.push({ open, high, low, close, day: dates[i] }); p = close;
+  }
+  const scale = price / candles[candles.length - 1].close;
+  return candles.map(c => ({
+    open: c.open * scale, high: c.high * scale,
+    low: c.low * scale, close: c.close * scale, day: c.day,
+  }));
+}
+
+// ─── CandleShape — custom SVG candle for Recharts Bar ────────────────────────
+
+function CandleShape({ x, y, width, height, payload }) {
+  if (!payload || !height || height <= 0) return null;
+
+  // y = pixel position of `payload.high` (top of bar, domain max for this bar)
+  // height = pixels from y to the bar's baseValue (domain min)
+  // We use this to compute a price → pixel scale.
+  const domainMin = payload.chartLow;
+  if (payload.high <= domainMin) return null;
+
+  const pixPerUnit = height / (payload.high - domainMin);
+  const yFor = (price) => y + (payload.high - price) * pixPerUnit;
+
+  const isGreen = payload.close >= payload.open;
+  const color = isGreen ? GREEN : RED;
+  const cx = x + width / 2;
+
+  const yHigh  = y; // = yFor(payload.high)
+  const yLow   = yFor(payload.low);
+  const yBody1 = yFor(Math.max(payload.open, payload.close));
+  const yBody2 = yFor(Math.min(payload.open, payload.close));
+
+  return (
+    <g>
+      {/* Wick */}
+      <rect x={cx - 0.5} y={yHigh} width={1} height={Math.max(0, yLow - yHigh)} fill={color} />
+      {/* Body */}
+      <rect
+        x={cx - 3} y={yBody1} width={6}
+        height={Math.max(1, yBody2 - yBody1)}
+        fill={color + '50'} stroke={color} strokeWidth={1}
+      />
+    </g>
+  );
+}
+
+// ─── Custom tooltip for the candlestick chart ─────────────────────────────────
+
+function CandleTooltip({ active, payload }) {
+  if (!active || !payload?.[0]) return null;
+  const d = payload[0].payload;
+  return (
+    <div style={{
+      background: SURFACE, border: `1px solid ${BORDER}`, borderRadius: 6,
+      padding: '6px 10px', fontSize: 11, fontFamily: mono, color: TEXT,
+    }}>
+      <div>O: {d.open?.toFixed(2)}</div>
+      <div>H: {d.high?.toFixed(2)}</div>
+      <div>L: {d.low?.toFixed(2)}</div>
+      <div>C: {d.close?.toFixed(2)}</div>
+    </div>
+  );
+}
+
+// ─── Health Pips ─────────────────────────────────────────────────────────────
+
+function HealthPips({ pips }) {
+  return (
+    <div style={{ display: 'flex', gap: 3, justifyContent: 'center', alignItems: 'center' }}>
+      {pips.map((pip, i) => (
+        <div key={i} style={{
+          width: 8, height: 8, borderRadius: '50%', backgroundColor: pip.color,
+        }} />
+      ))}
+    </div>
+  );
+}
+
+// ─── Payoff AreaChart ─────────────────────────────────────────────────────────
+
+function PayoffChart({ data, trade }) {
+  const buyStrike  = trade.long_strike;
+  const sellStrike = trade.short_strike;
+  const midPrice   = trade.breakeven;
+
+  return (
+    <ResponsiveContainer width="100%" height={160}>
+      <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+        <defs>
+          <linearGradient id="payoffGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%"   stopColor={GREEN} stopOpacity={0.25} />
+            <stop offset="45%"  stopColor={GREEN} stopOpacity={0} />
+            <stop offset="55%"  stopColor={RED}   stopOpacity={0} />
+            <stop offset="100%" stopColor={RED}   stopOpacity={0.2} />
+          </linearGradient>
+        </defs>
+        <XAxis dataKey="price" hide />
+        <YAxis orientation="right" width={50} tick={{ fill: MUTED, fontSize: 9 }} tickFormatter={(v) => v.toFixed(0)} />
+        <ReferenceLine y={0} stroke={BORDER} strokeDasharray="3 3" />
+        {midPrice   && <ReferenceLine x={midPrice}   stroke={ACCENT + '60'} strokeDasharray="3 3" />}
+        {buyStrike  && <ReferenceLine x={buyStrike}  stroke={MUTED + '80'} strokeDasharray="2 4" />}
+        {sellStrike && <ReferenceLine x={sellStrike} stroke={MUTED + '80'} strokeDasharray="2 4" />}
+        <Area
+          type="monotone" dataKey="pnl" isAnimationActive={false}
+          fill="url(#payoffGrad)" stroke={ACCENT} strokeWidth={1.5}
+        />
+      </AreaChart>
+    </ResponsiveContainer>
+  );
+}
+
+// ─── Math Matrix (inline score breakdown) ────────────────────────────────────
+
+function MathMatrix({ trade, config }) {
+  const { scoreMetrics } = config;
+  const total = scoreMetrics.reduce((sum, m) => {
+    const val = trade?.[m.field];
+    return sum + (val != null ? val * (m.weightPct / 100) : 0);
+  }, 0);
+
+  return (
+    <div>
+      {scoreMetrics.map((m, idx) => {
+        const score = trade?.[m.field];
+        const contribution = score != null ? score * (m.weightPct / 100) : null;
+
+        return (
+          <div key={m.key} style={{
+            marginBottom: 10,
+            paddingBottom: idx < scoreMetrics.length - 1 ? 10 : 0,
+            borderBottom: idx < scoreMetrics.length - 1 ? `1px solid ${C.borderSubtle}` : 'none',
+          }}>
+            {/* Header row */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div style={{ width: 7, height: 7, borderRadius: '50%', backgroundColor: m.color }} />
+                <span style={{ color: TEXT, fontWeight: 600, fontSize: 12 }}>{m.label}</span>
+                <span style={{
+                  padding: '1px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600,
+                  backgroundColor: m.color + '20', color: m.color,
+                }}>{m.weightPct}%</span>
+              </div>
+              <span style={{ color: m.color, fontWeight: 700, fontFamily: mono, fontSize: 12 }}>
+                {contribution != null ? `+${contribution.toFixed(4)}` : '—'}
+              </span>
+            </div>
+
+            {/* Formula */}
+            <div style={{ marginLeft: 13, fontSize: 11, color: MUTED, fontFamily: mono, marginBottom: 3 }}>
+              {m.formula}
+            </div>
+
+            {/* Score bar */}
+            <div style={{ marginLeft: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{
+                flex: 1, height: 4, backgroundColor: BORDER, borderRadius: 2, overflow: 'hidden',
+              }}>
+                <div style={{
+                  height: '100%', width: `${(score || 0) * 100}%`,
+                  backgroundColor: m.color, borderRadius: 2, transition: 'width 0.3s ease',
+                }} />
+              </div>
+              <span style={{ color: DIM, fontSize: 10, fontFamily: mono, minWidth: 40, textAlign: 'right' }}>
+                {score != null ? score.toFixed(4) : '—'}
+              </span>
+            </div>
+          </div>
+        );
+      })}
+
+      {/* Composite total */}
+      <div style={{
+        marginTop: 8, padding: '8px 12px', backgroundColor: C.surfaceAlt,
+        borderRadius: 6, border: `1px solid ${BORDER}`,
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+      }}>
+        <span style={{ color: TEXT, fontWeight: 700, fontSize: 13 }}>Composite Score</span>
+        <span style={{
+          color: total > 0.65 ? GREEN : total > 0.45 ? AMBER : RED,
+          fontWeight: 800, fontSize: 18, fontFamily: mono,
+        }}>
+          {total.toFixed(4)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ─── Chart date helpers ───────────────────────────────────────────────────────
+
+function tradingDaysAgo(n) {
+  // Returns YYYY-MM-DD string for the date n trading days before today
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  let count = 0;
+  while (count < n) {
+    d.setDate(d.getDate() - 1);
+    const dow = d.getDay();
+    if (dow !== 0 && dow !== 6) count++;
+  }
+  return d.toISOString().slice(0, 10);
+}
+
+function countTradingDays(startDateStr) {
+  // Count weekdays from startDateStr up to and including today
+  const today = new Date();
+  today.setHours(23, 59, 59, 0);
+  const d = new Date(startDateStr + 'T12:00:00');
+  let count = 0;
+  while (d <= today) {
+    const dow = d.getDay();
+    if (dow !== 0 && dow !== 6) count++;
+    d.setDate(d.getDate() + 1);
+  }
+  return Math.max(count, 10);
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
+
+export default function OptionsTerminal({ activeStrategy }) {
+  const config = STRATEGY_CONFIGS[activeStrategy] || STRATEGY_CONFIGS.verticals;
+  const { activeSymbol } = useApp();
+
+  // ── State ──────────────────────────────────────────────────────────────────
+  const [symbol,       setSymbol]       = useState(activeSymbol || 'QQQ');
+  const [inputSymbol,  setInputSymbol]  = useState(activeSymbol || 'QQQ');
+  const [trades,       setTrades]       = useState([]);
+  const [underlyingPrice, setUnderlyingPrice] = useState(0);
+  const [quoteData,    setQuoteData]    = useState(null);
+  const [candles,      setCandles]      = useState([]);
+  const [loading,        setLoading]        = useState(false);
+  const [error,          setError]          = useState(null);
+  const [lastAnalyzed,   setLastAnalyzed]   = useState(null);
+  const [chartStartDate, setChartStartDate] = useState(() => tradingDaysAgo(90));
+  const chartStartDateRef = useRef(chartStartDate);
+  const [selectedId,   setSelectedId]   = useState(null);
+  const [drawerTrade,  setDrawerTrade]  = useState(null);
+  const [drawerOpen,   setDrawerOpen]   = useState(false);
+  const [configOpen,   setConfigOpen]   = useState(false);
+
+  // ── Analysis config (weights, DTE, spread types, etc.) ────────────────────
+  const [presets,        setPresets]        = useState(DEFAULT_PRESETS);
+  const [activePresetId, setActivePresetId] = useState('balanced');
+  const [analysisConfig, setAnalysisConfig] = useState(() => {
+    const preset = DEFAULT_PRESETS.find(p => p.id === 'balanced') || DEFAULT_PRESETS[0];
+    return {
+      weights: { ...preset.weights },
+      dte:     { min: preset.dte?.min || 14, max: preset.dte?.max || 60 },
+      strikes: { range_pct: preset.strikes?.range_pct || 10, min_open_interest: 50, min_volume: 5 },
+      spreads: { min_width: 1, max_width: 10 },
+      risk:    { max_risk_per_trade: 500, profit_target_pct: 75, stop_loss_pct: 50 },
+      spreadTypes: { bull_call: true, bear_put: true, bull_put: false, bear_call: false },
+      greeks:  { min_short_delta: 0.15, max_short_delta: 0.45, min_net_delta: 0, max_net_theta: 0 },
+      smaPeriods: { short: 8, mid: 21, long: 50 },
+      systemVars: preset.systemVars
+        ? { ...preset.systemVars }
+        : { exit_warning_pct: 67, exit_scale_out_pct: 160, exit_underlying_stop_pct: 1.5, exit_time_stop_days: 10 },
+    };
+  });
+  const analysisConfigRef = useRef(analysisConfig);
+  analysisConfigRef.current = analysisConfig;
+
+  // Track if we've initialized (avoids duplicate runs on mount)
+  const initialized = useRef(false);
+
+  // ── SMA computation — uses periods from analysisConfig ───────────────────
+  const smaPeriods = analysisConfig.smaPeriods || { short: 8, mid: 21, long: 50 };
+
+  const getSmaData = useCallback(() => {
+    if (!candles.length) return { price: underlyingPrice, smaShort: 0, smaMid: 0, smaLong: 0 };
+    const sma = (period) => {
+      const slice = candles.slice(-period);
+      return slice.reduce((s, c) => s + c.close, 0) / slice.length;
+    };
+    return {
+      price: candles[candles.length - 1]?.close || underlyingPrice,
+      smaShort: sma(smaPeriods.short),
+      smaMid:   sma(smaPeriods.mid),
+      smaLong:  sma(smaPeriods.long),
+    };
+  }, [candles, underlyingPrice]);
+
+  const smaData = getSmaData();
+
+  // ── Chart data with per-candle SMA values ─────────────────────────────────
+  const chartData = useMemo(() => {
+    return candles.map((c, i) => {
+      const sma = (period) => {
+        if (i < period - 1) return null;
+        const slice = candles.slice(i - period + 1, i + 1);
+        return slice.reduce((s, c) => s + c.close, 0) / slice.length;
+      };
+      return { ...c, sma8: sma(smaPeriods.short), sma21: sma(smaPeriods.mid), sma50: sma(smaPeriods.long) };
+    });
+  }, [candles]);
+
+  // ── Chart Y-domain bounds — needed by CandleShape ─────────────────────────
+  const chartBounds = useMemo(() => {
+    if (!chartData.length) return { low: 0, high: 100 };
+    const lows  = chartData.map(c => c.low);
+    const highs = chartData.map(c => c.high);
+    const low   = Math.min(...lows);
+    const high  = Math.max(...highs);
+    const pad   = (high - low) * 0.03;
+    return { low: low - pad, high: high + pad };
+  }, [chartData]);
+
+  // Add chartLow to each candle so CandleShape can access it via payload
+  const chartDataWithMeta = useMemo(() => {
+    return chartData.map(c => ({ ...c, chartLow: chartBounds.low }));
+  }, [chartData, chartBounds]);
+
+  // ── Signal banner ─────────────────────────────────────────────────────────
+  const signal = useMemo(() => {
+    const { price, smaShort, smaMid, smaLong } = smaData;
+    if (!smaShort || !smaMid || !smaLong) {
+      return { text: '◆ Mixed — No directional confirmation', bg: BORDER, color: DIM };
+    }
+    if (price > smaShort && smaShort > smaMid && smaMid > smaLong) {
+      return { text: '◆ Bullish Alignment — Price above all 3 SMAs', bg: GREEN, color: '#000' };
+    }
+    if (smaShort < smaMid) {
+      return { text: '◆ Bearish Signal — Short-term weakness', bg: AMBER, color: '#000' };
+    }
+    return { text: '◆ Mixed — No directional confirmation', bg: BORDER, color: DIM };
+  }, [smaData]);
+
+  // ── Market ribbon helpers ─────────────────────────────────────────────────
+  function fmtChange(v) {
+    if (v == null) return '—';
+    const s = v > 0 ? `+${v.toFixed(2)}` : v.toFixed(2);
+    return s;
+  }
+  function fmtChangePct(v) {
+    if (v == null) return '—';
+    return `${v > 0 ? '+' : ''}${v.toFixed(2)}%`;
+  }
+  function fmtVol(v) {
+    if (!v) return '—';
+    if (v >= 1e6) return `${(v / 1e6).toFixed(1)}M`;
+    if (v >= 1e3) return `${(v / 1e3).toFixed(1)}K`;
+    return v.toString();
+  }
+  function fmtRange(lo, hi) {
+    if (!lo && !hi) return '—';
+    const f = (n) => n?.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) ?? '—';
+    return `${f(lo)} – ${f(hi)}`;
+  }
+  function fmtRelVol(ratio) {
+    if (ratio == null) return '—';
+    return `${ratio.toFixed(1)}x`;
+  }
+  function fmtCriticalDate(dateStr) {
+    if (!dateStr) return null;
+    const d = new Date(dateStr);
+    if (isNaN(d)) return null;
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const days = Math.round((d - today) / 86400000);
+    const label = d.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit' });
+    return { label, days };
+  }
+  const changeColor = (v) => v == null ? DIM : v > 0 ? GREEN : v < 0 ? RED : DIM;
+  const criticalDateColor = (days) => days == null ? DIM : days <= 14 ? RED : days <= 30 ? AMBER : GREEN;
+
+  // ── runAnalysis ───────────────────────────────────────────────────────────
+  const runAnalysis = useCallback(async (sym) => {
+    const targetSym = sym || symbol;
+    setLoading(true);
+    setError(null);
+
+    try {
+      const [analysisResult, quote] = await Promise.all([
+        apiPost(config.apiEndpoint, config.buildApiParams(targetSym, analysisConfigRef.current)),
+        getQuote(targetSym).catch(() => null),
+      ]);
+
+      const tradeList = analysisResult[config.tradesKey] || [];
+      setTrades(tradeList);
+      setUnderlyingPrice(analysisResult.underlying_price || 0);
+      setQuoteData(quote);
+      setLastAnalyzed(new Date());
+
+      if (analysisResult.underlying_price) {
+        const count = countTradingDays(chartStartDateRef.current);
+        setCandles(generateCandles(analysisResult.underlying_price, count));
+      }
+    } catch (err) {
+      setError(err.message || 'Analysis failed');
+      setTrades([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [config, symbol]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Config apply ──────────────────────────────────────────────────────────
+  const handleConfigApply = useCallback((newConfig) => {
+    setAnalysisConfig(newConfig);
+    setConfigOpen(false);
+    analysisConfigRef.current = newConfig;
+    runAnalysis(symbol);
+  }, [runAnalysis, symbol]);
+
+  // ── When activeStrategy changes: reset + re-analyze ──────────────────────
+  useEffect(() => {
+    setTrades([]);
+    setSelectedId(null);
+    setDrawerOpen(false);
+    setError(null);
+    if (initialized.current) {
+      runAnalysis(symbol);
+    }
+  }, [activeStrategy]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Regenerate candles when chart start date changes ──────────────────────
+  useEffect(() => {
+    chartStartDateRef.current = chartStartDate;
+    if (underlyingPrice > 0) {
+      const count = countTradingDays(chartStartDate);
+      setCandles(generateCandles(underlyingPrice, count));
+    }
+  }, [chartStartDate]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Initial load ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    initialized.current = true;
+    runAnalysis(symbol);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Watchlist selection: sync activeSymbol from context ───────────────────
+  useEffect(() => {
+    if (!activeSymbol || !initialized.current) return;
+    setSymbol(activeSymbol);
+    setInputSymbol(activeSymbol);
+    setSelectedId(null);
+    setDrawerOpen(false);
+    runAnalysis(activeSymbol);
+  }, [activeSymbol]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Symbol submit ─────────────────────────────────────────────────────────
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    const sym = inputSymbol.trim().toUpperCase();
+    if (!sym) return;
+    setSymbol(sym);
+    setSelectedId(null);
+    setDrawerOpen(false);
+    runAnalysis(sym);
+  };
+
+  // ── Row click: toggle expansion ───────────────────────────────────────────
+  const handleRowClick = (tradeId) => {
+    setSelectedId(prev => prev === tradeId ? null : tradeId);
+    setDrawerOpen(false);
+  };
+
+  // ── Open drawer ───────────────────────────────────────────────────────────
+  const handleOpenDrawer = (trade) => {
+    const enhanced = {
+      ...trade,
+      symbol,
+      spread_type: trade.spread_type || (trade.option_type === 'put' ? 'long_put' : 'long_call'),
+    };
+    setDrawerTrade(enhanced);
+    setDrawerOpen(true);
+  };
+
+  // ── Trade ID helper ───────────────────────────────────────────────────────
+  const getTradeId = (trade, idx) => {
+    return trade.long_strike != null
+      ? `${trade.long_strike}-${trade.short_strike}-${trade.expiration}-${trade.spread_type}`
+      : `${trade.strike}-${trade.expiration}-${trade.option_type}-${idx}`;
+  };
+
+  // ── Payoff data for selected trade ────────────────────────────────────────
+  const selectedTrade = useMemo(() => {
+    if (!selectedId || !trades.length) return null;
+    return trades.find((t, i) => getTradeId(t, i) === selectedId) || null;
+  }, [selectedId, trades]);
+
+  const payoffData = useMemo(() => {
+    if (!selectedTrade || config.payoffType !== 'spread' || !config.payoffFn) return [];
+    try { return config.payoffFn(selectedTrade, underlyingPrice); }
+    catch { return []; }
+  }, [selectedTrade, config, underlyingPrice]);
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // RENDER
+  // ─────────────────────────────────────────────────────────────────────────
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 0, minHeight: 0 }}>
+
+      {/* ── STAGE 0: Header + chart ────────────────────────────────────────── */}
+      <div style={{ backgroundColor: BG, borderBottom: `1px solid ${BORDER}`, padding: '10px 16px 0' }}>
+
+        {/* Nav bar */}
+        <form onSubmit={handleSubmit} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+          <input
+            value={inputSymbol}
+            onChange={e => setInputSymbol(e.target.value.toUpperCase())}
+            placeholder="Enter symbol…"
+            style={{
+              flex: 1, maxWidth: 220, padding: '6px 10px', borderRadius: 6,
+              border: `1px solid ${BORDER}`, backgroundColor: SURFACE,
+              color: TEXT, fontSize: 13, fontFamily: mono, outline: 'none',
+            }}
+          />
+
+          <button type="submit" style={{
+            padding: '6px 18px', borderRadius: 6, border: 'none',
+            backgroundColor: ACCENT, color: '#fff', fontFamily: mono,
+            fontSize: 13, fontWeight: 700, cursor: 'pointer',
+          }}>
+            Analyze
+          </button>
+
+          {loading && (
+            <div style={{
+              width: 16, height: 16, border: `2px solid ${BORDER}`,
+              borderTopColor: ACCENT, borderRadius: '50%',
+              animation: 'spin 0.7s linear infinite',
+            }} />
+          )}
+        </form>
+
+        {/* Market ribbon */}
+        {(underlyingPrice > 0 || quoteData) && (
+          <div style={{
+            display: 'flex', gap: 0, marginBottom: 8,
+            border: `1px solid ${BORDER}`, borderRadius: 6, overflow: 'hidden',
+          }}>
+            {(() => {
+              const earnings = fmtCriticalDate(quoteData?.next_earnings_date);
+              const dividend = fmtCriticalDate(quoteData?.next_dividend_date);
+              const isBullish = signal.bg === GREEN;
+              const isBearish = signal.bg === AMBER;
+              const sigBadge = isBullish
+                ? { label: 'BULLISH',  color: GREEN, bg: `${GREEN}25` }
+                : isBearish
+                  ? { label: 'BEARISH', color: AMBER, bg: `${AMBER}25` }
+                  : { label: 'MIXED',   color: DIM,   bg: `${DIM}20` };
+
+              const cells = [
+                { label: 'SYMBOL',       value: symbol, color: TEXT, mono: true, large: true },
+                { label: 'SIGNAL',       badge: sigBadge },
+                { label: 'LAST ANALYZED', value: lastAnalyzed ? lastAnalyzed.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }) + ' ' + lastAnalyzed.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }) : '—', color: DIM },
+                { label: 'PRICE',     value: (quoteData?.price || underlyingPrice).toFixed(2), color: TEXT },
+                { label: 'CHG',       value: fmtChange(quoteData?.change),          color: changeColor(quoteData?.change) },
+                { label: 'CHG %',     value: fmtChangePct(quoteData?.change_pct),   color: changeColor(quoteData?.change_pct) },
+                { label: 'DAY RANGE', value: fmtRange(quoteData?.day_low, quoteData?.day_high), color: DIM },
+                { label: '52W RANGE', value: fmtRange(quoteData?.week_52_low, quoteData?.week_52_high), color: DIM },
+                { label: 'VOLUME',    value: fmtVol(quoteData?.volume),             color: DIM },
+                { label: 'REL VOL',   value: fmtRelVol(quoteData?.volume_ratio),    color: quoteData?.volume_ratio >= 1.5 ? AMBER : DIM },
+                ...(earnings ? [{ label: 'EARNINGS', value: `${earnings.label} (${earnings.days}d)`, color: criticalDateColor(earnings.days) }] : []),
+                ...(dividend ? [{ label: 'DIVIDEND', value: `${dividend.label} (${dividend.days}d)`, color: criticalDateColor(dividend.days) }] : []),
+              ];
+              return cells.map((field, i) => (
+                <div key={field.label} style={{
+                  flex: 1, padding: '5px 8px', backgroundColor: SURFACE,
+                  borderRight: i < cells.length - 1 ? `1px solid ${BORDER}` : 'none',
+                  textAlign: 'center', minWidth: 0,
+                }}>
+                  <div style={{ fontSize: 9, color: MUTED, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 2 }}>
+                    {field.label}
+                  </div>
+                  {field.badge ? (
+                    <span style={{
+                      display: 'inline-block', padding: '2px 8px', borderRadius: 4,
+                      fontSize: 10, fontWeight: 700, letterSpacing: '0.05em',
+                      color: field.badge.color, backgroundColor: field.badge.bg,
+                    }}>
+                      {field.badge.label}
+                    </span>
+                  ) : (
+                    <div style={{ fontSize: field.large ? 15 : 12, fontFamily: mono, fontWeight: field.large ? 800 : 600, color: field.color, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', letterSpacing: field.large ? 1 : 0 }}>
+                      {field.value}
+                    </div>
+                  )}
+                </div>
+              ));
+            })()}
+          </div>
+        )}
+
+        {/* Candlestick chart */}
+        {candles.length > 0 && (
+          <div style={{ position: 'relative' }}>
+            {/* SMA legend — far right, outside Y-axis */}
+            <div style={{
+              position: 'absolute', top: 0, right: 0, bottom: 0, zIndex: 10,
+              width: 130,
+              display: 'flex', flexDirection: 'column', justifyContent: 'center',
+              padding: '8px 10px',
+              borderLeft: `1px solid ${BORDER}`,
+              background: `linear-gradient(135deg, ${C.surfaceAlt} 0%, ${C.card} 100%)`,
+              borderRadius: '0 4px 4px 0',
+            }}>
+              {/* SMA section */}
+              <div style={{
+                fontSize: 8, fontWeight: 700, color: MUTED,
+                letterSpacing: '0.07em', textTransform: 'uppercase',
+                marginBottom: 7, textAlign: 'center',
+                borderBottom: `1px solid ${BORDER}`, paddingBottom: 5,
+              }}>
+                SMA Configuration
+              </div>
+              {[
+                { period: smaPeriods.short, color: SMA8_COLOR  },
+                { period: smaPeriods.mid,   color: SMA21_COLOR },
+                { period: smaPeriods.long,  color: SMA50_COLOR },
+              ].map(({ period, color }) => (
+                <div key={period} style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 5 }}>
+                  <div style={{ width: 12, height: 12, backgroundColor: color, borderRadius: 2, flexShrink: 0 }} />
+                  <span style={{ fontSize: 11, fontFamily: mono, color, fontWeight: 700 }}>{period}-day</span>
+                </div>
+              ))}
+
+              {/* Chart start date section */}
+              <div style={{
+                fontSize: 8, fontWeight: 700, color: MUTED,
+                letterSpacing: '0.07em', textTransform: 'uppercase',
+                marginTop: 10, marginBottom: 6, textAlign: 'center',
+                borderTop: `1px solid ${BORDER}`, paddingTop: 8,
+              }}>
+                Chart Start Date
+              </div>
+              <input
+                type="date"
+                value={chartStartDate}
+                max={new Date().toISOString().slice(0, 10)}
+                onChange={e => e.target.value && setChartStartDate(e.target.value)}
+                style={{
+                  width: '100%', boxSizing: 'border-box',
+                  backgroundColor: C.bg, border: `1px solid ${BORDER}`,
+                  borderRadius: 4, color: DIM, fontSize: 10,
+                  padding: '3px 4px', fontFamily: mono,
+                  outline: 'none', cursor: 'pointer',
+                  colorScheme: 'dark',
+                }}
+              />
+            </div>
+
+          <ResponsiveContainer width="100%" height={215}>
+            <ComposedChart data={chartDataWithMeta} margin={{ top: 8, right: 138, bottom: 4, left: 0 }}>
+              <CartesianGrid vertical={false} stroke={C.borderSubtle} />
+              <XAxis
+                dataKey="day"
+                interval={13}
+                tick={{ fill: DIM, fontSize: 10, fontFamily: 'monospace' }}
+                axisLine={{ stroke: DIM }}
+                tickLine={{ stroke: DIM }}
+                height={22}
+                minTickGap={40}
+              />
+              <YAxis
+                orientation="right" width={55}
+                domain={[chartBounds.low, chartBounds.high]}
+                tick={{ fill: DIM, fontSize: 10 }}
+                axisLine={{ stroke: DIM }}
+                tickLine={{ stroke: DIM }}
+                tickFormatter={v => v.toFixed(0)}
+              />
+              <Tooltip content={<CandleTooltip />} />
+
+              {/* Candlestick bars — baseValue keeps the bar anchored to chartBounds.low */}
+              <Bar
+                dataKey="high"
+                baseValue={chartBounds.low}
+                shape={<CandleShape />}
+                isAnimationActive={false}
+                fill="transparent"
+              />
+
+              {/* SMA lines */}
+              <Line type="monotone" dataKey="sma8"  stroke={SMA8_COLOR}  strokeWidth={1.5} dot={false} isAnimationActive={false} />
+              <Line type="monotone" dataKey="sma21" stroke={SMA21_COLOR} strokeWidth={1.5} dot={false} isAnimationActive={false} />
+              <Line type="monotone" dataKey="sma50" stroke={SMA50_COLOR} strokeWidth={1.5} dot={false} isAnimationActive={false} />
+
+              {/* Current price reference */}
+              <ReferenceLine y={underlyingPrice} stroke={ACCENT + '90'} strokeDasharray="4 4" />
+            </ComposedChart>
+          </ResponsiveContainer>
+          </div>
+        )}
+      </div>
+
+      {/* ── STAGE 1: Master grid ───────────────────────────────────────────── */}
+      <div style={{ flex: 1, overflowX: 'auto', padding: '0 0 80px' }}>
+
+        {/* Loading */}
+        {loading && (
+          <div style={{ padding: '40px 16px', textAlign: 'center', color: DIM }}>
+            <div style={{ fontSize: 13 }}>Analyzing {symbol} options chain…</div>
+          </div>
+        )}
+
+        {/* Error */}
+        {error && (
+          <div style={{
+            margin: 16, padding: '10px 14px', backgroundColor: C.redBg,
+            border: `1px solid ${RED}40`, borderRadius: 6,
+            display: 'flex', alignItems: 'center', gap: 10,
+          }}>
+            <span style={{ color: RED }}>⚠ {error}</span>
+            <button
+              onClick={() => runAnalysis(symbol)}
+              style={{ background: 'none', border: `1px solid ${RED}60`, color: RED, padding: '3px 10px', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
+        {/* Grid header */}
+        {!loading && !error && trades.length > 0 && (
+          <div style={{
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            padding: '8px 16px', borderBottom: `1px solid ${BORDER}`,
+          }}>
+            <span style={{ fontFamily: mono, fontSize: 13, fontWeight: 700, color: TEXT }}>
+              {symbol} <span style={{ color: DIM }}>{config.label}</span>
+              <span style={{ color: MUTED, marginLeft: 8 }}>· {trades.length} results</span>
+            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontSize: 11, color: MUTED }}>
+                Click a row to see scoring breakdown →
+              </span>
+              <button
+                onClick={() => setConfigOpen(true)}
+                style={{
+                  padding: '4px 10px', borderRadius: 5, fontSize: 11,
+                  border: `1px solid ${BORDER}`, background: 'none',
+                  color: DIM, cursor: 'pointer',
+                }}
+              >
+                ⚙ Config
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Table */}
+        {!loading && !error && trades.length > 0 && (
+          <table style={{
+            width: '100%', borderCollapse: 'collapse',
+            fontFamily: mono, fontSize: 12,
+          }}>
+            <thead>
+              <tr style={{ backgroundColor: C.surfaceAlt, borderBottom: `1px solid ${BORDER}` }}>
+                {config.columns.map(col => (
+                  <th key={col.key} style={{
+                    padding: '6px 8px', textAlign: col.align,
+                    color: MUTED, fontWeight: 600, fontSize: 10,
+                    textTransform: 'uppercase', letterSpacing: '0.06em',
+                    whiteSpace: 'nowrap', width: col.width,
+                  }}>
+                    {col.label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {trades.map((trade, idx) => {
+                const tradeId   = getTradeId(trade, idx);
+                const isSelected = tradeId === selectedId;
+                const badge      = config.getBadge(trade);
+                const pips       = config.getHealthPips(trade, analysisConfig.systemVars);
+
+                return [
+                  // Trade row
+                  <tr
+                    key={`row-${tradeId}`}
+                    onClick={() => handleRowClick(tradeId)}
+                    style={{
+                      cursor: 'pointer',
+                      borderLeft: `3px solid ${isSelected ? ACCENT : 'transparent'}`,
+                      backgroundColor: isSelected ? ACCENT + '08' : 'transparent',
+                      borderBottom: `1px solid ${BORDER}`,
+                      transition: 'background 0.1s',
+                    }}
+                    onMouseEnter={e => { if (!isSelected) e.currentTarget.style.backgroundColor = SURFACE; }}
+                    onMouseLeave={e => { if (!isSelected) e.currentTarget.style.backgroundColor = 'transparent'; }}
+                  >
+                    {config.columns.map((col, ci) => {
+                      const val = trade[col.key];
+
+                      // Special: row index
+                      if (col.key === '#') {
+                        return (
+                          <td key={ci} style={{ padding: '6px 8px', textAlign: 'center', color: MUTED }}>
+                            {idx + 1}
+                          </td>
+                        );
+                      }
+
+                      // Special: type badge
+                      if (col.key === 'badge') {
+                        return (
+                          <td key={ci} style={{ padding: '6px 8px', textAlign: 'center' }}>
+                            <span style={{
+                              display: 'inline-block', padding: '2px 7px', borderRadius: 4,
+                              fontSize: 10, fontWeight: 700, letterSpacing: '0.04em',
+                              color: badge.color, backgroundColor: badge.bg,
+                            }}>
+                              {badge.label}
+                            </span>
+                          </td>
+                        );
+                      }
+
+                      // Special: score bar
+                      if (col.key === 'composite_score') {
+                        return (
+                          <td key={ci} style={{ padding: '4px 8px', textAlign: 'center' }}>
+                            <ScoreBar score={trade.composite_score} />
+                          </td>
+                        );
+                      }
+
+                      // Special: individual health pips
+                      if (col.key === 'pip_rr' || col.key === 'pip_prob' || col.key === 'pip_score') {
+                        const pip = pips[col.key === 'pip_rr' ? 0 : col.key === 'pip_prob' ? 1 : 2];
+                        return (
+                          <td key={ci} style={{ padding: '6px 8px', textAlign: 'center' }} title={col.title}>
+                            <div style={{ width: 10, height: 10, borderRadius: '50%', backgroundColor: pip.color, margin: '0 auto' }} />
+                          </td>
+                        );
+                      }
+
+                      // Standard formatted cell
+                      return (
+                        <td key={ci} style={{
+                          padding: '6px 8px',
+                          textAlign: col.align,
+                          color: TEXT,
+                        }}>
+                          {col.format ? col.format(val, trade, idx) : (val ?? '—')}
+                        </td>
+                      );
+                    })}
+                  </tr>,
+
+                  // Stage 2: Inline expansion
+                  isSelected && (
+                    <tr key={`expand-${tradeId}`}>
+                      <td colSpan={config.columns.length} style={{
+                        backgroundColor: BG,
+                        borderTop: `2px solid ${ACCENT}`,
+                        borderBottom: `1px solid ${BORDER}`,
+                        padding: 16,
+                      }}>
+                        <div style={{ display: 'flex', gap: 16 }}>
+
+                          {/* Left 58%: Math Matrix */}
+                          <div style={{ flex: '0 0 58%' }}>
+                            <div style={{ fontSize: 10, color: MUTED, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>
+                              Score Breakdown
+                            </div>
+                            <MathMatrix trade={trade} config={config} />
+                          </div>
+
+                          {/* Right 42%: Payoff diagram */}
+                          <div style={{ flex: '0 0 42%' }}>
+                            <div style={{ fontSize: 10, color: MUTED, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>
+                              Payoff at Expiration
+                            </div>
+                            {config.payoffType === 'spread' && payoffData.length > 0 ? (
+                              <PayoffChart data={payoffData} trade={trade} />
+                            ) : (
+                              <div style={{
+                                height: 160, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                backgroundColor: C.card, border: `1px dashed ${BORDER}`,
+                                borderRadius: 6, color: MUTED, fontSize: 12,
+                              }}>
+                                Payoff diagram available for spread strategies
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* CTA button */}
+                        <button
+                          onClick={() => handleOpenDrawer(trade)}
+                          style={{
+                            marginTop: 14, width: '100%', height: 40,
+                            backgroundColor: ACCENT, border: 'none', borderRadius: 6,
+                            color: '#fff', fontFamily: mono, fontSize: 13,
+                            fontWeight: 700, cursor: 'pointer', letterSpacing: '0.04em',
+                          }}
+                        >
+                          ✦ View Full Claude Thesis
+                        </button>
+                      </td>
+                    </tr>
+                  ),
+                ].filter(Boolean);
+              })}
+            </tbody>
+          </table>
+        )}
+
+        {/* Empty state */}
+        {!loading && !error && trades.length === 0 && underlyingPrice > 0 && (
+          <div style={{ padding: '40px 16px', textAlign: 'center' }}>
+            <div style={{ fontSize: 32, marginBottom: 12 }}>📊</div>
+            <div style={{ fontSize: 15, color: TEXT, fontWeight: 600, marginBottom: 6 }}>
+              No results found for {symbol}
+            </div>
+            <div style={{ fontSize: 13, color: DIM }}>
+              No trades passed the current filters. Try a different symbol or adjust settings.
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── STAGE 3: Side drawer ──────────────────────────────────────────── */}
+      {drawerOpen && (
+        <div
+          onClick={() => setDrawerOpen(false)}
+          style={{
+            position: 'fixed', inset: 0,
+            background: 'rgba(0,0,0,0.5)',
+            backdropFilter: 'blur(2px)',
+            zIndex: 40,
+          }}
+        />
+      )}
+      <AskClaudePanel
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        trade={drawerTrade}
+        smaData={smaData}
+        smaPeriods={smaPeriods}
+        riskConfig={{ ...analysisConfig.risk, systemVars: analysisConfig.systemVars }}
+      />
+
+      {/* Spinner keyframe */}
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+
+      {/* Config drawer — opened via Header gear or inline ⚙ button */}
+      <ConfigDrawer
+        mode={activeStrategy === 'long_calls' ? 'naked' : 'verticals'}
+        open={configOpen}
+        onClose={() => setConfigOpen(false)}
+        config={analysisConfig}
+        onApply={handleConfigApply}
+        alignment={signal.text.includes('Bullish') ? 'bullish' : signal.text.includes('Bearish') ? 'bearish' : 'mixed'}
+        presets={presets}
+        activePresetId={activePresetId}
+        onPresetSelect={(id) => {
+          setActivePresetId(id);
+          const preset = presets.find(p => p.id === id);
+          if (preset) setAnalysisConfig(prev => ({
+            ...prev,
+            weights: { ...preset.weights },
+            dte:    { min: preset.dte?.min || 14, max: preset.dte?.max || 60 },
+            strikes: { ...prev.strikes, range_pct: preset.strikes?.range_pct || 10 },
+            spreads: { min_width: preset.spreads?.min_width || 1, max_width: preset.spreads?.max_width || 10 },
+            ...(preset.systemVars ? { systemVars: { ...preset.systemVars } } : {}),
+          }));
+        }}
+        onSavePreset={(name) => {
+          const id = name.toLowerCase().replace(/\s+/g, '_');
+          setPresets(prev => [...prev, { id, name, icon: '📌', desc: 'Custom preset', ...analysisConfig }]);
+          setActivePresetId(id);
+        }}
+        onOverwrite={(id) => setPresets(prev => prev.map(p => p.id === id ? { ...p, ...analysisConfig } : p))}
+        onDelete={(id) => {
+          setPresets(prev => prev.filter(p => p.id !== id));
+          if (activePresetId === id) setActivePresetId('balanced');
+        }}
+        onRename={(id, newName) => setPresets(prev => prev.map(p => p.id === id ? { ...p, name: newName } : p))}
+      />
+    </div>
+  );
+}

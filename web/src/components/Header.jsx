@@ -1,19 +1,22 @@
 /**
- * Header — Top bar with logo, nav tabs, favorites badge, and Schwab status.
+ * Header — Top bar with logo, dynamic strategy tabs, favorites badge, Schwab status.
  *
- * ROUND 4 CHANGE: "Long Calls" tab renamed to "Puts & Calls" with
- * route path changed from /long-calls to /naked-options.
+ * Phase 2.7: Strategy tabs are now rendered dynamically from STRATEGY_CONFIGS.
+ * Clicking a tab calls setActiveStrategy(cfg.key), which is passed down from App.jsx.
+ * Favorites, Directional, and other routes remain as NavLinks.
  */
 import { useState, useEffect, useCallback } from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
 import Logo from '../assets/Logo';
 import { useApp } from '../context/AppContext';
 import { getSchwabStatus, getSchwabAuthUrl } from '../api/client';
+import { STRATEGY_CONFIGS } from '../strategy-configs/index';
 import './Header.css';
 
-export default function Header() {
+export default function Header({ activeStrategy, setActiveStrategy }) {
   const { favorites, fetchPrices, setConfigOpen } = useApp();
   const favCount = favorites.length;
+  const navigate = useNavigate();
 
   const [schwabConnected, setSchwabConnected] = useState(null);
 
@@ -59,6 +62,14 @@ export default function Header() {
     setTimeout(() => clearInterval(pollInterval), 5 * 60 * 1000);
   };
 
+  // Handle strategy tab click: update activeStrategy + navigate to the right URL
+  const handleStrategyClick = (cfg) => {
+    if (setActiveStrategy) setActiveStrategy(cfg.key);
+    // Route to the appropriate URL so the back button and direct links work
+    if (cfg.key === 'verticals') navigate('/verticals');
+    else navigate('/naked-options');
+  };
+
   return (
     <header className="header">
       <div className="logo">
@@ -66,13 +77,24 @@ export default function Header() {
         <span>Options Analyzer</span>
       </div>
       <nav className="nav-tabs">
-        <NavLink to="/verticals" className="nav-tab">
-          Vertical Spreads
+
+        {/* Dashboard */}
+        <NavLink to="/dashboard" className="nav-tab">
+          Dashboard
         </NavLink>
-        {/* CHANGED: was /long-calls "Long Calls" — now covers both puts and calls */}
-        <NavLink to="/naked-options" className="nav-tab">
-          Puts & Calls
-        </NavLink>
+
+        {/* Dynamic strategy tabs from STRATEGY_CONFIGS */}
+        {Object.values(STRATEGY_CONFIGS).map(cfg => (
+          <button
+            key={cfg.key}
+            onClick={() => handleStrategyClick(cfg)}
+            className={activeStrategy === cfg.key ? 'nav-tab active' : 'nav-tab'}
+          >
+            {cfg.tabLabel}
+          </button>
+        ))}
+
+        {/* Non-strategy tabs remain as NavLinks */}
         <NavLink to="/directional" className="nav-tab">
           Directional Compare
         </NavLink>
@@ -80,7 +102,8 @@ export default function Header() {
           ★ Favorites
           {favCount > 0 && <span className="fav-count">{favCount}</span>}
         </NavLink>
-         <button
+
+        <button
           onClick={() => setConfigOpen(true)}
           title="Analysis configuration"
           style={{
@@ -99,7 +122,8 @@ export default function Header() {
           onMouseLeave={(e) => { e.currentTarget.style.color = '#8b90a0'; e.currentTarget.style.borderColor = 'transparent'; }}
         >
           ⚙
-        </button>       
+        </button>
+
         <div
           className={`schwab-status ${
             schwabConnected === null ? 'checking' :
@@ -119,6 +143,7 @@ export default function Header() {
              schwabConnected ? 'Connected' : 'Disconnected'}
           </span>
         </div>
+
         <button
           onClick={() => {
             localStorage.removeItem('ota_token');

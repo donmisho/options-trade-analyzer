@@ -44,7 +44,7 @@ class Settings(BaseSettings):
 
     # --- Provider Defaults ---
     # Which provider handles each role (can be overridden per-user)
-    default_market_data_provider: str = "tradier"
+    default_market_data_provider: str = "schwab"
     default_account_provider: Optional[str] = None
     default_trading_provider: Optional[str] = None
 

@@ -56,7 +56,10 @@ class SpreadFilters:
     min_open_interest: int = 50       # Per leg — low OI = bad fills
     min_volume: int = 5               # Per leg — needs activity
     min_reward_risk: float = 0.5      # At least 0.5:1 reward:risk
+    min_ev_threshold: float = 0.0    # Minimum raw EV; 0 = only positive EV trades
     spread_types: list = field(default_factory=lambda: ["bull_call", "bear_put"])
+    min_net_delta: float = 0.0        # 0 = no filter; minimum net delta of the spread
+    max_net_theta: float = 0.0        # 0 = no filter; max absolute theta drain per day
 
 
 @dataclass
@@ -180,7 +183,15 @@ class VerticalSpreadEngine:
                 raw_spreads.extend(
                     self._build_bear_puts(chain, exp, underlying_price)
                 )
-        
+            if opt_type == "put" and "bull_put" in self.filters.spread_types:
+                raw_spreads.extend(
+                    self._build_bull_puts(chain, exp, underlying_price)
+                )
+            if opt_type == "call" and "bear_call" in self.filters.spread_types:
+                raw_spreads.extend(
+                    self._build_bear_calls(chain, exp, underlying_price)
+                )
+
         if not raw_spreads:
             return {
                 "spreads": [],
@@ -188,6 +199,17 @@ class VerticalSpreadEngine:
                 "underlying_price": underlying_price,
             }
         
+        # Hard filter: discard spreads below the EV threshold before scoring.
+        # Default threshold is 0 (only positive EV); user can raise or lower via system vars.
+        raw_spreads = [s for s in raw_spreads if s.ev_raw >= self.filters.min_ev_threshold]
+
+        if not raw_spreads:
+            return {
+                "spreads": [],
+                "total_valid": 0,
+                "underlying_price": underlying_price,
+            }
+
         # Score and rank
         scored = self._score_all(raw_spreads)
         scored.sort(key=lambda s: s.composite_score, reverse=True)
@@ -244,6 +266,47 @@ class VerticalSpreadEngine:
                     spreads.append(spread)
         return spreads
     
+    def _build_bull_puts(
+        self, puts: list[dict], exp: str, price: float
+    ) -> list[ScoredSpread]:
+        """
+        Bull Put Spread: SELL higher strike put, BUY lower strike put (both puts).
+
+        WHY: Profits when stock stays ABOVE the short put strike. You collect
+        a credit upfront and keep it if the stock doesn't fall too far.
+        Max profit = credit received. Max loss = width - credit.
+        """
+        spreads = []
+        for i, short_leg in enumerate(puts):  # higher index = higher strike put
+            for j in range(i):
+                long_leg = puts[j]  # lower strike put (protection)
+                spread = self._try_build_credit_spread(
+                    "bull_put", long_leg, short_leg, exp, price
+                )
+                if spread:
+                    spreads.append(spread)
+        return spreads
+
+    def _build_bear_calls(
+        self, calls: list[dict], exp: str, price: float
+    ) -> list[ScoredSpread]:
+        """
+        Bear Call Spread: SELL lower strike call, BUY higher strike call (both calls).
+
+        WHY: Profits when stock stays BELOW the short call strike. You collect
+        a credit upfront and keep it if the stock doesn't rise too far.
+        Max profit = credit received. Max loss = width - credit.
+        """
+        spreads = []
+        for i, short_leg in enumerate(calls):  # lower index = lower strike call (income leg)
+            for long_leg in calls[i + 1:]:     # higher strike call (protection)
+                spread = self._try_build_credit_spread(
+                    "bear_call", long_leg, short_leg, exp, price
+                )
+                if spread:
+                    spreads.append(spread)
+        return spreads
+
     def _try_build_spread(
         self,
         spread_type: str,
@@ -347,11 +410,17 @@ class VerticalSpreadEngine:
         long_theta = long_leg.get("theta", 0) or 0
         short_theta = short_leg.get("theta", 0) or 0
         net_theta = long_theta - short_theta  # Long theta is negative, short is positive for us
-        
+
+        # Net greeks filters (0 = no filter)
+        if self.filters.min_net_delta > 0 and net_delta < self.filters.min_net_delta:
+            return None
+        if self.filters.max_net_theta > 0 and abs(net_theta) > self.filters.max_net_theta:
+            return None
+
         long_vega = long_leg.get("vega", 0) or 0
         short_vega = short_leg.get("vega", 0) or 0
         net_vega = long_vega - short_vega
-        
+
         # Required move %
         if spread_type == "bull_call":
             required_move = ((breakeven - price) / price) * 100
@@ -386,6 +455,122 @@ class VerticalSpreadEngine:
             required_move_pct=round(required_move, 2),
         )
     
+    def _try_build_credit_spread(
+        self,
+        spread_type: str,
+        long_leg: dict,
+        short_leg: dict,
+        exp: str,
+        price: float,
+    ) -> Optional[ScoredSpread]:
+        """
+        Build a credit spread (bull put or bear call).
+
+        WHY SEPARATE FROM _try_build_spread:
+        Credit spreads have inverted economics vs. debit spreads:
+        - Max profit = credit received (not width - debit)
+        - Max loss = width - credit (not the debit itself)
+        - Probability: 1 - |short_delta| (short leg expiring OTM)
+        - net_debit stored as negative to signal it's a credit
+        """
+        width = abs(long_leg["strike"] - short_leg["strike"])
+        if width > self.filters.max_spread_width or width <= 0:
+            return None
+
+        # Short delta filter — same OTM range as debit spreads
+        short_delta = abs(short_leg.get("delta", 0) or 0)
+        if short_delta < self.filters.min_short_delta:
+            return None
+        if short_delta > self.filters.max_short_delta:
+            return None
+
+        # Liquidity filter
+        for leg in [long_leg, short_leg]:
+            if (leg.get("volume", 0) or 0) < self.filters.min_volume:
+                return None
+            if (leg.get("open_interest", 0) or 0) < self.filters.min_open_interest:
+                return None
+
+        long_mid = ((long_leg.get("bid", 0) or 0) + (long_leg.get("ask", 0) or 0)) / 2
+        short_mid = ((short_leg.get("bid", 0) or 0) + (short_leg.get("ask", 0) or 0)) / 2
+
+        net_credit = short_mid - long_mid
+        if net_credit <= 0:
+            return None
+
+        max_profit = net_credit
+        max_loss = width - net_credit
+        if max_loss <= 0:
+            return None
+
+        rr = max_profit / max_loss
+        if rr < self.filters.min_reward_risk:
+            return None
+
+        # Breakeven
+        if spread_type == "bull_put":
+            breakeven = short_leg["strike"] - net_credit
+        else:  # bear_call
+            breakeven = short_leg["strike"] + net_credit
+
+        # Probability: short leg expires OTM
+        prob_of_profit = 1.0 - abs(short_leg.get("delta", 0) or 0)
+
+        # Expected Value
+        ev = (prob_of_profit * max_profit) - ((1 - prob_of_profit) * max_loss)
+
+        # Net Greeks
+        long_delta = long_leg.get("delta", 0) or 0
+        short_delta_raw = short_leg.get("delta", 0) or 0
+        net_delta = long_delta - short_delta_raw
+        long_theta = long_leg.get("theta", 0) or 0
+        short_theta = short_leg.get("theta", 0) or 0
+        net_theta = long_theta - short_theta
+
+        # Net greeks filters (0 = no filter)
+        if self.filters.min_net_delta > 0 and net_delta < self.filters.min_net_delta:
+            return None
+        if self.filters.max_net_theta > 0 and abs(net_theta) > self.filters.max_net_theta:
+            return None
+
+        long_vega = long_leg.get("vega", 0) or 0
+        short_vega = short_leg.get("vega", 0) or 0
+        net_vega = long_vega - short_vega
+
+        # Buffer % — positive means stock has room to move against us before we lose
+        if spread_type == "bull_put":
+            required_move = ((price - breakeven) / price) * 100
+        else:
+            required_move = ((breakeven - price) / price) * 100
+
+        return ScoredSpread(
+            spread_type=spread_type,
+            long_strike=long_leg["strike"],
+            short_strike=short_leg["strike"],
+            expiration=exp,
+            long_bid=long_leg.get("bid", 0) or 0,
+            long_ask=long_leg.get("ask", 0) or 0,
+            short_bid=short_leg.get("bid", 0) or 0,
+            short_ask=short_leg.get("ask", 0) or 0,
+            option_type=long_leg["option_type"],
+            net_debit=round(-net_credit, 2),  # negative = credit received
+            max_profit=round(max_profit, 2),
+            max_loss=round(max_loss, 2),
+            breakeven=round(breakeven, 2),
+            spread_width=width,
+            net_delta=round(net_delta, 4),
+            net_theta=round(net_theta, 4),
+            net_vega=round(net_vega, 4),
+            prob_of_profit=round(prob_of_profit, 4),
+            long_volume=long_leg.get("volume", 0) or 0,
+            long_oi=long_leg.get("open_interest", 0) or 0,
+            short_volume=short_leg.get("volume", 0) or 0,
+            short_oi=short_leg.get("open_interest", 0) or 0,
+            ev_raw=round(ev, 2),
+            reward_risk_ratio=round(rr, 2),
+            required_move_pct=round(required_move, 2),
+        )
+
     # ─── Scoring ──────────────────────────────────────────────
     
     def _score_all(self, spreads: list[ScoredSpread]) -> list[ScoredSpread]:
@@ -423,9 +608,11 @@ class VerticalSpreadEngine:
             for s in spreads
         ]
         thetas = [
-            # Theta efficiency: net_theta / net_debit (less negative = better)
-            # A spread with -0.01 theta on $2 debit is better than -0.05 on $2
-            abs(s.net_theta / s.net_debit) if s.net_debit > 0 else 0
+            # Theta efficiency: net_theta / max_loss
+            # Debit spreads have negative net_theta (cost). Credit spreads have
+            # positive net_theta (income). Higher is better — credit spreads
+            # that collect more theta per dollar at risk score higher.
+            s.net_theta / s.max_loss if s.max_loss > 0 else 0
             for s in spreads
         ]
         
@@ -444,8 +631,7 @@ class VerticalSpreadEngine:
         rr_scores = normalize(rrs, higher_is_better=True)
         prob_scores = normalize(probs, higher_is_better=True)
         liq_scores = normalize(liqs, higher_is_better=True)
-        # For theta: lower absolute ratio = better (less decay per dollar)
-        theta_scores = normalize(thetas, higher_is_better=False)
+        theta_scores = normalize(thetas, higher_is_better=True)
         
         w = self.weights
         for i, s in enumerate(spreads):

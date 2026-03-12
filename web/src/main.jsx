@@ -31,7 +31,7 @@ msalInstance.initialize().then(async () => {
       let targetRoute = '/connect';
       try {
         const schwabStatus = await getSchwabStatus();
-        if (schwabStatus.connected) targetRoute = '/verticals';
+        if (schwabStatus.connected) targetRoute = '/dashboard';
       } catch { /* default to /connect */ }
 
       // MSAL replaces the URL with /login (the redirectStartPage) after processing

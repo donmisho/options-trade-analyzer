@@ -143,6 +143,29 @@ async def get_expirations(
         raise HTTPException(status_code=502, detail=f"Provider error: {str(e)}")
 
 
+@router.get("/history/{symbol}")
+async def get_symbol_history(
+    symbol: str,
+    date: str = Query(..., description="Date in YYYY-MM-DD format"),
+    user: dict = Depends(require_read),
+):
+    """
+    Get the closing price for a symbol on a specific date.
+    Used by the dashboard to compute YTD returns.
+    """
+    factory = _get_factory()
+    provider = _get_provider(factory, user.get("sub"))
+
+    if not hasattr(provider, "get_daily_close"):
+        raise HTTPException(status_code=501, detail="Historical data not supported by this provider")
+
+    try:
+        close = await provider.get_daily_close(symbol.upper(), date)
+        return {"symbol": symbol.upper(), "date": date, "close": close}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Provider error: {str(e)}")
+
+
 @router.get("/strikes/{symbol}/{expiration}")
 async def get_strikes(
     symbol: str,

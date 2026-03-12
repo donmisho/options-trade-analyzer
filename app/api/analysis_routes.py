@@ -26,6 +26,7 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require_read
+from app.core.config import settings
 from app.providers.factory import ProviderFactory
 from app.models.session import get_db
 from app.models.database import OptionChainSnapshot, AnalysisRun, AnalyzedTrade
@@ -80,6 +81,17 @@ class VerticalRequest(BaseModel):
     strike_range_pct: float = Field(default=10.0, ge=1, le=50)
     min_spread_width: float = Field(default=1.0, ge=0.5)
     max_spread_width: float = Field(default=10.0, ge=1)
+    # Greek filters
+    min_short_delta: float = Field(default=0.15, ge=0.0, le=1.0)
+    max_short_delta: float = Field(default=0.45, ge=0.0, le=1.0)
+    min_net_delta: float = Field(default=0.0, ge=0.0, le=1.0)
+    max_net_theta: float = Field(default=0.0, ge=0.0)
+    # Liquidity filters
+    min_open_interest: int = Field(default=50, ge=0)
+    min_volume: int = Field(default=5, ge=0)
+    # Scoring filters (surfaced from frontend system vars)
+    min_reward_risk: float = Field(default=0.5, ge=0.0)
+    min_ev_threshold: float = Field(default=0.0)
 
 
 class LongCallRequest(BaseModel):
@@ -134,7 +146,7 @@ async def _fetch_chain(
     The raw chain dict is returned so callers can persist it.
     """
     factory = _get_factory()
-    provider = factory.get_market_data("tradier", user_id=user.get("sub"))
+    provider = factory.get_market_data(settings.default_market_data_provider, user_id=user.get("sub"))
 
     try:
         chain_data = await provider.get_chain(
@@ -240,7 +252,15 @@ async def analyze_verticals(
 
     filters = SpreadFilters(
         spread_types=req.spread_types,
+        min_short_delta=req.min_short_delta,
+        max_short_delta=req.max_short_delta,
         max_spread_width=req.max_spread_width,
+        min_net_delta=req.min_net_delta,
+        max_net_theta=req.max_net_theta,
+        min_open_interest=req.min_open_interest,
+        min_volume=req.min_volume,
+        min_reward_risk=req.min_reward_risk,
+        min_ev_threshold=req.min_ev_threshold,
     )
     engine = VerticalSpreadEngine(weights=weights, filters=filters)
 
@@ -268,6 +288,8 @@ async def analyze_verticals(
             "strike_range_pct": req.strike_range_pct,
             "min_spread_width": req.min_spread_width,
             "max_spread_width": req.max_spread_width,
+            "min_reward_risk": req.min_reward_risk,
+            "min_ev_threshold": req.min_ev_threshold,
         }
 
         chain_id = await _persist_chain_snapshot(db, user_id, sym, price, chain_data)

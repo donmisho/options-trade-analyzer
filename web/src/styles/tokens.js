@@ -89,6 +89,7 @@ export const DEFAULT_PRESETS = [
     strikes: { range_pct: 10, min_open_interest: 10, min_volume: 1 },
     spreads: { min_width: 1, max_width: 10 },
     risk: { max_risk_per_trade: 500, profit_target_pct: 50, stop_loss_pct: 100 },
+    systemVars: { exit_warning_pct: 67, exit_scale_out_pct: 160, exit_underlying_stop_pct: 1.5, exit_time_stop_days: 10, min_reward_risk: 0.5, min_ev_threshold: 0, pip_rr_green: 1.5, pip_rr_amber: 1.0, pip_prob_green: 0.55, pip_prob_amber: 0.45, pip_score_green: 0.65, pip_score_amber: 0.45, pip_delta_lo: 0.30, pip_delta_hi: 0.65, pip_iv_green: 30, pip_iv_amber: 50, pip_runway_green: 30, pip_runway_amber: 15 },
   },
   {
     id: "aggressive", name: "Aggressive", icon: "🔥", builtIn: true,
@@ -98,6 +99,7 @@ export const DEFAULT_PRESETS = [
     strikes: { range_pct: 15, min_open_interest: 5, min_volume: 1 },
     spreads: { min_width: 2, max_width: 15 },
     risk: { max_risk_per_trade: 1000, profit_target_pct: 70, stop_loss_pct: 100 },
+    systemVars: { exit_warning_pct: 60, exit_scale_out_pct: 175, exit_underlying_stop_pct: 2.0, exit_time_stop_days: 7, min_reward_risk: 0.5, min_ev_threshold: 0.25, pip_rr_green: 2.0, pip_rr_amber: 1.5, pip_prob_green: 0.45, pip_prob_amber: 0.35, pip_score_green: 0.60, pip_score_amber: 0.40, pip_delta_lo: 0.20, pip_delta_hi: 0.75, pip_iv_green: 40, pip_iv_amber: 65, pip_runway_green: 21, pip_runway_amber: 10 },
   },
   {
     id: "conservative", name: "Conservative", icon: "🛡️", builtIn: true,
@@ -107,6 +109,7 @@ export const DEFAULT_PRESETS = [
     strikes: { range_pct: 8, min_open_interest: 50, min_volume: 5 },
     spreads: { min_width: 1, max_width: 5 },
     risk: { max_risk_per_trade: 300, profit_target_pct: 40, stop_loss_pct: 80 },
+    systemVars: { exit_warning_pct: 70, exit_scale_out_pct: 140, exit_underlying_stop_pct: 1.0, exit_time_stop_days: 14, min_reward_risk: 0.75, min_ev_threshold: 0, pip_rr_green: 1.2, pip_rr_amber: 0.8, pip_prob_green: 0.65, pip_prob_amber: 0.55, pip_score_green: 0.70, pip_score_amber: 0.50, pip_delta_lo: 0.35, pip_delta_hi: 0.55, pip_iv_green: 25, pip_iv_amber: 40, pip_runway_green: 45, pip_runway_amber: 21 },
   },
   {
     id: "theta_gang", name: "Theta Gang", icon: "⏳", builtIn: true,
@@ -116,5 +119,6 @@ export const DEFAULT_PRESETS = [
     strikes: { range_pct: 8, min_open_interest: 20, min_volume: 5 },
     spreads: { min_width: 1, max_width: 5 },
     risk: { max_risk_per_trade: 400, profit_target_pct: 50, stop_loss_pct: 100 },
+    systemVars: { exit_warning_pct: 67, exit_scale_out_pct: 150, exit_underlying_stop_pct: 1.5, exit_time_stop_days: 7, min_reward_risk: 0.3, min_ev_threshold: 0, pip_rr_green: 0.5, pip_rr_amber: 0.3, pip_prob_green: 0.70, pip_prob_amber: 0.60, pip_score_green: 0.65, pip_score_amber: 0.45, pip_delta_lo: 0.25, pip_delta_hi: 0.50, pip_iv_green: 35, pip_iv_amber: 55, pip_runway_green: 21, pip_runway_amber: 10 },
   },
 ];
