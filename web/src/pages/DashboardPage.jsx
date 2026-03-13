@@ -7,11 +7,12 @@
  *  3. Recent Favorites — last 5 saved trades with link to full favorites page
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useMsal } from '@azure/msal-react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
-import { getQuote, getHistoricalClose } from '../api/client';
+import { getQuote, getHistoricalClose, getInsights, dismissInsight, actOnInsight } from '../api/client';
+import { InsightCard } from '../components/InsightCard';
 
 // ─── Index definitions ────────────────────────────────────────────
 
@@ -99,6 +100,42 @@ export default function DashboardPage() {
   const [indexQuotes, setIndexQuotes] = useState({});
   const [ytdRefs, setYtdRefs]         = useState({});
   const [loading, setLoading]         = useState(true);
+  const [insights, setInsights]       = useState([]);
+  const pollTimerRef                  = useRef(null);
+
+  const loadInsights = useCallback(async () => {
+    try {
+      const data = await getInsights('options', 'ACTIVE');
+      setInsights(data || []);
+    } catch {
+      // silently fail — dashboard should not break if insights are unavailable
+    }
+  }, []);
+
+  // Poll insights every 60s while page is active
+  useEffect(() => {
+    loadInsights();
+    pollTimerRef.current = setInterval(loadInsights, 60_000);
+    return () => clearInterval(pollTimerRef.current);
+  }, [loadInsights]);
+
+  const handleDismiss = useCallback(async (insightId) => {
+    // Optimistic update
+    setInsights(prev => prev.filter(i => i.insight_id !== insightId));
+    try {
+      await dismissInsight(insightId);
+    } catch {
+      // Re-fetch to restore if API call fails
+      loadInsights();
+    }
+  }, [loadInsights]);
+
+  const handleViewEntity = useCallback(async (route, insightId) => {
+    try {
+      await actOnInsight(insightId);
+    } catch { /* best-effort */ }
+    navigate(route);
+  }, [navigate]);
 
   useEffect(() => {
     async function load() {
@@ -192,6 +229,36 @@ export default function DashboardPage() {
           })}
         </div>
       </section>
+
+      {/* ── Insights Feed ── */}
+      {insights.length > 0 && (
+        <section style={s.section}>
+          <div style={s.sectionHeader}>
+            <h2 style={s.sectionTitle}>
+              Insights
+              <span style={{ marginLeft: 8, color: '#ef4444', fontVariantNumeric: 'tabular-nums' }}>
+                ({insights.length} active)
+              </span>
+            </h2>
+            <button style={s.seeAll} onClick={loadInsights}>
+              ↻ Refresh
+            </button>
+          </div>
+          {insights.slice(0, 3).map(insight => (
+            <InsightCard
+              key={insight.insight_id}
+              insight={insight}
+              onDismiss={handleDismiss}
+              onViewEntity={handleViewEntity}
+            />
+          ))}
+          {insights.length > 3 && (
+            <p style={{ fontSize: 12, color: '#6b7280', marginTop: 8 }}>
+              +{insights.length - 3} more — view from Positions page
+            </p>
+          )}
+        </section>
+      )}
 
       {/* ── Recent Favorites ── */}
       <section style={s.section}>

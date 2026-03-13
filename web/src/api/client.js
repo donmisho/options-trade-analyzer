@@ -525,3 +525,38 @@ export async function closePosition(positionId, data) {
     body: JSON.stringify(data),
   });
 }
+
+
+// ═══════════════════════════════════════════════════════════════════
+// INSIGHTS (Phase 3.6)
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * Fetch active insights for a domain.
+ * @param {string} domain — 'options' | 'manufacturing' etc. (default 'options')
+ * @param {string} status — 'ACTIVE' | 'DISMISSED' | 'ACTED_ON' (default 'ACTIVE')
+ * @returns InsightResponse[]
+ */
+export async function getInsights(domain = 'options', status = 'ACTIVE') {
+  return apiFetch(`/insights?domain=${encodeURIComponent(domain)}&status=${encodeURIComponent(status)}`);
+}
+
+/**
+ * Dismiss an insight. Removes it from the active feed.
+ * @param {string} insightId — UUID
+ */
+export async function dismissInsight(insightId) {
+  return apiFetch(`/insights/${encodeURIComponent(insightId)}/dismiss`, {
+    method: 'PATCH',
+  });
+}
+
+/**
+ * Mark an insight as acted on (user navigated to the entity).
+ * @param {string} insightId — UUID
+ */
+export async function actOnInsight(insightId) {
+  return apiFetch(`/insights/${encodeURIComponent(insightId)}/act`, {
+    method: 'PATCH',
+  });
+}

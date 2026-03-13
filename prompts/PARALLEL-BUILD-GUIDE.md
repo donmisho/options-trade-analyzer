@@ -55,7 +55,7 @@ Phase 3.5  ───────────────────────
 
 ## Session Sequencing: What To Run When
 
-### Session 1 — Foundation (2 parallel Claude Code windows)
+### Session 1 — Foundation (2 parallel Claude Code windows) ✅ DONE
 
 **Window 1: Phase 2.9 Stream A**
 Paste Prompt A1 from PHASE-2.9.md
@@ -69,7 +69,7 @@ These are completely independent. Run simultaneously.
 
 ---
 
-### Session 2 — Backend completion + Frontend wiring (2 parallel windows)
+### Session 2 — Backend completion + Frontend wiring (2 parallel windows) ✅ DONE
 
 **Prerequisite**: Session 1 complete.
 
@@ -85,7 +85,7 @@ These are independent. Run simultaneously.
 
 ---
 
-### Session 3 — Position API + Frontend integration (2 parallel windows)
+### Session 3 — Position API + Frontend integration (2 parallel windows) ✅ DONE
 
 **Prerequisite**: Session 2 complete.
 
@@ -101,7 +101,7 @@ These are independent. Run simultaneously.
 
 ---
 
-### Session 4 — Integration Test 1: Phase 2.9
+### Session 4 — Integration Test 1: Phase 2.9 ✅ DONE
 
 **Prerequisite**: Sessions 1-3 complete, both 2.9 streams done.
 
@@ -113,7 +113,7 @@ Then run Integration Tests 1-5 from PHASE-2.9.md manually.
 
 ---
 
-### Session 5 — Phase 2.11 (2 parallel windows)
+### Session 5 — Phase 2.11 (2 parallel windows) ✅ DONE
 
 **Prerequisite**: Phase 2.9 integration tests passing.
 
@@ -129,7 +129,7 @@ These are independent. Run simultaneously.
 
 ---
 
-### Session 6 — Phase 2.10 wiring + Phase 2.11 wiring (2 parallel windows)
+### Session 6 — Phase 2.10 wiring + Phase 2.11 wiring (2 parallel windows) ✅ DONE
 
 **Prerequisite**: Session 5 complete.
 
@@ -147,7 +147,7 @@ with Phase 2.10 B2 if both touch the same button handlers.
 
 ---
 
-### Integration Test 2 — Full Phase 2.9 + 2.10 + 2.11
+### Integration Test 2 — Full Phase 2.9 + 2.10 + 2.11 ⚠️ NOT YET RUN
 
 **Prerequisite**: Sessions 4-6 complete.
 
@@ -164,7 +164,7 @@ Run these tests in order:
 
 ---
 
-### Session 7 — Azure Deployment (Phase 3)
+### Session 7 — Azure Deployment (Phase 3) ✅ DONE
 
 **Prerequisite**: Integration Test 2 passing, v2.0.0-pre-azure tagged.
 
@@ -181,7 +181,7 @@ cloud deployment is clean.
 
 ---
 
-### Session 8 — Phase 3.5 Infrastructure (2 parallel windows)
+### Session 8 — Phase 3.5 Infrastructure (2 parallel windows) ✅ DONE
 
 **Prerequisite**: Azure deployment complete and verified.
 
@@ -193,48 +193,50 @@ Paste Prompt A1 from PHASE-3.5.md
 **Window 2: Phase 3.5 Stream C (Foundry Registration)**
 Do this manually in Azure portal — no Claude Code needed.
 Register ota-position-monitor-agent in Foundry. Note Entra Agent ID.
+⚠️ Stream C still pending — manual portal step not yet completed.
 
 These are independent. Run simultaneously.
 
 ---
 
-### Session 9 — Phase 3.5 Agent (2 parallel windows)
+### Session 9 — Phase 3.5 Agent + Phase 3.6 start (2 parallel windows) ✅ DONE (3.5 side) / ⏭ NEXT (3.6 side)
 
 **Prerequisite**: Session 8 complete.
 
-**Window 1: Phase 3.5 Stream B, Prompt B1**
+**Window 1: Phase 3.5 Stream B, Prompt B1** ✅ DONE
 → Creates position_monitor.py + SKILL.md
 
-**Window 2: Phase 3.6 Stream A, Prompt A1**
-→ Creates insights table, DeviationDetector
+**Window 2: Phase 3.6 Stream A, Prompt A1** ← START HERE NEXT SESSION
+→ Creates insights table + Insight model in database.py, DeviationDetector with all
+  4 methods (check_threshold, check_trend, check_anomaly, check_correlation)
 
 These are independent. Run simultaneously.
 
 ---
 
-### Session 10 — Phase 3.5 completion + Phase 3.6 engine (2 parallel windows)
+### Session 10 — Phase 3.5 completion + Phase 3.6 engine (2 parallel windows) ✅ DONE (3.5 side) / ⏭ NEXT (3.6 side)
 
 **Prerequisite**: Session 9 complete.
 
-**Window 1: Phase 3.5 Stream B, Prompt B2**
+**Window 1: Phase 3.5 Stream B, Prompt B2** ✅ DONE
 → Adds scheduler, on-demand endpoint
 
-**Window 2: Phase 3.6 Stream A, Prompt A2**
-→ Creates InsightEngine, insight_routes.py
+**Window 2: Phase 3.6 Stream A, Prompt A2** ← RUN AFTER SESSION 9 WINDOW 2
+→ Creates InsightEngine (with duplicate guard), insight_routes.py (GET/dismiss/act)
 
 These are independent. Run simultaneously.
 
 ---
 
-### Session 11 — Phase 3.6 wiring (3 parallel windows)
+### Session 11 — Phase 3.6 wiring (3 parallel windows) ⏭ NEXT
 
 **Prerequisite**: Session 10 complete.
 
 **Window 1: Phase 3.6 Stream B, Prompt B1**
-→ Creates options SKILL.md, wires InsightEngine into Position Monitor
+→ Creates options SKILL.md, wires InsightEngine into Position Monitor _trigger_insights
 
 **Window 2: Phase 3.6 Stream C, Prompt C1**
-→ Creates InsightCard.jsx, Dashboard feed (mock data)
+→ Creates InsightCard.jsx, Dashboard feed section (mock data, 60s poll)
 
 **Window 3: Phase 3.5 Integration Testing**
 Run Integration Tests 1-5 from PHASE-3.5.md manually
@@ -244,9 +246,18 @@ Window 3 (testing) can run while 1 and 2 are building.
 
 ---
 
-### Integration Test 3 — Full Phase 3.5 + 3.6
+### Session 12 — Phase 3.6 final wiring ⏭ NEXT
 
-**Prerequisite**: Sessions 8-11 complete.
+**Prerequisite**: Session 11 complete.
+
+**Single window: Phase 3.6 Stream C, Prompt C2**
+→ Wire DashboardPage insights feed to real API, implement dismiss + act-on flow
+
+---
+
+### Integration Test 3 — Full Phase 3.5 + 3.6 ⏭ NEXT
+
+**Prerequisite**: Sessions 8-12 complete.
 
 Run these tests in order:
 
@@ -285,19 +296,20 @@ the previous. A broken foundation causes cascading failures.
 
 ## Quick Reference: Which Prompts Can Run Simultaneously
 
-| Session | Window 1 | Window 2 | Window 3 |
-|---------|----------|----------|----------|
-| 1 | 2.9-A1 | 2.9-B1 | — |
-| 2 | 2.9-A2 | 2.10-A1 | — |
-| 3 | 2.10-A2 | 2.10-B1 + 2.9-B2 | — |
-| 4 | 2.9-B2 wiring | Manual testing | — |
-| 5 | 2.11-A1 | 2.11-B1 | — |
-| 6 | 2.10-B2 | 2.11-B2 | — |
-| 7 | Azure deployment | — | — |
-| 8 | 3.5-A1 | Foundry portal | — |
-| 9 | 3.5-B1 | 3.6-A1 | — |
-| 10 | 3.5-B2 | 3.6-A2 | — |
-| 11 | 3.6-B1 | 3.6-C1 | 3.5 tests |
+| Session | Window 1 | Window 2 | Window 3 | Status |
+|---------|----------|----------|----------|--------|
+| 1 | 2.9-A1 | 2.9-B1 | — | ✅ Done |
+| 2 | 2.9-A2 | 2.10-A1 | — | ✅ Done |
+| 3 | 2.10-A2 | 2.10-B1 + 2.9-B2 | — | ✅ Done |
+| 4 | 2.9-B2 wiring | Manual testing | — | ✅ Done |
+| 5 | 2.11-A1 | 2.11-B1 | — | ✅ Done |
+| 6 | 2.10-B2 | 2.11-B2 | — | ✅ Done |
+| 7 | Azure deployment | — | — | ✅ Done |
+| 8 | 3.5-A1 | Foundry portal | — | ✅ Done (portal ⚠️ pending) |
+| 9 | 3.5-B1 | **3.6-A1** ← next | — | 3.5 ✅ / 3.6 ⏭ |
+| 10 | 3.5-B2 | **3.6-A2** ← next | — | 3.5 ✅ / 3.6 ⏭ |
+| 11 | **3.6-B1** | **3.6-C1** | **3.5 tests** | ⏭ |
+| 12 | **3.6-C2** | — | — | ⏭ |
 
 ---
 

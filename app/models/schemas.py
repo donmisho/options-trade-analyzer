@@ -396,3 +396,40 @@ class PositionListResponse(BaseModel):
     positions: list[PositionResponse]
     total: int
     aggregate: dict     # win_rate, avg_pnl, avg_hold_days, by_strategy
+
+
+# ============================================================
+# Insight Engine Schemas (Phase 3.6)
+# ============================================================
+
+class DeviationResult(BaseModel):
+    """
+    Result of running a DeviationDetector check.
+
+    Returned by all four check_* methods. Contains everything InsightEngine
+    needs to craft an insight: what was detected, how severe it is, and a
+    description for Claude's context.
+    """
+    detected: bool
+    deviation_type: Optional[str] = None    # THRESHOLD | TREND | ANOMALY | CORRELATION
+    deviation_score: int = 0                # 0-100 severity
+    observation: dict = {}                  # what was measured
+    baseline: dict = {}                     # what was expected
+    description: str = ""                   # human-readable, included in Claude prompt
+
+
+class InsightResponse(BaseModel):
+    """Insight returned to the frontend."""
+    insight_id: str
+    domain: str
+    entity_id: str
+    entity_label: str
+    deviation_score: int
+    deviation_type: str
+    title: str
+    body: str
+    severity: str
+    recommended_actions: Optional[List[dict]] = None
+    status: str
+    agent_run_id: Optional[str] = None
+    created_at: datetime

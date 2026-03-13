@@ -30,6 +30,7 @@ from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.context_store import ContextStore
+from app.agents.insight_engine import InsightEngine
 from app.agents.telemetry import invoke_with_tracing
 from app.models.database import Position, AgentRunLog
 from app.providers.base import ContextSource
@@ -172,6 +173,10 @@ class PositionMonitorAgent:
 
         # 7. Commit context store + position writes
         await db.commit()
+
+        # 6b. Trigger Insight Engine for positions flagged for escalation
+        if updates:
+            await self._trigger_insights(db, updates, positions, symbol_contexts, run_id)
 
         insights_count = sum(1 for u in updates if u.needs_insight)
 
@@ -317,3 +322,69 @@ class PositionMonitorAgent:
             pos.current_pnl = update.current_pnl
             pos.last_monitored_at = now
             pos.updated_at = now
+
+    async def _trigger_insights(
+        self,
+        db: AsyncSession,
+        updates: List[PositionHealthUpdate],
+        positions: List[Position],
+        symbol_contexts: dict,
+        run_id: str,
+    ) -> None:
+        """
+        For each position update where needs_insight=True, run the deviation
+        detector to classify the deviation and call InsightEngine.generate().
+        """
+        escalations = [u for u in updates if u.needs_insight]
+        if not escalations:
+            return
+
+        engine = InsightEngine(
+            ai_provider=self._adapter,
+            domain="options",
+        )
+
+        # Build a quick position_id → Position lookup
+        pos_map = {p.position_id: p for p in positions}
+
+        for update in escalations:
+            pos = pos_map.get(update.position_id)
+            entity_label = (
+                f"{pos.symbol} {pos.strategy_key.replace('-', ' ').title()}"
+                if pos else update.position_id
+            )
+            context = update.insight_context or {}
+            deviation_type = context.get("deviation_type", "THRESHOLD")
+
+            # Build a DeviationResult from the insight_context Claude returned
+            from app.models.schemas import DeviationResult
+            deviation = DeviationResult(
+                detected=True,
+                deviation_type=deviation_type,
+                deviation_score=self._score_health_grade(update.health_grade),
+                observation={"observation": context.get("observation", "")},
+                baseline={"baseline": context.get("baseline", "")},
+                description=context.get("observation", f"Position {update.position_id} needs attention"),
+            )
+
+            context_signals = symbol_contexts.get(pos.symbol if pos else "", []) if symbol_contexts else []
+
+            try:
+                await engine.generate(
+                    db=db,
+                    entity_id=update.position_id,
+                    entity_label=entity_label,
+                    deviation=deviation,
+                    context_signals=context_signals,
+                    agent_run_id=run_id,
+                )
+            except Exception as e:
+                logger.error(
+                    f"PositionMonitorAgent: insight generation failed for "
+                    f"{update.position_id}: {e}"
+                )
+
+    @staticmethod
+    def _score_health_grade(grade: str) -> int:
+        """Map health grade to a deviation score for InsightEngine."""
+        return {"A": 0, "B": 20, "C": 50, "D": 75, "F": 95}.get(grade, 50)

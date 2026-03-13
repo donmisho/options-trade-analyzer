@@ -576,6 +576,48 @@ class SymbolContext(Base):
     )
 
 
+# ─── Insight Engine ───────────────────────────────────────────────────────────
+
+
+class Insight(Base):
+    """
+    An AI-generated insight for a monitored entity.
+
+    Created by InsightEngine when a deviation is detected. Domain-agnostic —
+    the domain field determines what kind of entity is being monitored
+    (options position, manufacturing equipment, customer account, etc.).
+
+    Status lifecycle: ACTIVE → DISMISSED | ACTED_ON
+    One active insight per entity per deviation type — duplicates are suppressed
+    (existing row is updated instead of creating a new one).
+    """
+    __tablename__ = "insights"
+
+    insight_id          = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    domain              = Column(String(50), nullable=False)     # 'options' | 'manufacturing'
+    entity_id           = Column(String(100), nullable=False)    # position_id, machine_id
+    entity_label        = Column(String(200), nullable=False)    # human-readable
+    observation         = Column(Text, nullable=False)           # JSON
+    baseline            = Column(Text, nullable=False)           # JSON
+    deviation_score     = Column(Integer, nullable=False)        # 0-100
+    deviation_type      = Column(String(50), nullable=False)     # THRESHOLD|TREND|ANOMALY|CORRELATION
+    title               = Column(String(200), nullable=False)
+    body                = Column(String(1000), nullable=False)
+    severity            = Column(String(20), nullable=False)     # INFO|WARNING|CRITICAL
+    recommended_actions = Column(Text)                           # JSON array
+    status              = Column(String(20), default="ACTIVE")   # ACTIVE|DISMISSED|ACTED_ON
+    source_signals      = Column(Text)                           # JSON: which sources triggered
+    agent_run_id        = Column(String(36))                     # FK to agent_run_log
+    created_at          = Column(DateTime, default=datetime.utcnow)
+    dismissed_at        = Column(DateTime)
+    acted_on_at         = Column(DateTime)
+
+    __table_args__ = (
+        Index("ix_insights_domain_entity", "domain", "entity_id", "status"),
+        Index("ix_insights_created", "created_at"),
+    )
+
+
 # ─── Position Tracking ────────────────────────────────────────────────────────
 
 
