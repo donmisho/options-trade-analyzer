@@ -7,8 +7,8 @@ FastAPI returns a clear error automatically. These schemas are the "contract"
 between your API and its consumers (web app, Excel, MCP).
 """
 
-from pydantic import BaseModel, Field, EmailStr
-from typing import Optional
+from pydantic import BaseModel, Field, EmailStr, field_validator
+from typing import Optional, List
 from datetime import datetime
 
 
@@ -234,3 +234,165 @@ class ProviderStatusResponse(BaseModel):
     market_data: Optional[dict] = None  # {provider, status, environment}
     account: Optional[dict] = None
     trading: Optional[dict] = None
+
+
+# ============================================================
+# Strategy Scorecard Schemas (Phase 2.9)
+# ============================================================
+
+class ScorecardRequest(BaseModel):
+    """Request a strategy scorecard for a symbol."""
+    symbol: str
+    user_config: Optional[dict] = None  # optional overrides (dte_min, delta_max, sma_alignment_score, etc.)
+
+
+class StrategyScoreItem(BaseModel):
+    """Score for a single strategy."""
+    strategy_key: str
+    label: str
+    score: int                          # 0-100
+    best_trade: Optional[dict] = None   # top-scoring candidate trade
+    signal_summary: str
+    metric_scores: dict
+
+
+class ScorecardResponse(BaseModel):
+    """Full scorecard response for a symbol across all strategies."""
+    symbol: str
+    underlying_price: float
+    strategies: list[StrategyScoreItem]
+
+
+class ProbabilityMatrixRequest(BaseModel):
+    """Request a Black-Scholes probability matrix for a trade."""
+    symbol: str
+    current_price: float = Field(..., gt=0)
+    iv: float = Field(..., gt=0, description="Annualized IV as decimal (0.25 = 25%)")
+    dte: int = Field(..., ge=1, le=730)
+    risk_free_rate: float = Field(default=0.05, ge=0, le=0.20)
+    price_range_pct: float = Field(default=0.10, ge=0.02, le=0.50)
+    price_step: float = Field(default=10.0, gt=0)
+
+
+class ProbabilityMatrixResponse(BaseModel):
+    """Black-Scholes probability matrix response."""
+    symbol: str
+    current_price: float
+    iv: float
+    dte: int
+    price_levels: list[float]
+    dates: list[str]        # ISO date strings: [expiry-9, expiry-6, expiry-3, expiry]
+    matrix: list[list[float]]  # matrix[date_idx][price_idx] = probability
+
+
+# ============================================================
+# Trade Evaluation Card (Phase 2.11)
+# ============================================================
+
+class TradeEvaluationCard(BaseModel):
+    """
+    Structured AI evaluation card for a single strategy.
+
+    Returned by POST /api/v1/evaluate/structured.
+    Claude populates verdict, claude_read, key_risks, and thesis_invalidators.
+    All numeric fields (entry_price through exit_stop_debit) come from the
+    trade data passed in the request; Claude echoes them back unchanged.
+    probability_matrix is the pre-computed B-S matrix, also echoed back.
+    """
+    strategy_key: str
+    strategy_label: str
+    trade_structure: str            # e.g. "Sell 415P / Buy 410P, Dec 19"
+    entry_price: float
+    max_profit: float
+    max_loss: float
+    exit_warning_price: float       # underlying price that triggers warning
+    exit_warning_pnl: float         # P&L at warning (negative = loss)
+    exit_target_debit: float        # debit to close at ~50% profit
+    exit_stop_debit: float          # debit to close at 2× credit
+    probability_matrix: dict        # serialized ProbabilityMatrix from B-S
+    score: int                      # 0-100 from strategy scorer (or Claude estimate)
+    verdict: str                    # EXECUTE | WAIT | PASS
+    claude_read: str                # 2-3 sentences on fit with current conditions
+    key_risks: List[str]            # 2-3 items, each under 15 words
+    thesis_invalidators: List[str]  # 2-3 specific price/event conditions
+
+    @field_validator("verdict")
+    @classmethod
+    def verdict_must_be_valid(cls, v: str) -> str:
+        if v not in ("EXECUTE", "WAIT", "PASS"):
+            raise ValueError(f"verdict must be EXECUTE, WAIT, or PASS; got {v!r}")
+        return v
+
+    @field_validator("key_risks", "thesis_invalidators")
+    @classmethod
+    def between_two_and_three_items(cls, v: List[str]) -> List[str]:
+        if not (2 <= len(v) <= 3):
+            raise ValueError(f"must have 2-3 items; got {len(v)}")
+        return v
+
+
+# ============================================================
+# Position Tracking Schemas (Phase 2.10)
+# ============================================================
+
+class FollowPositionRequest(BaseModel):
+    """Follow an existing position (paper or live) for monitoring."""
+    symbol: str
+    strategy_key: str
+    trade_structure: dict           # legs, strikes, expiration
+    entry_price: float
+    entry_greeks: dict
+    entry_iv_rank: float
+    entry_sma_alignment: dict
+    entry_underlying_price: float
+    claude_score: Optional[int] = None
+    # Phase 2.11 — populated from TradeEvaluationCard at Follow/Take time
+    claude_verdict: Optional[dict] = None       # full TradeEvaluationCard as JSON
+    claude_exit_levels: Optional[dict] = None   # exit_warning_price, exit_target_debit, etc.
+    claude_probability_matrix: Optional[dict] = None  # pre-computed B-S matrix
+
+
+class TakePositionRequest(FollowPositionRequest):
+    pass  # identical for now — source will be set to LIVE by the route
+
+
+class ClosePositionRequest(BaseModel):
+    """Close an open position with exit price and reason."""
+    exit_price: float
+    exit_reason: str    # TARGET | WARNING | STOP | EXPIRED | MANUAL
+
+
+class PositionResponse(BaseModel):
+    """Single position returned to the client."""
+    position_id: str
+    symbol: str
+    strategy_key: str
+    strategy_label: str
+    source: str
+    status: str
+    entry_price: float
+    entry_date: str
+    entry_underlying_price: float
+    current_price: Optional[float] = None
+    current_pnl: Optional[float] = None
+    health_grade: Optional[str] = None
+    claude_score: Optional[int] = None
+    # Phase 2.11 — Claude evaluation data attached at entry
+    claude_verdict: Optional[dict] = None
+    claude_exit_levels: Optional[dict] = None
+    claude_probability_matrix: Optional[dict] = None
+    days_held: int
+    dte_at_entry: Optional[int] = None
+    trade_structure: dict
+    # Populated when status == CLOSED
+    exit_price: Optional[float] = None
+    exit_date: Optional[str] = None
+    exit_reason: Optional[str] = None
+    outcome_pnl: Optional[float] = None
+
+
+class PositionListResponse(BaseModel):
+    """Paginated list of positions with aggregate stats."""
+    positions: list[PositionResponse]
+    total: int
+    aggregate: dict     # win_rate, avg_pnl, avg_hold_days, by_strategy

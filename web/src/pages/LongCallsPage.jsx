@@ -16,7 +16,6 @@ import StarButton from '../components/StarButton';
 import ScoreBar from '../components/ScoreBar';
 import QuoteBar from '../components/QuoteBar';
 import SmaPanel from '../components/SmaPanel';
-import AskClaudePanel from '../components/AskClaudePanel';
 import { C } from '../styles/tokens';
 import './PageShared.css';
 import './VerticalsPage.css';
@@ -52,10 +51,6 @@ export default function LongCallsPage() {
   const [smaPeriods, setSmaPeriods] = useState({ short: 8, mid: 21, long: 50 });
   const [candles, setCandles] = useState([]);
 
-  // Ask Claude
-  const [claudeOpen, setClaudeOpen] = useState(false);
-  const [claudeTrade, setClaudeTrade] = useState(null);
-
   const runAnalysis = useCallback(async (symbol) => {
     setLoading(true);
     setError(null);
@@ -81,18 +76,6 @@ export default function LongCallsPage() {
     if (!candles.length) return { price: underlyingPrice, smaShort: 0, smaMid: 0, smaLong: 0 };
     const sma = (period) => candles.slice(-period).reduce((s, c) => s + c.close, 0) / Math.min(period, candles.length);
     return { price: candles[candles.length - 1]?.close || underlyingPrice, smaShort: sma(smaPeriods.short), smaMid: sma(smaPeriods.mid), smaLong: sma(smaPeriods.long) };
-  }
-
-  function buildClaudeTrade(c) {
-    return {
-      symbol: activeSymbol, spread_type: 'long_call',
-      long_strike: c.strike, short_strike: null,
-      expiration: c.expiration, option_type: 'call',
-      net_debit: c.premium_dollars / 100, max_profit: 999,
-      max_loss: c.premium_dollars / 100,
-      reward_risk_ratio: 0, prob_of_profit: c.delta,
-      composite_score: c.composite_score,
-    };
   }
 
   function buildFavTrade(c) {
@@ -150,7 +133,6 @@ export default function LongCallsPage() {
                 <th style={{ textAlign: 'right' }}>IV</th>
                 <th style={{ textAlign: 'right' }}>Breakeven</th>
                 <th>Score</th>
-                <th style={{ width: 60 }}></th>
               </tr>
             </thead>
             <tbody>
@@ -166,19 +148,6 @@ export default function LongCallsPage() {
                   <td className="mono">{c.iv.toFixed(1)}%</td>
                   <td className="mono">{c.breakeven.toFixed(2)}</td>
                   <td><ScoreBar score={c.composite_score} /></td>
-                  <td>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setClaudeTrade(buildClaudeTrade(c)); setClaudeOpen(true); }}
-                      style={{
-                        padding: '3px 8px', borderRadius: 4,
-                        border: `1px solid ${C.claudeBorder}`,
-                        backgroundColor: C.claudeDim, color: C.claudeAccent,
-                        fontSize: 9, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
-                      }}
-                    >
-                      ✦ Ask
-                    </button>
-                  </td>
                 </tr>
               ))}
             </tbody>
@@ -211,8 +180,6 @@ export default function LongCallsPage() {
         )}
       </div>
 
-      {/* Ask Claude Panel */}
-      <AskClaudePanel open={claudeOpen} onClose={() => setClaudeOpen(false)} trade={claudeTrade} smaData={getSmaData()} smaPeriods={smaPeriods} />
     </div>
   );
 }

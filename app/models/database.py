@@ -11,9 +11,10 @@ This is the foundation of data isolation — queries always filter by the
 authenticated user's ID.
 """
 
+import uuid
 from datetime import datetime
 from sqlalchemy import (
-    Column, Integer, String, Float, Boolean, DateTime, Text,
+    Column, Integer, String, Float, Boolean, DateTime, Text, Numeric,
     ForeignKey, JSON, Index, UniqueConstraint
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
@@ -542,4 +543,63 @@ class AnalyzedTrade(Base):
         Index("ix_analyzed_trades_run", "run_id"),
         Index("ix_analyzed_trades_user_symbol", "user_id", "symbol", "captured_at"),
         Index("ix_analyzed_trades_symbol_expiry", "symbol", "expiration"),
+    )
+
+
+# ─── Position Tracking ────────────────────────────────────────────────────────
+
+
+class Position(Base):
+    """
+    A tracked options position, paper or live.
+
+    One row per position the user has chosen to follow. Status progresses
+    from FOLLOWING → CLOSED (or EXPIRED). Claude fields (probability_matrix,
+    exit_levels, verdict) are populated in Phase 2.11 by the monitoring agent.
+
+    trade_structure stores the full leg definition (strikes, expiration, quantity)
+    as JSON so any strategy type can be represented without schema changes.
+
+    WHY UUID primary key: positions may be created client-side and synced later;
+    UUIDs avoid insert-order collisions across devices or parallel sessions.
+    """
+    __tablename__ = "positions"
+
+    position_id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False)
+    symbol = Column(String(20), nullable=False)
+    strategy_key = Column(String(50), nullable=False)
+    trade_structure = Column(Text, nullable=False)           # JSON
+    source = Column(String(10), nullable=False)              # PAPER | LIVE
+    status = Column(String(20), nullable=False, default="FOLLOWING")
+
+    entry_price = Column(Numeric(10, 4))
+    entry_date = Column(DateTime, nullable=False)
+    entry_greeks = Column(Text)                              # JSON
+    entry_iv_rank = Column(Numeric(5, 2))
+    entry_sma_alignment = Column(Text)                       # JSON
+    entry_underlying_price = Column(Numeric(10, 4))
+
+    # Populated by monitoring agent (Phase 2.11)
+    claude_probability_matrix = Column(Text)                 # JSON
+    claude_exit_levels = Column(Text)                        # JSON
+    claude_verdict = Column(Text)                            # JSON
+    claude_score = Column(Integer)
+
+    health_grade = Column(String(2))                         # A|B|C|D|F
+    current_price = Column(Numeric(10, 4))
+    current_pnl = Column(Numeric(10, 4))
+    last_monitored_at = Column(DateTime)
+
+    exit_price = Column(Numeric(10, 4))
+    exit_date = Column(DateTime)
+    exit_reason = Column(String(50))
+    outcome_pnl = Column(Numeric(10, 4))
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_positions_user_status", "user_id", "status"),
+        Index("ix_positions_user_symbol", "user_id", "symbol"),
     )

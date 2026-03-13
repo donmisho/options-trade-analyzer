@@ -42,6 +42,7 @@ from app.api.user_routes import router as user_router
 from app.api.entra_auth_routes import router as entra_auth_router
 from app.api.agent_routes import router as agent_router, init_agent_routes
 from app.api.admin_routes import router as admin_router
+from app.api.position_routes import router as position_router
 from app.providers.ai import AnthropicAdapter, FoundryAdapter
 from app.ai.foundry_adapter import FoundryEvalAdapter
 from app.agents.telemetry import init_agent_telemetry
@@ -250,6 +251,7 @@ app.include_router(user_router, prefix="/api/v1")
 app.include_router(entra_auth_router, prefix="/api/v1")
 app.include_router(agent_router, prefix="/api/v1")
 app.include_router(admin_router, prefix="/api/v1")
+app.include_router(position_router, prefix="/api/v1")
 
 
 # --- Health Check ---

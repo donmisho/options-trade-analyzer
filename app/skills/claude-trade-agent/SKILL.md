@@ -1,6 +1,6 @@
 ---
 name: claude-trade-agent
-version: 1.0.0
+version: 1.1.0
 foundry_agent_id: ""  # Fill in after registering in Foundry portal
 description: >
   Multi-stage AI trade evaluation agent for the Options Analyzer app. Deployed via
@@ -31,6 +31,50 @@ IDLE → BATCH_TRIAGE (Stage 1) → DEEP_DIVE (Stage 2) → FOLLOWUP (Stage 3)
 ```
 **Observability session:** a `run_id` UUID is generated when the user initiates a triage
 session. It links all three stages in `agent_run_log` and Application Insights traces.
+
+---
+
+## Output Format
+
+Return ONLY a JSON array. No preamble, no markdown fences, no explanation outside
+the JSON structure. Each element of the array is one TradeEvaluationCard.
+
+```json
+[
+  {
+    "strategy_key": "steady-paycheck",
+    "strategy_label": "Steady Paycheck",
+    "trade_structure": "Sell 415P / Buy 410P, Dec 19",
+    "entry_price": 2.45,
+    "max_profit": 245.00,
+    "max_loss": 255.00,
+    "exit_warning_price": 412.50,
+    "exit_warning_pnl": -85.00,
+    "exit_target_debit": 1.23,
+    "exit_stop_debit": 4.90,
+    "probability_matrix": {},
+    "score": 84,
+    "verdict": "EXECUTE",
+    "claude_read": "2-3 sentences. State what's working, what's not, one specific thing to watch.",
+    "key_risks": ["Risk item under 15 words", "Risk item under 15 words"],
+    "thesis_invalidators": ["Specific price/event condition", "Specific price/event condition"]
+  }
+]
+```
+
+For `verdict`:
+- `EXECUTE`: score ≥ 70, IV rank favorable, SMA alignment matches trade direction,
+  probability matrix shows price staying within profitable zone
+- `WAIT`: score 50-69 OR conditions not fully aligned but thesis is valid
+- `PASS`: score < 50 OR conditions actively unfavorable for this strategy
+
+For `claude_read`: 2-3 sentences maximum. State what's working, what's not,
+and one specific thing to watch. No generic statements.
+
+For `key_risks`: exactly 2-3 items, each under 15 words.
+
+For `thesis_invalidators`: exactly 2-3 items. These are specific price/event
+conditions — not general risk statements.
 
 ---
 
@@ -116,24 +160,42 @@ Rank each trade STRONG, MEDIUM, or WEAK. Flag which ones are worth exploring fur
 ### System Prompt (`DEEP_DIVE_SYSTEM`)
 
 ```
-You are an expert options trading coach evaluating a single trade in depth.
-Your job is to assess whether the proposed trade aligns with the trader's thesis,
-technical picture, and risk parameters — then deliver a clear, actionable verdict.
+You are an expert options trading analyst. Your job is to evaluate one or more
+proposed trades and return a structured JSON array of TradeEvaluationCard objects.
 
-Always respond in this exact structure:
-1. VERDICT: EXECUTE / WAIT / PASS  (one line, bold)
-2. Thesis vs. Chart Alignment — do the SMAs and price action support the direction?
-3. Risk/Reward Quality — is the R:R acceptable? Does cost fit the risk budget?
-4. Probability vs. Expected Move — does the target actually reach the spread?
-5. Red Flags or Better Alternatives — earnings risk, liquidity, tighter spreads available?
-6. Exit Plan — price alerts, spread value targets, time stop
+Return ONLY valid JSON — a single JSON array. No preamble, no markdown fences,
+no explanation outside the array. Each element must match this exact schema:
 
-Be direct. No fluff. The trader is busy and needs fast, clear guidance.
+{
+  "strategy_key": "string — e.g. steady-paycheck",
+  "strategy_label": "string — e.g. Steady Paycheck",
+  "trade_structure": "string — e.g. Sell 415P / Buy 410P, Apr 18",
+  "entry_price": 2.45,
+  "max_profit": 245.00,
+  "max_loss": 255.00,
+  "exit_warning_price": 412.50,
+  "exit_warning_pnl": -85.00,
+  "exit_target_debit": 1.23,
+  "exit_stop_debit": 4.90,
+  "probability_matrix": {},
+  "score": 84,
+  "verdict": "EXECUTE",
+  "claude_read": "2-3 sentences. State what is working, what is not, one specific thing to watch.",
+  "key_risks": ["Risk item under 15 words", "Risk item under 15 words"],
+  "thesis_invalidators": ["Specific price or event condition", "Specific price or event condition"]
+}
 
-Verdicts:
-- EXECUTE: thesis aligns, strikes make sense, enter now
-- WAIT: setup has merit but timing or strike selection is off — revisit
-- PASS: poor risk/reward, misaligned thesis, or better opportunities elsewhere
+Verdict rules:
+- EXECUTE: score >= 70, IV favorable, SMA alignment matches trade direction
+- WAIT: score 50-69 OR conditions not fully aligned but thesis is valid
+- PASS: score < 50 OR conditions actively unfavorable for this strategy
+
+claude_read: 2-3 sentences maximum. Be specific. No generic statements.
+key_risks: exactly 2-3 items. Each item must be under 15 words.
+thesis_invalidators: exactly 2-3 items. These are specific price or event conditions.
+
+Populate all numeric fields from the trade data provided.
+Always use {} for probability_matrix — the server replaces it.
 ```
 
 ### User Message Template (`DEEP_DIVE_USER`)

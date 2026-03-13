@@ -7,7 +7,6 @@
  * Stage 0: Ticker nav, market data ribbon, signal banner, candlestick chart
  * Stage 1: Master grid — ranked trades, dynamic columns from config
  * Stage 2: Inline expansion — math matrix + payoff diagram
- * Stage 3: Side drawer — AskClaudePanel for AI deep-dive
  */
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -16,11 +15,12 @@ import {
   CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, Cell,
 } from 'recharts';
 import { STRATEGY_CONFIGS } from '../strategy-configs/index';
-import { apiPost, getQuote } from '../api/client';
+import { apiPost, getQuote, followTrade, takeTrade } from '../api/client';
 import { useApp } from '../context/AppContext';
-import AskClaudePanel from '../components/AskClaudePanel';
 import ConfigDrawer from '../components/ConfigDrawer';
 import ScoreBar from '../components/ScoreBar';
+import StrategyScorecard from '../components/StrategyScorecard';
+import { getStrategyScorecard } from '../api/client';
 import { C, mono, DEFAULT_PRESETS } from '../styles/tokens';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -301,9 +301,17 @@ export default function OptionsTerminal({ activeStrategy }) {
   const [chartStartDate, setChartStartDate] = useState(() => tradingDaysAgo(90));
   const chartStartDateRef = useRef(chartStartDate);
   const [selectedId,   setSelectedId]   = useState(null);
-  const [drawerTrade,  setDrawerTrade]  = useState(null);
-  const [drawerOpen,   setDrawerOpen]   = useState(false);
   const [configOpen,   setConfigOpen]   = useState(false);
+
+  // ── Strategy scorecard state (Stage 2 expansion — B3) ─────────────────────
+  const [scorecardData,         setScorecardData]         = useState(null);
+  const [scorecardLoading,      setScorecardLoading]      = useState(false);
+  const [scorecardSelectedKeys, setScorecardSelectedKeys] = useState([]);
+
+  // Follow/Take position modal — { trade, type: 'follow'|'take' }
+  const [positionModal, setPositionModal] = useState(null);
+  const [positionSubmitting, setPositionSubmitting] = useState(false);
+  const [positionToast, setPositionToast] = useState(null); // { message, error }
 
   // ── Analysis config (weights, DTE, spread types, etc.) ────────────────────
   const [presets,        setPresets]        = useState(DEFAULT_PRESETS);
@@ -459,6 +467,77 @@ export default function OptionsTerminal({ activeStrategy }) {
     }
   }, [config, symbol]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Load strategy scorecard for the currently expanded trade's symbol ─────
+  const loadScorecardForTrade = useCallback(async () => {
+    if (!symbol) return;
+    setScorecardLoading(true);
+    try {
+      const data = await getStrategyScorecard(symbol);
+      setScorecardData(data);
+    } catch (err) {
+      setScorecardData({ error: err.message || 'Failed to load strategy scores' });
+    } finally {
+      setScorecardLoading(false);
+    }
+  }, [symbol]);
+
+  // ── Follow / Take position ────────────────────────────────────────────────
+  const handlePositionConfirm = useCallback(async () => {
+    if (!positionModal) return;
+    const { trade, type } = positionModal;
+    setPositionSubmitting(true);
+    try {
+      const isSpread = !!(trade.spread_type || trade.long_strike);
+      const tradeStructure = isSpread
+        ? {
+            spread_type:  trade.spread_type,
+            long_strike:  trade.long_strike,
+            short_strike: trade.short_strike,
+            expiration:   trade.expiration,
+            dte:          trade.dte,
+          }
+        : {
+            option_type: trade.option_type ?? 'call',
+            strike:      trade.strike ?? trade.long_strike,
+            expiration:  trade.expiration,
+            dte:         trade.dte,
+          };
+
+      const payload = {
+        symbol:                  symbol,
+        strategy_key:            activeStrategy,
+        trade_structure:         tradeStructure,
+        entry_price:             trade.net_debit ?? trade.premium_dollars ?? 0,
+        entry_greeks:            {
+          delta: trade.delta ?? null,
+          theta: trade.theta_per_day ?? null,
+          iv:    trade.iv ?? null,
+        },
+        entry_iv_rank:           trade.iv ?? 0,
+        entry_sma_alignment:     smaData
+          ? { sma_8: smaData.smaShort, sma_21: smaData.smaMid, sma_50: smaData.smaLong }
+          : {},
+        entry_underlying_price:  underlyingPrice,
+        claude_score:            null,
+      };
+
+      const fn = type === 'follow' ? followTrade : takeTrade;
+      await fn(payload);
+
+      setPositionToast({
+        message: `${type === 'follow' ? 'Paper follow' : 'Live position'} created for ${symbol}`,
+        error: false,
+      });
+      setTimeout(() => setPositionToast(null), 4000);
+    } catch (err) {
+      setPositionToast({ message: err.message || 'Failed to create position', error: true });
+      setTimeout(() => setPositionToast(null), 5000);
+    } finally {
+      setPositionSubmitting(false);
+      setPositionModal(null);
+    }
+  }, [positionModal, symbol, activeStrategy, smaData, underlyingPrice]);
+
   // ── Config apply ──────────────────────────────────────────────────────────
   const handleConfigApply = useCallback((newConfig) => {
     setAnalysisConfig(newConfig);
@@ -477,6 +556,17 @@ export default function OptionsTerminal({ activeStrategy }) {
       runAnalysis(symbol);
     }
   }, [activeStrategy]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Reset scorecard when symbol changes (new symbol = fresh scores needed) ─
+  useEffect(() => {
+    setScorecardData(null);
+    setScorecardSelectedKeys([]);
+  }, [symbol]);
+
+  // ── Reset scorecard selection when trade row changes ───────────────────────
+  useEffect(() => {
+    setScorecardSelectedKeys([]);
+  }, [selectedId]);
 
   // ── Regenerate candles when chart start date changes ──────────────────────
   useEffect(() => {
@@ -518,17 +608,6 @@ export default function OptionsTerminal({ activeStrategy }) {
   const handleRowClick = (tradeId) => {
     setSelectedId(prev => prev === tradeId ? null : tradeId);
     setDrawerOpen(false);
-  };
-
-  // ── Open drawer ───────────────────────────────────────────────────────────
-  const handleOpenDrawer = (trade) => {
-    const enhanced = {
-      ...trade,
-      symbol,
-      spread_type: trade.spread_type || (trade.option_type === 'put' ? 'long_put' : 'long_call'),
-    };
-    setDrawerTrade(enhanced);
-    setDrawerOpen(true);
   };
 
   // ── Trade ID helper ───────────────────────────────────────────────────────
@@ -944,18 +1023,69 @@ export default function OptionsTerminal({ activeStrategy }) {
                           </div>
                         </div>
 
-                        {/* CTA button */}
-                        <button
-                          onClick={() => handleOpenDrawer(trade)}
-                          style={{
-                            marginTop: 14, width: '100%', height: 40,
-                            backgroundColor: ACCENT, border: 'none', borderRadius: 6,
-                            color: '#fff', fontFamily: mono, fontSize: 13,
-                            fontWeight: 700, cursor: 'pointer', letterSpacing: '0.04em',
-                          }}
-                        >
-                          ✦ View Full Claude Thesis
-                        </button>
+                        {/* Strategy Fit section (B3) */}
+                        <div style={{ marginTop: 16, borderTop: `1px solid ${BORDER}`, paddingTop: 14 }}>
+                          <div style={{ fontSize: 10, color: MUTED, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>
+                            Strategy Fit
+                          </div>
+                          {!scorecardData && !scorecardLoading && (
+                            <button
+                              onClick={loadScorecardForTrade}
+                              style={{
+                                padding: '7px 14px', borderRadius: 6,
+                                border: `1px solid ${BORDER}`,
+                                backgroundColor: 'transparent', color: DIM, fontSize: 12,
+                                cursor: 'pointer', fontWeight: 500,
+                              }}
+                            >
+                              &#8635; Load Strategy Scores for {symbol}
+                            </button>
+                          )}
+                          {scorecardData?.error && (
+                            <p style={{ color: C.red, fontSize: 12, margin: 0 }}>
+                              {scorecardData.error}
+                            </p>
+                          )}
+                          {(scorecardData?.strategies || scorecardLoading) && (
+                            <StrategyScorecard
+                              scores={scorecardData?.strategies || []}
+                              selectedKeys={scorecardSelectedKeys}
+                              onSelectionChange={setScorecardSelectedKeys}
+                              onEvaluate={(keys) => console.log('[OptionsTerminal] Evaluate strategies:', keys, 'for', symbol)}
+                              loading={scorecardLoading}
+                            />
+                          )}
+                        </div>
+
+                        {/* Follow / Take Position buttons */}
+                        <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+                          <button
+                            onClick={() => setPositionModal({ trade, type: 'follow' })}
+                            style={{
+                              flex: 1, height: 36, borderRadius: 6,
+                              border: `1px solid ${C.accent}40`,
+                              backgroundColor: C.accent + '14',
+                              color: C.accent, fontFamily: mono, fontSize: 12,
+                              fontWeight: 700, cursor: 'pointer', letterSpacing: '0.03em',
+                            }}
+                          >
+                            &#128204; Follow (Paper)
+                          </button>
+                          <button
+                            onClick={() => setPositionModal({ trade, type: 'take' })}
+                            style={{
+                              flex: 1, height: 36, borderRadius: 6,
+                              border: `1px solid ${C.green}40`,
+                              backgroundColor: C.green + '14',
+                              color: C.green, fontFamily: mono, fontSize: 12,
+                              fontWeight: 700, cursor: 'pointer', letterSpacing: '0.03em',
+                            }}
+                          >
+                            &#128176; Take Position (Live)
+                          </button>
+                        </div>
+
+
                       </td>
                     </tr>
                   ),
@@ -979,29 +1109,86 @@ export default function OptionsTerminal({ activeStrategy }) {
         )}
       </div>
 
-      {/* ── STAGE 3: Side drawer ──────────────────────────────────────────── */}
-      {drawerOpen && (
-        <div
-          onClick={() => setDrawerOpen(false)}
-          style={{
-            position: 'fixed', inset: 0,
-            background: 'rgba(0,0,0,0.5)',
-            backdropFilter: 'blur(2px)',
-            zIndex: 40,
-          }}
-        />
-      )}
-      <AskClaudePanel
-        open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        trade={drawerTrade}
-        smaData={smaData}
-        smaPeriods={smaPeriods}
-        riskConfig={{ ...analysisConfig.risk, systemVars: analysisConfig.systemVars }}
-      />
-
       {/* Spinner keyframe */}
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+
+      {/* Follow / Take confirmation modal */}
+      {positionModal && (
+        <div
+          onClick={() => !positionSubmitting && setPositionModal(null)}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200,
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: C.card, border: `1px solid ${C.border}`,
+              borderRadius: 8, padding: 24, minWidth: 320, maxWidth: 440,
+            }}
+          >
+            <div style={{ fontSize: 14, fontWeight: 600, color: C.text, marginBottom: 10 }}>
+              {positionModal.type === 'follow' ? 'Follow (Paper)' : 'Take Position (Live)'}
+            </div>
+            <div style={{ fontSize: 13, color: C.textDim, marginBottom: 16, lineHeight: 1.5 }}>
+              {positionModal.type === 'follow'
+                ? `Create a paper-tracked position for ${symbol} — ${positionModal.trade.spread_label || positionModal.trade.label || 'this trade'}.`
+                : `Record a live position for ${symbol}. This does not place an order with your broker.`}
+            </div>
+            <div style={{
+              background: C.surfaceAlt, borderRadius: 6, padding: '10px 12px',
+              marginBottom: 16, fontFamily: mono, fontSize: 12, color: C.textDim,
+            }}>
+              <div>Symbol: <span style={{ color: C.text }}>{symbol}</span></div>
+              <div>Strategy: <span style={{ color: C.text }}>{activeStrategy}</span></div>
+              <div>Entry price: <span style={{ color: C.text }}>
+                {(positionModal.trade.net_debit ?? positionModal.trade.premium_dollars ?? 0).toFixed(2)}
+              </span></div>
+              <div>Underlying: <span style={{ color: C.text }}>{underlyingPrice.toFixed(2)}</span></div>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button
+                onClick={() => setPositionModal(null)}
+                disabled={positionSubmitting}
+                style={{
+                  fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 4,
+                  border: `1px solid ${C.border}`, background: 'transparent',
+                  color: C.textDim, cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handlePositionConfirm}
+                disabled={positionSubmitting}
+                style={{
+                  fontSize: 12, fontWeight: 700, padding: '6px 16px', borderRadius: 4,
+                  border: 'none',
+                  background: positionModal.type === 'follow' ? C.accent : C.green,
+                  color: '#fff', cursor: positionSubmitting ? 'wait' : 'pointer',
+                  fontFamily: mono,
+                }}
+              >
+                {positionSubmitting ? 'Saving...' : 'Confirm'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Position toast notification */}
+      {positionToast && (
+        <div style={{
+          position: 'fixed', bottom: 24, right: 24, zIndex: 300,
+          background: positionToast.error ? '#ef4444' : C.green,
+          color: '#fff', borderRadius: 6, padding: '10px 18px',
+          fontSize: 13, fontWeight: 600, fontFamily: mono,
+          boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
+        }}>
+          {positionToast.message}
+        </div>
+      )}
 
       {/* Config drawer — opened via Header gear or inline ⚙ button */}
       <ConfigDrawer

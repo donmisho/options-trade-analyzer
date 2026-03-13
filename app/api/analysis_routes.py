@@ -37,6 +37,12 @@ from app.analysis.long_call_engine import (
     LongCallEngine, LongCallWeights, LongCallFilters
 )
 from app.analysis.directional_engine import DirectionalEngine, Thesis
+from app.analysis.strategy_scorer import score_all_strategies
+from app.analysis.black_scholes import compute_probability_matrix
+from app.models.schemas import (
+    ScorecardRequest, ScorecardResponse, StrategyScoreItem,
+    ProbabilityMatrixRequest, ProbabilityMatrixResponse,
+)
 
 log = logging.getLogger(__name__)
 
@@ -482,7 +488,7 @@ async def analyze_directional(
 ):
     """
     Compare strategies for a directional thesis.
-    
+
     NEW functionality — takes your trade thesis and returns a
     structured comparison of 2-4 strategies, each evaluated for
     cost, max profit, breakeven, probability, and thesis fit.
@@ -493,14 +499,14 @@ async def analyze_directional(
             status_code=422,
             detail="Direction must be 'bullish' or 'bearish'"
         )
-    
+
     contracts, price = await _fetch_chain(
         req.symbol, user,
         min_dte=req.min_dte,
         max_dte=req.max_dte,
         strike_range_pct=req.strike_range_pct,
     )
-    
+
     thesis = Thesis(
         symbol=req.symbol.upper(),
         direction=req.direction,
@@ -509,8 +515,103 @@ async def analyze_directional(
         risk_budget=req.risk_budget,
         current_price=price,
     )
-    
+
     engine = DirectionalEngine()
     result = engine.compare(thesis=thesis, contracts=contracts)
-    
+
     return result
+
+
+@router.post("/scorecard", response_model=ScorecardResponse)
+async def get_strategy_scorecard(
+    req: ScorecardRequest,
+    user: dict = Depends(require_read),
+):
+    """
+    Score all four strategies for a symbol using a single chain fetch.
+
+    Returns a 0-100 score per strategy plus the best candidate trade and
+    a signal summary. Scores are normalized within each strategy independently
+    using min-max scaling across candidates.
+
+    Accepts optional user_config overrides (dte_min, delta_max, sma_alignment_score, etc.).
+    Pass sma_alignment_score (0-1) from the frontend SMA indicator to influence trend-rider.
+
+    IMPORTANT: exactly one chain fetch happens regardless of how many strategies are scored.
+    """
+    sym = req.symbol.upper()
+    factory = _get_factory()
+    provider = factory.get_market_data(settings.default_market_data_provider, user_id=user.get("sub"))
+
+    scores = await score_all_strategies(
+        symbol=sym,
+        provider=provider,
+        user_config=req.user_config,
+    )
+
+    # Resolve underlying_price from first score's best_trade, or 0
+    underlying_price = 0.0
+    for s in scores:
+        if s.best_trade:
+            # best_trade is a spread or option dict — try common price fields
+            underlying_price = (
+                s.best_trade.get("underlying_price") or
+                s.best_trade.get("current_price") or
+                0.0
+            )
+            if underlying_price:
+                break
+
+    return ScorecardResponse(
+        symbol=sym,
+        underlying_price=underlying_price,
+        strategies=[
+            StrategyScoreItem(
+                strategy_key=s.strategy_key,
+                label=s.label,
+                score=s.score,
+                best_trade=s.best_trade,
+                signal_summary=s.signal_summary,
+                metric_scores=s.metric_scores,
+            )
+            for s in scores
+        ],
+    )
+
+
+@router.post("/probability-matrix", response_model=ProbabilityMatrixResponse)
+async def get_probability_matrix(
+    req: ProbabilityMatrixRequest,
+    user: dict = Depends(require_read),
+):
+    """
+    Compute a Black-Scholes probability matrix for a trade.
+
+    Returns the probability of the underlying being at each price level
+    on four snapshot dates: expiry-9, expiry-6, expiry-3, and expiry.
+    Price levels cover ±price_range_pct around current_price in price_step increments.
+
+    This is a deterministic math computation — Claude is NOT involved.
+    The matrix is used as context when Claude evaluates a trade.
+    """
+    try:
+        result = compute_probability_matrix(
+            current_price=req.current_price,
+            iv=req.iv,
+            dte=req.dte,
+            risk_free_rate=req.risk_free_rate,
+            price_range_pct=req.price_range_pct,
+            price_step=req.price_step,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Matrix computation failed: {e}")
+
+    return ProbabilityMatrixResponse(
+        symbol=req.symbol.upper(),
+        current_price=req.current_price,
+        iv=req.iv,
+        dte=req.dte,
+        price_levels=result.price_levels,
+        dates=[d.isoformat() for d in result.dates],
+        matrix=result.matrix,
+    )

@@ -169,6 +169,58 @@ FOLLOW-UP QUESTION:
 
         return FollowUpResponse.model_validate_json(_extract_json(text))
 
+    async def chat(
+        self,
+        system_prompt: str,
+        user_message: str,
+        max_tokens: int = 1500,
+        extra_messages: Optional[list] = None,
+    ) -> dict:
+        """
+        Call the model with fully custom system + user prompts.
+
+        Used by the structured evaluation endpoint so it can pass SKILL.md
+        prompts without being bound to the TradeVerdict output shape.
+
+        extra_messages: optional additional turns to append after the initial
+        user_message (e.g. assistant bad-response + correction turn for retry).
+
+        Returns:
+            {"text": str, "input_tokens": int, "output_tokens": int,
+             "model": str, "provider": str}
+        """
+        messages = [{"role": "user", "content": user_message}]
+        if extra_messages:
+            messages.extend(extra_messages)
+
+        payload = {
+            "model": self.model,
+            "max_tokens": max_tokens,
+            "system": system_prompt,
+            "messages": messages,
+        }
+
+        response = await self._client.post(self.endpoint, json=payload)
+        if not response.is_success:
+            logger.error(f"FoundryEvalAdapter.chat: {response.status_code}: {response.text[:300]}")
+            response.raise_for_status()
+
+        data = response.json()
+        text = ""
+        for block in data.get("content", []):
+            if block.get("type") == "text":
+                text = block["text"]
+                break
+
+        usage = data.get("usage", {})
+        return {
+            "text": text,
+            "input_tokens": usage.get("input_tokens", 0),
+            "output_tokens": usage.get("output_tokens", 0),
+            "model": data.get("model", self.model),
+            "provider": "foundry",
+        }
+
     async def health_check(self) -> bool:
         """Test connectivity to the Foundry endpoint."""
         try:
