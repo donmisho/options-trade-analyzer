@@ -14,8 +14,80 @@ The Adapter Pattern in action:
 """
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Optional
 from datetime import datetime
+
+
+@dataclass
+class ContextSignal:
+    """
+    A single normalized signal from one source for one symbol.
+
+    Produced by ContextSource.normalize() and written to symbol_context
+    by ContextStore. The ttl_seconds field drives the expires_at timestamp.
+    """
+    source_id: str
+    signal_type: str    # PRICE | SENTIMENT | FUNDAMENTAL | TECHNICAL | NEWS
+    symbol: str
+    value: dict         # normalized signal data — shape defined by the source
+    ttl_seconds: int    # how long this signal stays fresh before re-fetching
+
+
+class ContextSource(ABC):
+    """
+    Plug-in interface for any signal source the Position Monitor Agent can use.
+
+    WHY: The agent reads from this interface, not from Schwab or any specific
+    provider. Adding social sentiment, fundamentals, or a second brokerage
+    means writing one new ContextSource subclass — zero changes to the agent.
+
+    Register new sources in ProviderFactory so the agent picks them up
+    automatically on the next run.
+    """
+
+    @property
+    @abstractmethod
+    def source_id(self) -> str:
+        """Unique identifier, e.g. 'schwab_quotes', 'social_sentiment'."""
+        ...
+
+    @property
+    @abstractmethod
+    def signal_type(self) -> str:
+        """One of: PRICE | SENTIMENT | FUNDAMENTAL | TECHNICAL | NEWS"""
+        ...
+
+    @abstractmethod
+    async def fetch(self, symbol: str) -> dict:
+        """Fetch raw data for the symbol from this source."""
+        ...
+
+    @abstractmethod
+    def normalize(self, raw: dict) -> dict:
+        """
+        Normalize raw data into a stable signal_value JSON blob.
+
+        The shape returned here must not change without a migration — downstream
+        consumers (the Position Monitor prompt, health grade logic) depend on it.
+        """
+        ...
+
+    @abstractmethod
+    def ttl_seconds(self) -> int:
+        """How long a cached signal from this source stays fresh."""
+        ...
+
+    async def fetch_and_normalize(self, symbol: str) -> ContextSignal:
+        """Convenience: fetch + normalize in one call."""
+        raw = await self.fetch(symbol)
+        return ContextSignal(
+            source_id=self.source_id,
+            signal_type=self.signal_type,
+            symbol=symbol,
+            value=self.normalize(raw),
+            ttl_seconds=self.ttl_seconds(),
+        )
 
 
 class MarketDataProvider(ABC):

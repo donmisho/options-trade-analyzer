@@ -43,6 +43,7 @@ from app.api.entra_auth_routes import router as entra_auth_router
 from app.api.agent_routes import router as agent_router, init_agent_routes
 from app.api.admin_routes import router as admin_router
 from app.api.position_routes import router as position_router
+from app.api.agents_routes import router as agents_router, init_agents_routes, update_next_run_at
 from app.providers.ai import AnthropicAdapter, FoundryAdapter
 from app.ai.foundry_adapter import FoundryEvalAdapter
 from app.agents.telemetry import init_agent_telemetry
@@ -209,11 +210,73 @@ async def lifespan(app: FastAPI):
     appinsights_cs = secrets_manager.get("applicationinsights-connection-string")
     init_agent_telemetry(appinsights_cs)
 
+    # 8. Initialize Position Monitor Agent + APScheduler
+    scheduler = None
+    _eval_adapter_for_monitor = eval_adapter if (foundry_endpoint and foundry_api_key) else None
+    if _eval_adapter_for_monitor is not None:
+        from app.agents.position_monitor import PositionMonitorAgent
+        from app.providers.schwab_context_source import SchwabPriceContextSource
+        from apscheduler.schedulers.asyncio import AsyncIOScheduler
+        from apscheduler.triggers.cron import CronTrigger
+
+        # Build context source list — grows as new sources are added
+        schwab_provider = provider_factory.get_market_data(
+            settings.default_market_data_provider
+        ) if settings.default_market_data_provider == "schwab" else None
+        context_sources = []
+        if schwab_provider is not None:
+            context_sources.append(SchwabPriceContextSource(schwab_provider))
+
+        position_monitor = PositionMonitorAgent(
+            ai_adapter=_eval_adapter_for_monitor,
+            context_sources=context_sources,
+        )
+
+        # Scheduled job — runs at 4:15pm ET Mon-Fri after market close
+        async def _scheduled_monitor_run():
+            from app.models.session import async_session
+            async with async_session() as db:
+                try:
+                    result = await position_monitor.run(db=db)
+                    logger.info(
+                        f"Scheduled position monitor: {result.positions_processed} positions, "
+                        f"{result.insights_triggered} escalations"
+                    )
+                except Exception as e:
+                    logger.error(f"Scheduled position monitor failed: {e}")
+
+        scheduler = AsyncIOScheduler()
+        trigger = CronTrigger(
+            day_of_week="mon-fri",
+            hour=16,
+            minute=15,
+            timezone="America/New_York",
+        )
+        scheduler.add_job(_scheduled_monitor_run, trigger, id="position_monitor")
+        scheduler.start()
+
+        # Expose next fire time to the status endpoint
+        job = scheduler.get_job("position_monitor")
+        next_run = job.next_run_time if job else None
+        init_agents_routes(position_monitor, next_run_at=next_run)
+        logger.info(
+            f"Position Monitor Agent ready. "
+            f"Next scheduled run: {next_run}"
+        )
+    else:
+        logger.warning(
+            "Position Monitor Agent: no eval adapter configured — "
+            "agent disabled (set FOUNDRY_ENDPOINT + foundry-api-key)"
+        )
+        init_agents_routes(None)
+
     logger.info(f"{settings.app_name} ready at http://{settings.host}:{settings.port}")
 
     yield  # App runs here
 
     # --- SHUTDOWN ---
+    if scheduler is not None:
+        scheduler.shutdown(wait=False)
     await provider_factory.clear_cache()
     logger.info(f"{settings.app_name} shut down")
 
@@ -257,6 +320,7 @@ app.include_router(entra_auth_router, prefix="/api/v1")
 app.include_router(agent_router, prefix="/api/v1")
 app.include_router(admin_router, prefix="/api/v1")
 app.include_router(position_router, prefix="/api/v1")
+app.include_router(agents_router, prefix="/api/v1")
 
 
 # --- Health Check ---
