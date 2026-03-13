@@ -8,16 +8,19 @@ ENDPOINTS:
   GET  /api/v1/evaluate/health     — Check if AI provider is reachable
 
 STRUCTURED OUTPUTS:
-  /evaluate/structured uses FoundryEvalAdapter.chat() with the DEEP_DIVE_SYSTEM
-  prompt from SKILL.md. Claude returns a JSON array of TradeEvaluationCard
-  objects validated by Pydantic. Retries once with correction context on
-  JSON parse failure. Writes every call to agent_run_log.
+  /evaluate/structured calls adapter.chat() with the DEEP_DIVE_SYSTEM prompt
+  from SKILL.md. The adapter is FoundryEvalAdapter (httpx) when FOUNDRY_ENDPOINT
+  is set, or AnthropicAdapter (SDK) as a fallback for local dev. Both expose a
+  compatible chat(system, user, max_tokens, extra_messages) interface.
+  Claude returns a JSON array of TradeEvaluationCard objects validated by Pydantic.
+  Retries once with correction context on JSON parse failure.
+  Writes every call to agent_run_log.
 """
 
 import json
 import uuid
 from datetime import datetime, timezone
-from typing import Optional, List
+from typing import Any, Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
@@ -26,9 +29,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require_read
 from app.ai.foundry_adapter import FoundryEvalAdapter
-from app.ai.message_builder import build_trade_evaluation_message
-from app.providers.ai.prompts import pre_screen_trade, compute_exit_levels
-from app.providers.ai.base import TradeContext
 from app.models.session import get_db
 from app.models.database import AgentRunLog
 from app.models.schemas import TradeEvaluationCard
@@ -38,17 +38,19 @@ from app.analysis.black_scholes import compute_probability_matrix
 
 router = APIRouter(prefix="/evaluate", tags=["Trade Evaluation"])
 
-# Initialized in main.py at startup
-_eval_adapter: Optional[FoundryEvalAdapter] = None
+# Initialized in main.py at startup.
+# Type is Any because Foundry (httpx-based FoundryEvalAdapter) and Anthropic
+# (SDK-based AnthropicAdapter) both expose a compatible .chat() method.
+_eval_adapter: Optional[Any] = None
 
 
-def init_evaluation_routes(adapter: FoundryEvalAdapter):
-    """Called from main.py to inject the evaluation adapter."""
+def init_evaluation_routes(adapter: Any):
+    """Called from main.py to inject the evaluation adapter (Foundry or Anthropic)."""
     global _eval_adapter
     _eval_adapter = adapter
 
 
-def _get_adapter() -> FoundryEvalAdapter:
+def _get_adapter() -> Any:
     if _eval_adapter is None:
         raise HTTPException(
             status_code=503,

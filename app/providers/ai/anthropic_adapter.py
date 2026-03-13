@@ -172,14 +172,30 @@ class AnthropicAdapter(AIProvider):
             logger.error(f"AnthropicAdapter: Follow-up failed: {e}")
             raise
 
-    async def chat(self, system_prompt: str, user_message: str, max_tokens: int) -> dict:
-        """Call the model with fully custom system/user prompts (used by agent routes)."""
+    async def chat(
+        self,
+        system_prompt: str,
+        user_message: str,
+        max_tokens: int,
+        extra_messages: Optional[list] = None,
+    ) -> dict:
+        """
+        Call the model with fully custom system/user prompts (used by agent routes
+        and the structured evaluation endpoint).
+
+        extra_messages: optional list of additional turns appended after
+        the initial user message — used for the JSON-correction retry path
+        in evaluation_routes.py.  Format: [{"role": "...", "content": "..."}]
+        """
         client = self._get_client()
+        messages = [{"role": "user", "content": user_message}]
+        if extra_messages:
+            messages.extend(extra_messages)
         response = await client.messages.create(
             model=self.model,
             max_tokens=max_tokens,
             system=system_prompt,
-            messages=[{"role": "user", "content": user_message}],
+            messages=messages,
         )
         text = "".join(b.text for b in response.content if hasattr(b, "text"))
         return {

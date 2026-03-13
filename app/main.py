@@ -182,8 +182,9 @@ async def lifespan(app: FastAPI):
         init_agent_routes(ai_provider)
 
     # 6b. Initialize evaluation adapter (httpx-based, structured outputs via output_format)
-    #     API key comes from Key Vault ("foundry-api-key") — no .env needed
-    #     Endpoint is non-secret config: set FOUNDRY_ENDPOINT in .env or App Service settings
+    #     Prefers Foundry (FOUNDRY_ENDPOINT + foundry-api-key from Key Vault).
+    #     Falls back to the already-initialized ai_provider (Anthropic) so that
+    #     /evaluate/structured works in local dev without a Foundry deployment.
     foundry_endpoint = settings.foundry_endpoint
     foundry_api_key = secrets_manager.get("foundry-api-key")
     if foundry_endpoint and foundry_api_key:
@@ -194,10 +195,14 @@ async def lifespan(app: FastAPI):
         )
         init_evaluation_routes(eval_adapter)
         logger.info(f"Evaluation AI provider: Foundry httpx ({foundry_endpoint})")
+    elif ai_provider is not None:
+        # AnthropicAdapter.chat() matches the FoundryEvalAdapter.chat() signature
+        init_evaluation_routes(ai_provider)
+        logger.info("Evaluation AI provider: Anthropic fallback (no FOUNDRY_ENDPOINT set)")
     else:
         logger.warning(
-            "Evaluation AI provider: FOUNDRY_ENDPOINT or FOUNDRY_API_KEY not set — "
-            "/evaluate/trade will return 503"
+            "Evaluation AI provider: neither Foundry nor Anthropic configured — "
+            "/evaluate/structured will return 503"
         )
 
     # 7. Initialize OpenTelemetry → Application Insights (agent observability)

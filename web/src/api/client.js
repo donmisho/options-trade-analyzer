@@ -195,6 +195,56 @@ export async function apiPost(path, data) {
 
 
 // ═══════════════════════════════════════════════════════════════════
+// STRATEGY SCORECARD (Phase 2.9)
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * Run all strategies against a symbol in one backend call.
+ * Returns { symbol, quote, sma_signal, strategies: [{ key, label, score, best_trade, signal_summary }] }
+ *
+ * @param {string} symbol — Ticker symbol (e.g. 'MSFT')
+ * @param {Object} userConfig — Optional strategy config overrides from localStorage
+ */
+export async function getStrategyScorecard(symbol, userConfig = null) {
+  return apiFetch('/analysis/scorecard', {
+    method: 'POST',
+    body: JSON.stringify({ symbol: symbol.toUpperCase(), user_config: userConfig || undefined }),
+  });
+}
+
+/**
+ * Compute Black-Scholes probability matrix for a trade.
+ * Returns { price_levels, dates, matrix }
+ */
+export async function getProbabilityMatrix({ symbol, current_price, iv, dte }) {
+  return apiFetch('/analysis/probability-matrix', {
+    method: 'POST',
+    body: JSON.stringify({ symbol, current_price, iv, dte }),
+  });
+}
+
+/**
+ * Run structured Claude evaluation for one or more strategies.
+ *
+ * @param {Object} data
+ *   symbol          — ticker
+ *   current_price   — float
+ *   iv              — annualized IV as decimal (0.25 = 25%)
+ *   sma_alignment   — dict from scorecard sma_signal
+ *   strategy_keys   — string[]
+ *   trade           — optional pre-populated trade dict (null = Claude picks best)
+ *
+ * @returns {{ evaluations: TradeEvaluationCard[], evaluated_at: string, agent_run_id: string }}
+ */
+export async function evaluateStructured(data) {
+  return apiFetch('/evaluate/structured', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+
+// ═══════════════════════════════════════════════════════════════════
 // CONFIG
 // ═══════════════════════════════════════════════════════════════════
 
@@ -419,5 +469,59 @@ export async function getRecommendation(tradeKey) {
 export async function deleteRecommendation(tradeKey) {
   return apiFetch(`/agent/recommendations/${encodeURIComponent(tradeKey)}`, {
     method: "DELETE",
+  });
+}
+
+
+// ═══════════════════════════════════════════════════════════════════
+// POSITIONS (Phase 2.10)
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * List positions with composable filters.
+ * @param {Object} filters — { status, source, symbol, strategy_key } — all optional
+ * @returns PositionListResponse — { positions, total, aggregate }
+ */
+export async function getPositions(filters = {}) {
+  const params = new URLSearchParams();
+  if (filters.status && filters.status !== 'all') params.set('status', filters.status);
+  if (filters.source && filters.source !== 'all') params.set('source', filters.source);
+  if (filters.symbol) params.set('symbol', filters.symbol.toUpperCase());
+  if (filters.strategy_key && filters.strategy_key !== 'all') params.set('strategy_key', filters.strategy_key);
+  const qs = params.toString();
+  return apiFetch(`/positions${qs ? `?${qs}` : ''}`);
+}
+
+/**
+ * Create a paper-tracked position (source=PAPER, status=FOLLOWING).
+ * @param {Object} data — FollowPositionRequest fields
+ */
+export async function followTrade(data) {
+  return apiFetch('/positions/follow', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+/**
+ * Create a live position (source=LIVE, status=LIVE).
+ * @param {Object} data — TakePositionRequest fields (same shape as follow)
+ */
+export async function takeTrade(data) {
+  return apiFetch('/positions/take', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+/**
+ * Close a position and record the outcome.
+ * @param {string} positionId — UUID
+ * @param {Object} data — { exit_price: float, exit_reason: string }
+ */
+export async function closePosition(positionId, data) {
+  return apiFetch(`/positions/${encodeURIComponent(positionId)}/close`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
   });
 }
