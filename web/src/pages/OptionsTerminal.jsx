@@ -550,7 +550,7 @@ export default function OptionsTerminal({ activeStrategy }) {
   useEffect(() => {
     setTrades([]);
     setSelectedId(null);
-    setDrawerOpen(false);
+    setConfigOpen(false);
     setError(null);
     if (initialized.current) {
       runAnalysis(symbol);
@@ -589,7 +589,7 @@ export default function OptionsTerminal({ activeStrategy }) {
     setSymbol(activeSymbol);
     setInputSymbol(activeSymbol);
     setSelectedId(null);
-    setDrawerOpen(false);
+    setConfigOpen(false);
     runAnalysis(activeSymbol);
   }, [activeSymbol]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -600,14 +600,14 @@ export default function OptionsTerminal({ activeStrategy }) {
     if (!sym) return;
     setSymbol(sym);
     setSelectedId(null);
-    setDrawerOpen(false);
+    setConfigOpen(false);
     runAnalysis(sym);
   };
 
   // ── Row click: toggle expansion ───────────────────────────────────────────
   const handleRowClick = (tradeId) => {
     setSelectedId(prev => prev === tradeId ? null : tradeId);
-    setDrawerOpen(false);
+    setConfigOpen(false);
   };
 
   // ── Trade ID helper ───────────────────────────────────────────────────────

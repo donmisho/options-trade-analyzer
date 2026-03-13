@@ -35,7 +35,7 @@ export default function BrokerConnectPage() {
           try {
             const status = await getSchwabStatus();
             if (status.connected) {
-              navigate('/verticals', { replace: true });
+              navigate('/dashboard', { replace: true });
             } else {
               setError('Schwab authorization was not completed. Try again.');
             }
@@ -98,7 +98,7 @@ export default function BrokerConnectPage() {
 
         {error && <p style={styles.error}>{error}</p>}
 
-        <button onClick={() => navigate('/verticals', { replace: true })} style={styles.skip}>
+        <button onClick={() => navigate('/dashboard', { replace: true })} style={styles.skip}>
           Skip for now →
         </button>
       </div>
