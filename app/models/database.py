@@ -546,6 +546,36 @@ class AnalyzedTrade(Base):
     )
 
 
+# ─── Signal Context Store ─────────────────────────────────────────────────────
+
+
+class SymbolContext(Base):
+    """
+    Short-lived signal data for a symbol from any registered ContextSource.
+
+    WHY: The Position Monitor Agent needs current price, IV, and other signals
+    to evaluate position health. Fetching from the brokerage on every run is
+    slow and burns API quota. This table acts as a TTL-aware cache — the agent
+    checks here first, only re-fetches from the source if the signal is stale.
+
+    The composite index on (symbol, source_id, expires_at) makes the common
+    query "is there a fresh signal for this symbol from this source?" fast.
+    """
+    __tablename__ = "symbol_context"
+
+    context_id  = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    symbol      = Column(String(20), nullable=False, index=True)
+    source_id   = Column(String(50), nullable=False)   # e.g. "schwab_quotes"
+    signal_type = Column(String(50), nullable=False)   # PRICE | SENTIMENT | FUNDAMENTAL | TECHNICAL | NEWS
+    signal_value = Column(Text, nullable=False)        # JSON blob — shape defined by source
+    captured_at = Column(DateTime, default=datetime.utcnow)
+    expires_at  = Column(DateTime, nullable=False)
+
+    __table_args__ = (
+        Index("ix_symbol_context_lookup", "symbol", "source_id", "expires_at"),
+    )
+
+
 # ─── Position Tracking ────────────────────────────────────────────────────────
 
 

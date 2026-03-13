@@ -26,8 +26,10 @@ import OptionsTerminal from './pages/OptionsTerminal';
 // import VerticalsPage from './pages/VerticalsPage';      // DEPRECATED — retained for reference
 // import NakedOptionsPage from './pages/NakedOptionsPage'; // DEPRECATED — retained for reference
 import DirectionalPage from './pages/DirectionalPage';
-import FavoritesPage from './pages/FavoritesPage';
+// import FavoritesPage from './pages/FavoritesPage';  // DEPRECATED — /favorites redirects to /positions
+import PositionsPage from './pages/PositionsPage';
 import DashboardPage from './pages/DashboardPage';
+import SecurityDashboard from './pages/SecurityDashboard';
 import LoginPage from './pages/LoginPage';
 import BrokerConnectPage from './pages/BrokerConnectPage';
 
@@ -91,9 +93,13 @@ export default function App() {
             <Route path="/verticals"     element={<OptionsTerminal activeStrategy={activeStrategy} />} />
             <Route path="/naked-options" element={<OptionsTerminal activeStrategy={activeStrategy} />} />
 
-            {/* Other pages — unchanged */}
+            {/* Security Dashboard — per-symbol strategy scorecard */}
+            <Route path="/security/:symbol" element={<SecurityDashboard />} />
+
+            {/* Other pages */}
             <Route path="/directional" element={<DirectionalPage />} />
-            <Route path="/favorites"   element={<FavoritesPage />} />
+            <Route path="/positions"   element={<PositionsPage />} />
+            <Route path="/favorites"   element={<Navigate to="/positions" replace />} />
 
             {/* Default route → Dashboard */}
             <Route path="*" element={<Navigate to="/dashboard" replace />} />

@@ -6,6 +6,7 @@
  * The spinner on the refresh button shows when prices are loading.
  */
 
+import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import './Watchlist.css';
 
@@ -19,11 +20,11 @@ export default function Watchlist() {
     fetchPrices,
     showToast,
   } = useApp();
+  const navigate = useNavigate();
 
   const handleClick = (symbol) => {
-    if (symbol === activeSymbol) return;
     setActiveSymbol(symbol);
-    showToast(`Switched to ${symbol} — analysis will refresh`);
+    navigate(`/security/${symbol}`);
   };
 
   const handleRefresh = async () => {

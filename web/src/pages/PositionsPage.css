@@ -1,0 +1,276 @@
+/* ── PositionsPage ── */
+
+.pos-page-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.pos-header-count {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* ── Filter bar ── */
+
+.pos-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 12px 14px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 20px;
+}
+
+.pos-filter-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pos-filter-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.pos-filter-select,
+.pos-filter-input {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 12px;
+  padding: 4px 8px;
+  outline: none;
+  height: 28px;
+  min-width: 110px;
+}
+
+.pos-filter-input {
+  min-width: 90px;
+}
+
+.pos-filter-select:focus,
+.pos-filter-input:focus {
+  border-color: var(--accent-blue);
+}
+
+/* ── Strategy group ── */
+
+.pos-strategy-group {
+  margin-bottom: 24px;
+}
+
+.pos-group-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.pos-group-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--accent-cyan);
+}
+
+.pos-group-stats {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.pos-stats-sep {
+  opacity: 0.4;
+}
+
+/* ── P&L colors ── */
+
+.pos-pnl-up   { color: var(--accent-green); }
+.pos-pnl-down { color: var(--accent-red); }
+
+/* ── Source badge ── */
+
+.pos-source-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 3px;
+  display: inline-block;
+}
+
+.pos-source-paper {
+  background: rgba(6, 182, 212, 0.10);
+  color: var(--accent-cyan);
+  border: 1px solid rgba(6, 182, 212, 0.25);
+}
+
+.pos-source-live {
+  background: rgba(34, 197, 94, 0.10);
+  color: var(--accent-green);
+  border: 1px solid rgba(34, 197, 94, 0.25);
+}
+
+/* ── Exit reason badge ── */
+
+.pos-exit-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 3px;
+  display: inline-block;
+  background: rgba(255,255,255,0.05);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+.pos-exit-target  { color: var(--accent-green); border-color: rgba(34,197,94,0.25); background: rgba(34,197,94,0.08); }
+.pos-exit-warning { color: #eab308;             border-color: rgba(234,179,8,0.25);  background: rgba(234,179,8,0.08); }
+.pos-exit-stop    { color: var(--accent-red);   border-color: rgba(239,68,68,0.25);  background: rgba(239,68,68,0.08); }
+.pos-exit-expired { color: var(--text-muted);   }
+.pos-exit-manual  { color: var(--text-secondary); }
+
+/* ── Action buttons ── */
+
+.pos-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.pos-btn-close,
+.pos-btn-view {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 4px;
+  border: 1px solid;
+  cursor: pointer;
+  background: transparent;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.pos-btn-close {
+  color: var(--accent-red);
+  border-color: rgba(239, 68, 68, 0.30);
+}
+.pos-btn-close:hover {
+  background: rgba(239, 68, 68, 0.10);
+}
+
+.pos-btn-view {
+  color: var(--accent-cyan);
+  border-color: rgba(6, 182, 212, 0.30);
+}
+.pos-btn-view:hover {
+  background: rgba(6, 182, 212, 0.08);
+}
+
+/* ── Symbol button (clickable to navigate) ── */
+
+.pos-symbol-btn {
+  background: none;
+  border: none;
+  color: var(--accent-cyan);
+  font-family: monospace;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+.pos-symbol-btn:hover {
+  text-decoration: underline;
+}
+
+/* ── Closed divider ── */
+
+.pos-closed-divider {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+  padding: 6px 0 4px;
+}
+
+/* ── Empty state ── */
+
+.empty-state {
+  text-align: center;
+  padding: 48px 24px;
+  color: var(--text-muted);
+}
+
+.empty-icon {
+  font-size: 32px;
+  margin-bottom: 12px;
+  opacity: 0.3;
+}
+
+.empty-state h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.empty-state p {
+  font-size: 12px;
+  line-height: 1.6;
+  max-width: 340px;
+  margin: 0 auto;
+}
+
+/* ── Close confirmation modal ── */
+
+.pos-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.pos-modal {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 24px;
+  min-width: 320px;
+  max-width: 420px;
+}
+
+.pos-modal-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 10px;
+}
+
+.pos-modal-body {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+
+.pos-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}

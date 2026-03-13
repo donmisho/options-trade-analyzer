@@ -12,6 +12,7 @@
  */
 import { useState, useCallback, useEffect } from "react";
 import { C, mono, WEIGHT_COLORS, WEIGHT_LABELS } from "../styles/tokens";
+import { STRATEGY_CONFIGS } from "../strategy-configs/index";
 
 // --- Reusable form components (unchanged from Round 3) -------------
 
@@ -156,17 +157,51 @@ const SLIDER_STYLES = `input[type=number]::-webkit-inner-spin-button,input[type=
 
 // --- Main ConfigDrawer --------------------------------------------
 
-export default function ConfigDrawer({ mode = "verticals", open, onClose, config, onApply, alignment, presets, activePresetId, onPresetSelect, onSavePreset, onOverwrite, onDelete, onRename }) {
-  const [draft, setDraft] = useState(config);
-  useEffect(() => { if (open) setDraft(config); }, [open, config]);
+export default function ConfigDrawer({ mode = "verticals", open, onClose, config, onApply, alignment, presets, activePresetId, onPresetSelect, onSavePreset, onOverwrite, onDelete, onRename, activeStrategy }) {
+  // ── Strategy-aware mode (B4) ─────────────────────────────────────────────
+  const strategyCfg = activeStrategy ? STRATEGY_CONFIGS[activeStrategy] : null;
+  const hasConfigSchema = !!(strategyCfg?.configSchema?.length);
 
-  const { weights, dte, strikes, spreads, risk, spreadTypes, greeks, smaPeriods, systemVars } = draft;
+  // Load strategy field values from localStorage, falling back to schema defaults
+  const loadStrategyDraft = () => {
+    if (!strategyCfg?.configSchema) return {};
+    try {
+      const stored = JSON.parse(localStorage.getItem('analysisConfig') || '{}');
+      const saved = stored.strategyOverrides?.[activeStrategy] || {};
+      const result = {};
+      for (const field of strategyCfg.configSchema) {
+        result[field.key] = field.key in saved ? saved[field.key] : field.default;
+      }
+      return result;
+    } catch {
+      const result = {};
+      for (const field of strategyCfg.configSchema) result[field.key] = field.default;
+      return result;
+    }
+  };
+
+  const [strategyDraft, setStrategyDraft] = useState(loadStrategyDraft);
+
+  // ── Standard mode state ──────────────────────────────────────────────────
+  const [draft, setDraft] = useState(config || {});
+
+  // Sync state when drawer opens
+  useEffect(() => {
+    if (!open) return;
+    if (hasConfigSchema) {
+      setStrategyDraft(loadStrategyDraft());
+    } else {
+      setDraft(config || {});
+    }
+  }, [open, config]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const { weights, dte, strikes, spreads, risk, spreadTypes, greeks, smaPeriods, systemVars } = draft || {};
   const st = spreadTypes || { bull_call: true, bear_put: true, bull_put: false, bear_call: false };
   const gk = greeks || { min_short_delta: 0.15, max_short_delta: 0.45, min_net_delta: 0, max_net_theta: 0 };
   const sma = smaPeriods || { short: 8, mid: 21, long: 50 };
   const sv = systemVars || { exit_warning_pct: 67, exit_scale_out_pct: 160, exit_underlying_stop_pct: 1.5, exit_time_stop_days: 10, min_reward_risk: 0.5, min_ev_threshold: 0, pip_rr_green: 1.5, pip_rr_amber: 1.0, pip_prob_green: 0.55, pip_prob_amber: 0.45, pip_score_green: 0.65, pip_score_amber: 0.45, pip_delta_lo: 0.30, pip_delta_hi: 0.65, pip_iv_green: 30, pip_iv_amber: 50, pip_runway_green: 30, pip_runway_amber: 15 };
 
-  const ws = Object.values(weights).reduce((s, v) => s + v, 0);
+  const ws = Object.values(weights || {}).reduce((s, v) => s + v, 0);
   const wPct = Math.round(ws * 100);
   const wv = Math.abs(ws - 1.0) < 0.02;
   const [validationError, setValidationError] = useState(null);
@@ -186,10 +221,28 @@ export default function ConfigDrawer({ mode = "verticals", open, onClose, config
     onApply(draft);
   }, [draft, onApply]);
 
-  const handleCancel = useCallback(() => { setDraft(config); onClose(); }, [config, onClose]);
+  const handleCancel = useCallback(() => {
+    if (hasConfigSchema) setStrategyDraft(loadStrategyDraft());
+    else setDraft(config || {});
+    onClose();
+  }, [config, onClose, hasConfigSchema]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Strategy-aware apply: save overrides to localStorage, call onApply, close
+  const handleStrategyApply = useCallback(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem('analysisConfig') || '{}');
+      const overrides = stored.strategyOverrides || {};
+      overrides[activeStrategy] = strategyDraft;
+      localStorage.setItem('analysisConfig', JSON.stringify({ ...stored, strategyOverrides: overrides }));
+    } catch { /* silently ignore storage errors */ }
+    if (onApply) onApply(strategyDraft);
+    onClose();
+  }, [activeStrategy, strategyDraft, onApply, onClose]);
 
   const isV = mode === "verticals";
-  const subtitle = isV ? "Vertical Spread Settings" : "Naked Puts & Calls Settings";
+  const subtitle = hasConfigSchema
+    ? `${strategyCfg.label} Parameters`
+    : isV ? "Vertical Spread Settings" : "Naked Puts & Calls Settings";
   const alignLabel = alignment === "bullish" ? "Bullish" : alignment === "bearish" ? "Bearish" : "Mixed";
   const alignColor = alignment === "bullish" ? C.green : alignment === "bearish" ? C.red : C.yellow;
   const recType = alignment === "bullish" ? "bull_call" : alignment === "bearish" ? "bear_put" : null;
@@ -203,14 +256,43 @@ export default function ConfigDrawer({ mode = "verticals", open, onClose, config
       <div style={{ padding: "14px 18px", borderBottom: `1px solid ${C.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
         <div><h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: C.text }}>Configuration</h2><p style={{ margin: "2px 0 0", fontSize: 11, color: C.textDim }}>{subtitle}</p></div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 10.5, padding: "2px 8px", borderRadius: 12, fontWeight: 600, fontFamily: mono, backgroundColor: wv ? C.greenDim : C.redDim, color: wv ? C.green : C.red }}>&Sigma; {wPct}%</span>
+          {!hasConfigSchema && <span style={{ fontSize: 10.5, padding: "2px 8px", borderRadius: 12, fontWeight: 600, fontFamily: mono, backgroundColor: wv ? C.greenDim : C.redDim, color: wv ? C.green : C.red }}>&Sigma; {wPct}%</span>}
           <button onClick={handleCancel} style={{ background: "none", border: "none", color: C.textMuted, fontSize: 20, cursor: "pointer", padding: 4 }}>&times;</button>
         </div>
       </div>
 
       {/* Body */}
       <div style={{ flex: 1, overflowY: "auto", padding: "14px 18px" }}>
-        <PresetSelector presets={presets} activePresetId={activePresetId} onSelect={onPresetSelect} onSaveNew={onSavePreset} onOverwrite={onOverwrite} onDelete={onDelete} onRename={onRename} />
+
+        {/* Strategy config body — shown when activeStrategy has configSchema */}
+        {hasConfigSchema && (<>
+          <div style={{ marginBottom: 16, padding: "10px 14px", borderRadius: 6, backgroundColor: C.card, border: `1px solid ${C.border}` }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: C.accent, marginBottom: 2 }}>{strategyCfg.label}</div>
+            <div style={{ fontSize: 11, color: C.textDim, lineHeight: 1.4 }}>{strategyCfg.description}</div>
+          </div>
+          {strategyCfg.configSchema.map(field => {
+            const value = strategyDraft[field.key] ?? field.default;
+            const update = (v) => setStrategyDraft(prev => ({ ...prev, [field.key]: v }));
+            if (field.type === "slider") {
+              return <SingleSlider key={field.key} label={field.label} value={value} min={field.min} max={field.max} step={field.step} unit={field.unit || ""} color={C.accent} onChange={update} />;
+            }
+            if (field.type === "toggle") {
+              return (
+                <div key={field.key} style={{ marginBottom: 14, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <span style={{ color: C.textDim, fontSize: 10.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>{field.label}</span>
+                  <ToggleChip label={value ? "On" : "Off"} checked={!!value} onChange={(v) => update(v ? 1 : 0)} color={C.accent} />
+                </div>
+              );
+            }
+            if (field.type === "number") {
+              return <NumInput key={field.key} label={field.label} value={value} onChange={update} min={field.min} max={field.max} step={field.step} unit={field.unit || ""} />;
+            }
+            return null;
+          })}
+        </>)}
+
+        {/* Standard body — shown when NOT in strategy mode */}
+        {!hasConfigSchema && <><PresetSelector presets={presets} activePresetId={activePresetId} onSelect={onPresetSelect} onSaveNew={onSavePreset} onOverwrite={onOverwrite} onDelete={onDelete} onRename={onRename} />
 
         <Sect title="Scoring Weights" icon="&#9878;&#65039;" defaultOpen={true}>
           <p style={{ fontSize: 11, color: C.textDim, margin: "6px 0 8px", lineHeight: 1.4 }}>Drag each slider independently — total must equal 100%.</p>
@@ -321,13 +403,18 @@ export default function ConfigDrawer({ mode = "verticals", open, onClose, config
             </>)}
           </div>
         </Sect>
+        </>}
       </div>
 
       {/* Footer */}
       <div style={{ padding: "12px 18px", borderTop: `1px solid ${C.border}`, flexShrink: 0 }}>
-        {validationError && <div style={{ padding: "8px 12px", marginBottom: 8, borderRadius: 6, border: `1px solid ${C.red}40`, backgroundColor: C.redDim, color: C.red, fontSize: 11.5, lineHeight: 1.4 }}>{validationError}</div>}
+        {!hasConfigSchema && validationError && <div style={{ padding: "8px 12px", marginBottom: 8, borderRadius: 6, border: `1px solid ${C.red}40`, backgroundColor: C.redDim, color: C.red, fontSize: 11.5, lineHeight: 1.4 }}>{validationError}</div>}
         <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={handleApply} style={{ flex: 1, padding: "10px 0", borderRadius: 8, border: "none", fontWeight: 600, fontSize: 13, cursor: wv ? "pointer" : "not-allowed", backgroundColor: wv ? C.accent : C.border, color: wv ? "#fff" : C.textMuted, opacity: wv ? 1 : 0.7 }}>Apply & Re-analyze</button>
+          {hasConfigSchema ? (
+            <button onClick={handleStrategyApply} style={{ flex: 1, padding: "10px 0", borderRadius: 8, border: "none", fontWeight: 600, fontSize: 13, cursor: "pointer", backgroundColor: C.accent, color: "#fff" }}>Apply</button>
+          ) : (
+            <button onClick={handleApply} style={{ flex: 1, padding: "10px 0", borderRadius: 8, border: "none", fontWeight: 600, fontSize: 13, cursor: wv ? "pointer" : "not-allowed", backgroundColor: wv ? C.accent : C.border, color: wv ? "#fff" : C.textMuted, opacity: wv ? 1 : 0.7 }}>Apply & Re-analyze</button>
+          )}
           <button onClick={handleCancel} style={{ padding: "10px 16px", borderRadius: 8, border: `1px solid ${C.border}`, backgroundColor: "transparent", color: C.textDim, fontSize: 13, cursor: "pointer" }}>Cancel</button>
         </div>
       </div>

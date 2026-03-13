@@ -14,8 +14,7 @@ import { STRATEGY_CONFIGS } from '../strategy-configs/index';
 import './Header.css';
 
 export default function Header({ activeStrategy, setActiveStrategy }) {
-  const { favorites, fetchPrices, setConfigOpen } = useApp();
-  const favCount = favorites.length;
+  const { fetchPrices, setConfigOpen, activeSymbol } = useApp();
   const navigate = useNavigate();
 
   const [schwabConnected, setSchwabConnected] = useState(null);
@@ -65,9 +64,14 @@ export default function Header({ activeStrategy, setActiveStrategy }) {
   // Handle strategy tab click: update activeStrategy + navigate to the right URL
   const handleStrategyClick = (cfg) => {
     if (setActiveStrategy) setActiveStrategy(cfg.key);
-    // Route to the appropriate URL so the back button and direct links work
-    if (cfg.key === 'verticals') navigate('/verticals');
-    else navigate('/naked-options');
+    if (cfg.scorecardStrategy) {
+      // Scorecard strategies route to SecurityDashboard for the current symbol
+      navigate(activeSymbol ? `/security/${activeSymbol}` : '/dashboard');
+    } else if (cfg.key === 'verticals') {
+      navigate('/verticals');
+    } else {
+      navigate('/naked-options');
+    }
   };
 
   return (
@@ -98,9 +102,8 @@ export default function Header({ activeStrategy, setActiveStrategy }) {
         <NavLink to="/directional" className="nav-tab">
           Directional Compare
         </NavLink>
-        <NavLink to="/favorites" className="nav-tab">
-          ★ Favorites
-          {favCount > 0 && <span className="fav-count">{favCount}</span>}
+        <NavLink to="/positions" className="nav-tab">
+          Positions
         </NavLink>
 
         <button
