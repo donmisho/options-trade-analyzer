@@ -217,7 +217,7 @@ export default function StrategyScorecard({
             );
           })
         )
-        )}
+        }
       </div>
 
       {/* Evaluate button */}
