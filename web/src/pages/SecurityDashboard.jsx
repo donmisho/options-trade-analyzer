@@ -213,39 +213,14 @@ export default function SecurityDashboard() {
   const displayScores = scores || MOCK_SCORES;
   const usingMockData = !scores && !loading;
 
-  // SMA signal banner
+  // SMA signal for QuoteBar
   const smaAlignment = smaSignal?.alignment;
-  const smaColor = smaAlignment === 'BULLISH' ? C.green
-    : smaAlignment === 'BEARISH' ? C.red
-    : C.amber;
-  const smaBannerText = smaSignal
-    ? `SMA: ${smaAlignment}${smaSignal.description ? '  ' + smaSignal.description : ''}`
-    : null;
 
   return (
     <div style={{ backgroundColor: C.bg, minHeight: '100%', paddingBottom: 24 }}>
 
-      {/* Quote bar — reads activeSymbol from AppContext */}
-      <QuoteBar title="Security Dashboard" />
-
-      {/* SMA alignment banner — shown only when real data is loaded */}
-      {smaBannerText && (
-        <div style={{
-          padding: '6px 20px',
-          borderBottom: `1px solid ${C.border}`,
-          backgroundColor: C.surface,
-        }}>
-          <span style={{
-            fontSize: 11.5,
-            fontWeight: 600,
-            color: smaColor,
-            fontFamily: mono,
-            letterSpacing: '0.03em',
-          }}>
-            {smaBannerText}
-          </span>
-        </div>
-      )}
+      {/* Quote bar — unified symbol header */}
+      <QuoteBar symbol={symbolUpper} smaSignal={smaAlignment || undefined} />
 
       {/* Main content */}
       <div style={{ padding: '20px 20px 0' }}>

@@ -28,7 +28,7 @@ import './Layout.css';
 export default function Layout({ activeStrategy, setActiveStrategy }) {
   return (
     <div className="app-layout">
-      <Header activeStrategy={activeStrategy} setActiveStrategy={setActiveStrategy} />
+      <Header setActiveStrategy={setActiveStrategy} />
       <Watchlist />
       <main className="main-content">
         <Outlet />

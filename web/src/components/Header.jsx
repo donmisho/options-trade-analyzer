@@ -1,19 +1,17 @@
 /**
- * Header — Top bar with logo, dynamic strategy tabs, favorites badge, Schwab status.
+ * Header — Top bar with logo, nav tabs, Schwab status.
  *
- * Phase 2.7: Strategy tabs are now rendered dynamically from STRATEGY_CONFIGS.
- * Clicking a tab calls setActiveStrategy(cfg.key), which is passed down from App.jsx.
- * Favorites, Directional, and other routes remain as NavLinks.
+ * Nav: Dashboard | Verticals | Puts & Calls | Positions
+ * Strategy configs are NOT rendered as tabs — they feed StrategyScorecard instead.
  */
 import { useState, useEffect, useCallback } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import Logo from '../assets/Logo';
 import { useApp } from '../context/AppContext';
 import { getSchwabStatus, getSchwabAuthUrl } from '../api/client';
-import { STRATEGY_CONFIGS } from '../strategy-configs/index';
 import './Header.css';
 
-export default function Header({ activeStrategy, setActiveStrategy }) {
+export default function Header({ setActiveStrategy }) {
   const { fetchPrices, setConfigOpen, activeSymbol } = useApp();
   const navigate = useNavigate();
 
@@ -61,19 +59,6 @@ export default function Header({ activeStrategy, setActiveStrategy }) {
     setTimeout(() => clearInterval(pollInterval), 5 * 60 * 1000);
   };
 
-  // Handle strategy tab click: update activeStrategy + navigate to the right URL
-  const handleStrategyClick = (cfg) => {
-    if (setActiveStrategy) setActiveStrategy(cfg.key);
-    if (cfg.scorecardStrategy) {
-      // Scorecard strategies route to SecurityDashboard for the current symbol
-      navigate(activeSymbol ? `/security/${activeSymbol}` : '/dashboard');
-    } else if (cfg.key === 'verticals') {
-      navigate('/verticals');
-    } else {
-      navigate('/naked-options');
-    }
-  };
-
   return (
     <header className="header">
       <div className="logo">
@@ -82,27 +67,34 @@ export default function Header({ activeStrategy, setActiveStrategy }) {
       </div>
       <nav className="nav-tabs">
 
-        {/* Dashboard */}
-        <NavLink to="/dashboard" className="nav-tab">
+        <NavLink to="/dashboard" className={({ isActive }) => isActive ? 'nav-tab active' : 'nav-tab'}>
           Dashboard
         </NavLink>
 
-        {/* Dynamic strategy tabs from STRATEGY_CONFIGS */}
-        {Object.values(STRATEGY_CONFIGS).map(cfg => (
-          <button
-            key={cfg.key}
-            onClick={() => handleStrategyClick(cfg)}
-            className={activeStrategy === cfg.key ? 'nav-tab active' : 'nav-tab'}
-          >
-            {cfg.tabLabel}
-          </button>
-        ))}
+        <button
+          onClick={() => navigate(activeSymbol ? `/security-strategies/${activeSymbol}` : '/security-strategies')}
+          className="nav-tab"
+        >
+          Security Strategies
+        </button>
 
-        {/* Non-strategy tabs remain as NavLinks */}
-        <NavLink to="/directional" className="nav-tab">
-          Directional Compare
+        <NavLink
+          to="/verticals"
+          className={({ isActive }) => isActive ? 'nav-tab active' : 'nav-tab'}
+          onClick={() => setActiveStrategy?.('verticals')}
+        >
+          Verticals
         </NavLink>
-        <NavLink to="/positions" className="nav-tab">
+
+        <NavLink
+          to="/naked-options"
+          className={({ isActive }) => isActive ? 'nav-tab active' : 'nav-tab'}
+          onClick={() => setActiveStrategy?.('long-calls')}
+        >
+          Puts &amp; Calls
+        </NavLink>
+
+        <NavLink to="/positions" className={({ isActive }) => isActive ? 'nav-tab active' : 'nav-tab'}>
           Positions
         </NavLink>
 

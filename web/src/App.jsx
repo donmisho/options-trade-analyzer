@@ -25,11 +25,11 @@ import Layout from './components/Layout';
 import OptionsTerminal from './pages/OptionsTerminal';
 // import VerticalsPage from './pages/VerticalsPage';      // DEPRECATED — retained for reference
 // import NakedOptionsPage from './pages/NakedOptionsPage'; // DEPRECATED — retained for reference
-import DirectionalPage from './pages/DirectionalPage';
 // import FavoritesPage from './pages/FavoritesPage';  // DEPRECATED — /favorites redirects to /positions
 import PositionsPage from './pages/PositionsPage';
 import DashboardPage from './pages/DashboardPage';
 import SecurityDashboard from './pages/SecurityDashboard';
+import SecurityStrategiesPage from './pages/SecurityStrategiesPage';
 import LoginPage from './pages/LoginPage';
 import BrokerConnectPage from './pages/BrokerConnectPage';
 
@@ -93,11 +93,15 @@ export default function App() {
             <Route path="/verticals"     element={<OptionsTerminal activeStrategy={activeStrategy} />} />
             <Route path="/naked-options" element={<OptionsTerminal activeStrategy={activeStrategy} />} />
 
-            {/* Security Dashboard — per-symbol strategy scorecard */}
-            <Route path="/security/:symbol" element={<SecurityDashboard />} />
+            {/* Security Dashboard — per-symbol strategy scorecard (legacy) */}
+            <Route path="/security/:symbol" element={<Navigate to="/security-strategies" replace />} />
+
+            {/* Security Strategies — primary landing page for a symbol */}
+            <Route path="/security-strategies" element={<SecurityStrategiesPage />} />
+            <Route path="/security-strategies/:symbol" element={<SecurityStrategiesPage />} />
 
             {/* Other pages */}
-            <Route path="/directional" element={<DirectionalPage />} />
+            <Route path="/directional" element={<Navigate to="/dashboard" replace />} />
             <Route path="/positions"   element={<PositionsPage />} />
             <Route path="/favorites"   element={<Navigate to="/positions" replace />} />
 

@@ -15,12 +15,13 @@ import {
   CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, Cell,
 } from 'recharts';
 import { STRATEGY_CONFIGS } from '../strategy-configs/index';
-import { apiPost, getQuote, followTrade, takeTrade } from '../api/client';
+import { apiPost, getQuote, followTrade, takeTrade, getStrategyScorecard, evaluateStructured } from '../api/client';
 import { useApp } from '../context/AppContext';
 import ConfigDrawer from '../components/ConfigDrawer';
+import QuoteBar from '../components/QuoteBar';
 import ScoreBar from '../components/ScoreBar';
 import StrategyScorecard from '../components/StrategyScorecard';
-import { getStrategyScorecard } from '../api/client';
+import TradeEvaluationCard from '../components/TradeEvaluationCard';
 import { C, mono, DEFAULT_PRESETS } from '../styles/tokens';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -308,6 +309,11 @@ export default function OptionsTerminal({ activeStrategy }) {
   const [scorecardLoading,      setScorecardLoading]      = useState(false);
   const [scorecardSelectedKeys, setScorecardSelectedKeys] = useState([]);
 
+  // ── Per-trade evaluation results (inline in Stage 2) ──────────────────────
+  const [terminalEvalLoading,   setTerminalEvalLoading]   = useState(false);
+  const [terminalEvalError,     setTerminalEvalError]     = useState(null);
+  const [terminalEvaluations,   setTerminalEvaluations]   = useState([]);
+
   // Follow/Take position modal — { trade, type: 'follow'|'take' }
   const [positionModal, setPositionModal] = useState(null);
   const [positionSubmitting, setPositionSubmitting] = useState(false);
@@ -563,9 +569,12 @@ export default function OptionsTerminal({ activeStrategy }) {
     setScorecardSelectedKeys([]);
   }, [symbol]);
 
-  // ── Reset scorecard selection when trade row changes ───────────────────────
+  // ── Reset scorecard selection and eval when trade row changes ─────────────
   useEffect(() => {
     setScorecardSelectedKeys([]);
+    setTerminalEvalLoading(false);
+    setTerminalEvalError(null);
+    setTerminalEvaluations([]);
   }, [selectedId]);
 
   // ── Regenerate candles when chart start date changes ──────────────────────
@@ -629,6 +638,57 @@ export default function OptionsTerminal({ activeStrategy }) {
     catch { return []; }
   }, [selectedTrade, config, underlyingPrice]);
 
+  // ── Scorecard scores filtered by trade_structure ──────────────────────────
+  // Verticals: all 4 strategies. Puts & Calls (long-calls): only long_option strategies.
+  const filteredScorecardScores = useMemo(() => {
+    if (!scorecardData?.strategies) return [];
+    return scorecardData.strategies.filter(item => {
+      const key = item.key ?? item.strategy_key;
+      const cfg = STRATEGY_CONFIGS[key];
+      return activeStrategy === 'verticals' || cfg?.trade_structure === 'long_option';
+    });
+  }, [scorecardData, activeStrategy]);
+
+  const notApplicableScores = useMemo(() => {
+    if (!scorecardData?.strategies || activeStrategy === 'verticals') return [];
+    const applicableKeys = new Set(filteredScorecardScores.map(s => s.key ?? s.strategy_key));
+    return scorecardData.strategies.filter(item => {
+      const key = item.key ?? item.strategy_key;
+      return !applicableKeys.has(key);
+    });
+  }, [scorecardData, filteredScorecardScores, activeStrategy]);
+
+  // ── Evaluate selected strategies for the expanded trade ───────────────────
+  const handleTerminalEvaluate = useCallback(async (keys) => {
+    if (!keys.length || !symbol || !selectedTrade) return;
+    setTerminalEvalLoading(true);
+    setTerminalEvalError(null);
+    setTerminalEvaluations([]);
+
+    const ivSource = keys
+      .map(k => filteredScorecardScores.find(s => (s.strategy_key ?? s.key) === k))
+      .find(s => s?.best_trade?.iv != null);
+    const iv = ivSource?.best_trade?.iv ?? selectedTrade.iv ?? 0.25;
+
+    try {
+      const data = await evaluateStructured({
+        symbol,
+        current_price: underlyingPrice,
+        iv,
+        sma_alignment: smaData
+          ? { sma_8: smaData.smaShort, sma_21: smaData.smaMid, sma_50: smaData.smaLong }
+          : {},
+        strategy_keys: keys,
+        trade: selectedTrade,
+      });
+      setTerminalEvaluations([...(data.evaluations ?? [])].sort((a, b) => b.score - a.score));
+    } catch (err) {
+      setTerminalEvalError(err.message || 'Evaluation failed');
+    } finally {
+      setTerminalEvalLoading(false);
+    }
+  }, [symbol, underlyingPrice, smaData, selectedTrade, filteredScorecardScores]);
+
   // ─────────────────────────────────────────────────────────────────────────
   // RENDER
   // ─────────────────────────────────────────────────────────────────────────
@@ -668,64 +728,20 @@ export default function OptionsTerminal({ activeStrategy }) {
           )}
         </form>
 
-        {/* Market ribbon */}
-        {(underlyingPrice > 0 || quoteData) && (
-          <div style={{
-            display: 'flex', gap: 0, marginBottom: 8,
-            border: `1px solid ${BORDER}`, borderRadius: 6, overflow: 'hidden',
-          }}>
-            {(() => {
-              const earnings = fmtCriticalDate(quoteData?.next_earnings_date);
-              const dividend = fmtCriticalDate(quoteData?.next_dividend_date);
-              const isBullish = signal.bg === GREEN;
-              const isBearish = signal.bg === AMBER;
-              const sigBadge = isBullish
-                ? { label: 'BULLISH',  color: GREEN, bg: `${GREEN}25` }
-                : isBearish
-                  ? { label: 'BEARISH', color: AMBER, bg: `${AMBER}25` }
-                  : { label: 'MIXED',   color: DIM,   bg: `${DIM}20` };
-
-              const cells = [
-                { label: 'SYMBOL',       value: symbol, color: TEXT, mono: true, large: true },
-                { label: 'SIGNAL',       badge: sigBadge },
-                { label: 'LAST ANALYZED', value: lastAnalyzed ? lastAnalyzed.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }) + ' ' + lastAnalyzed.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }) : '—', color: DIM },
-                { label: 'PRICE',     value: (quoteData?.price || underlyingPrice).toFixed(2), color: TEXT },
-                { label: 'CHG',       value: fmtChange(quoteData?.change),          color: changeColor(quoteData?.change) },
-                { label: 'CHG %',     value: fmtChangePct(quoteData?.change_pct),   color: changeColor(quoteData?.change_pct) },
-                { label: 'DAY RANGE', value: fmtRange(quoteData?.day_low, quoteData?.day_high), color: DIM },
-                { label: '52W RANGE', value: fmtRange(quoteData?.week_52_low, quoteData?.week_52_high), color: DIM },
-                { label: 'VOLUME',    value: fmtVol(quoteData?.volume),             color: DIM },
-                { label: 'REL VOL',   value: fmtRelVol(quoteData?.volume_ratio),    color: quoteData?.volume_ratio >= 1.5 ? AMBER : DIM },
-                ...(earnings ? [{ label: 'EARNINGS', value: `${earnings.label} (${earnings.days}d)`, color: criticalDateColor(earnings.days) }] : []),
-                ...(dividend ? [{ label: 'DIVIDEND', value: `${dividend.label} (${dividend.days}d)`, color: criticalDateColor(dividend.days) }] : []),
-              ];
-              return cells.map((field, i) => (
-                <div key={field.label} style={{
-                  flex: 1, padding: '5px 8px', backgroundColor: SURFACE,
-                  borderRight: i < cells.length - 1 ? `1px solid ${BORDER}` : 'none',
-                  textAlign: 'center', minWidth: 0,
-                }}>
-                  <div style={{ fontSize: 9, color: MUTED, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 2 }}>
-                    {field.label}
-                  </div>
-                  {field.badge ? (
-                    <span style={{
-                      display: 'inline-block', padding: '2px 8px', borderRadius: 4,
-                      fontSize: 10, fontWeight: 700, letterSpacing: '0.05em',
-                      color: field.badge.color, backgroundColor: field.badge.bg,
-                    }}>
-                      {field.badge.label}
-                    </span>
-                  ) : (
-                    <div style={{ fontSize: field.large ? 15 : 12, fontFamily: mono, fontWeight: field.large ? 800 : 600, color: field.color, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', letterSpacing: field.large ? 1 : 0 }}>
-                      {field.value}
-                    </div>
-                  )}
-                </div>
-              ));
-            })()}
-          </div>
-        )}
+        {/* Market ribbon — unified QuoteBar */}
+        {(() => {
+          const smaSignalStr = signal.text.includes('Bullish') ? 'BULLISH'
+            : signal.text.includes('Bearish') ? 'BEARISH'
+            : 'MIXED';
+          return (
+            <QuoteBar
+              symbol={symbol}
+              quote={quoteData}
+              smaSignal={candles.length > 0 ? smaSignalStr : undefined}
+              lastAnalyzed={lastAnalyzed}
+            />
+          );
+        })()}
 
         {/* Candlestick chart */}
         {candles.length > 0 && (
@@ -994,68 +1010,105 @@ export default function OptionsTerminal({ activeStrategy }) {
                         borderBottom: `1px solid ${BORDER}`,
                         padding: 16,
                       }}>
-                        <div style={{ display: 'flex', gap: 16 }}>
+                        {/* 2-column grid: Scoring Breakdown (left) + Strategy Fit (right) */}
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
 
-                          {/* Left 58%: Math Matrix */}
-                          <div style={{ flex: '0 0 58%' }}>
+                          {/* Left: Scoring Breakdown */}
+                          <div>
                             <div style={{ fontSize: 10, color: MUTED, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>
                               Score Breakdown
                             </div>
                             <MathMatrix trade={trade} config={config} />
                           </div>
 
-                          {/* Right 42%: Payoff diagram */}
-                          <div style={{ flex: '0 0 42%' }}>
+                          {/* Right: Strategy Fit */}
+                          <div>
                             <div style={{ fontSize: 10, color: MUTED, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>
-                              Payoff at Expiration
+                              Strategy Fit — This Trade
                             </div>
-                            {config.payoffType === 'spread' && payoffData.length > 0 ? (
-                              <PayoffChart data={payoffData} trade={trade} />
-                            ) : (
-                              <div style={{
-                                height: 160, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                backgroundColor: C.card, border: `1px dashed ${BORDER}`,
-                                borderRadius: 6, color: MUTED, fontSize: 12,
-                              }}>
-                                Payoff diagram available for spread strategies
+
+                            {!scorecardData && !scorecardLoading && (
+                              <button
+                                onClick={loadScorecardForTrade}
+                                style={{
+                                  padding: '7px 14px', borderRadius: 6,
+                                  border: `1px solid ${BORDER}`,
+                                  backgroundColor: 'transparent', color: DIM, fontSize: 12,
+                                  cursor: 'pointer', fontWeight: 500,
+                                }}
+                              >
+                                &#8635; Load Strategy Scores for {symbol}
+                              </button>
+                            )}
+                            {scorecardData?.error && (
+                              <p style={{ color: C.red, fontSize: 12, margin: 0 }}>{scorecardData.error}</p>
+                            )}
+                            {(filteredScorecardScores.length > 0 || scorecardLoading) && (
+                              <StrategyScorecard
+                                scores={filteredScorecardScores}
+                                selectedKeys={scorecardSelectedKeys}
+                                onSelectionChange={setScorecardSelectedKeys}
+                                onEvaluate={handleTerminalEvaluate}
+                                loading={scorecardLoading}
+                              />
+                            )}
+
+                            {/* Non-applicable strategies (Puts & Calls only) */}
+                            {notApplicableScores.length > 0 && scorecardData && !scorecardLoading && (
+                              <div style={{ marginTop: 10 }}>
+                                <div style={{ position: 'relative', textAlign: 'center', marginBottom: 8 }}>
+                                  <div style={{ borderBottom: '1px dashed rgba(48,54,61,0.5)', position: 'absolute', width: '100%', top: '50%' }} />
+                                  <span style={{ position: 'relative', background: BG, padding: '0 8px', fontSize: 9, color: 'rgba(139,148,158,0.5)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                    not applicable to this trade type
+                                  </span>
+                                </div>
+                                {notApplicableScores.map(item => {
+                                  const key = item.key ?? item.strategy_key;
+                                  const cfg = STRATEGY_CONFIGS[key];
+                                  const reason = cfg?.trade_structure === 'credit_spread'
+                                    ? 'requires credit spread structure'
+                                    : 'not applicable';
+                                  return (
+                                    <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 4px' }}>
+                                      <span style={{ fontSize: 11, color: MUTED, fontStyle: 'italic' }}>{item.label ?? item.strategy_label ?? key}</span>
+                                      <span style={{ fontSize: 10, color: 'rgba(139,148,158,0.5)', fontStyle: 'italic' }}>{reason}</span>
+                                    </div>
+                                  );
+                                })}
                               </div>
                             )}
                           </div>
                         </div>
 
-                        {/* Strategy Fit section (B3) */}
-                        <div style={{ marginTop: 16, borderTop: `1px solid ${BORDER}`, paddingTop: 14 }}>
-                          <div style={{ fontSize: 10, color: MUTED, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>
-                            Strategy Fit
+                        {/* Evaluation results — below the 2-column grid */}
+                        {terminalEvalLoading && (
+                          <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 6, border: `1px solid ${BORDER}`, color: MUTED, fontSize: 12 }}>
+                            Evaluating with Claude…
                           </div>
-                          {!scorecardData && !scorecardLoading && (
-                            <button
-                              onClick={loadScorecardForTrade}
-                              style={{
-                                padding: '7px 14px', borderRadius: 6,
-                                border: `1px solid ${BORDER}`,
-                                backgroundColor: 'transparent', color: DIM, fontSize: 12,
-                                cursor: 'pointer', fontWeight: 500,
-                              }}
-                            >
-                              &#8635; Load Strategy Scores for {symbol}
+                        )}
+                        {terminalEvalError && !terminalEvalLoading && (
+                          <div style={{ marginTop: 14, padding: '8px 12px', borderRadius: 6, border: `1px solid ${C.red}40`, color: C.red, fontSize: 12 }}>
+                            {terminalEvalError}
+                            <button onClick={() => handleTerminalEvaluate(scorecardSelectedKeys)} style={{ marginLeft: 10, background: 'none', border: 'none', color: C.red, fontSize: 11, cursor: 'pointer', textDecoration: 'underline', padding: 0 }}>
+                              Retry
                             </button>
-                          )}
-                          {scorecardData?.error && (
-                            <p style={{ color: C.red, fontSize: 12, margin: 0 }}>
-                              {scorecardData.error}
-                            </p>
-                          )}
-                          {(scorecardData?.strategies || scorecardLoading) && (
-                            <StrategyScorecard
-                              scores={scorecardData?.strategies || []}
-                              selectedKeys={scorecardSelectedKeys}
-                              onSelectionChange={setScorecardSelectedKeys}
-                              onEvaluate={(keys) => console.log('[OptionsTerminal] Evaluate strategies:', keys, 'for', symbol)}
-                              loading={scorecardLoading}
-                            />
-                          )}
-                        </div>
+                          </div>
+                        )}
+                        {!terminalEvalLoading && terminalEvaluations.length > 0 && (
+                          <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 14 }}>
+                            {terminalEvaluations.map(card => (
+                              <TradeEvaluationCard
+                                key={card.strategy_key}
+                                card={card}
+                                symbol={symbol}
+                                currentPrice={underlyingPrice}
+                                smaData={{ smaShort: smaData.smaShort, smaMid: smaData.smaMid, smaLong: smaData.smaLong }}
+                                tradeData={selectedTrade}
+                                activeStrategy={card.strategy_key}
+                              />
+                            ))}
+                          </div>
+                        )}
 
                         {/* Follow / Take Position buttons */}
                         <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
