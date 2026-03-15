@@ -6,7 +6,7 @@
  * The spinner on the refresh button shows when prices are loading.
  */
 
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import './Watchlist.css';
 
@@ -20,11 +20,19 @@ export default function Watchlist() {
     fetchPrices,
     showToast,
   } = useApp();
+  const location = useLocation();
   const navigate = useNavigate();
 
   const handleClick = (symbol) => {
     setActiveSymbol(symbol);
-    navigate(`/security-strategies/${symbol}`, { state: { fromWatchlist: true } });
+
+    if (location.pathname.startsWith('/verticals') || location.pathname.startsWith('/naked-options')) {
+      // Stay on page — OptionsTerminal watches activeSymbol and re-runs analysis
+    } else if (location.pathname.startsWith('/positions')) {
+      // Symbol switch only, no navigation
+    } else {
+      navigate(`/security-strategies/${symbol}`, { state: { fromWatchlist: true } });
+    }
   };
 
   const handleRefresh = async () => {

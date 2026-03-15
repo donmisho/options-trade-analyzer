@@ -19,10 +19,12 @@ import { apiPost, getQuote, followTrade, takeTrade, getStrategyScorecard } from 
 import { useApp } from '../context/AppContext';
 import ConfigDrawer from '../components/ConfigDrawer';
 import QuoteBar from '../components/QuoteBar';
-import ScoreBar from '../components/ScoreBar';
+import ResultsTable from '../components/ResultsTable';
 import StrategyScorecard from '../components/StrategyScorecard';
 import TradeEvaluationCard from '../components/TradeEvaluationCard';
 import TradeExpansionPanel from '../components/TradeExpansionPanel';
+import { verticalsColumns } from '../config/verticals-columns';
+import { longOptionsColumns } from '../config/long-options-columns';
 import { C, mono, DEFAULT_PRESETS } from '../styles/tokens';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -574,6 +576,16 @@ export default function OptionsTerminal({ activeStrategy }) {
     initialized.current = true;
   }, []);
 
+  // ── Re-analyze when activeSymbol changes (e.g. Watchlist click) ──────────
+  // Only fires after mount (initialized guard) and only when the symbol actually changed.
+  useEffect(() => {
+    if (!initialized.current || !activeSymbol || activeSymbol === symbol) return;
+    setSymbol(activeSymbol);
+    setInputSymbol(activeSymbol);
+    setSelectedId(null);
+    runAnalysis(activeSymbol);
+  }, [activeSymbol]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Symbol submit ─────────────────────────────────────────────────────────
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -585,30 +597,28 @@ export default function OptionsTerminal({ activeStrategy }) {
     runAnalysis(sym);
   };
 
-  // ── Row click: toggle expansion ───────────────────────────────────────────
-  const handleRowClick = (tradeId) => {
-    setSelectedId(prev => prev === tradeId ? null : tradeId);
-    setConfigOpen(false);
+  // ── Column config and display results ────────────────────────────────────
+  // Select column set based on which strategy is active.
+  const isLongOptions = config.key === 'long_calls';
+  const tableColumns  = isLongOptions ? longOptionsColumns : verticalsColumns;
+
+  // For long options, pre-compute vs_itm_dollars so the vs ITM column can sort by it.
+  const displayResults = useMemo(() => {
+    if (!isLongOptions || !trades.length) return trades;
+    const price = underlyingPrice || 0;
+    return trades.map(trade => ({
+      ...trade,
+      vs_itm_dollars: trade.option_type === 'call'
+        ? price - trade.strike
+        : trade.strike - price,
+    }));
+  }, [trades, isLongOptions, underlyingPrice]);
+
+  // Context passed to column render functions
+  const tableContext = {
+    currentPrice: quoteData?.price ?? underlyingPrice,
+    systemVars:   analysisConfig.systemVars,
   };
-
-  // ── Trade ID helper ───────────────────────────────────────────────────────
-  const getTradeId = (trade, idx) => {
-    return trade.long_strike != null
-      ? `${trade.long_strike}-${trade.short_strike}-${trade.expiration}-${trade.spread_type}`
-      : `${trade.strike}-${trade.expiration}-${trade.option_type}-${idx}`;
-  };
-
-  // ── Payoff data for selected trade ────────────────────────────────────────
-  const selectedTrade = useMemo(() => {
-    if (!selectedId || !trades.length) return null;
-    return trades.find((t, i) => getTradeId(t, i) === selectedId) || null;
-  }, [selectedId, trades]);
-
-  const payoffData = useMemo(() => {
-    if (!selectedTrade || config.payoffType !== 'spread' || !config.payoffFn) return [];
-    try { return config.payoffFn(selectedTrade, underlyingPrice); }
-    catch { return []; }
-  }, [selectedTrade, config, underlyingPrice]);
 
   // ── Scorecard scores filtered by trade_structure ──────────────────────────
   // Verticals: all 4 strategies. Puts & Calls (long-calls): only long_option strategies.
@@ -843,131 +853,35 @@ export default function OptionsTerminal({ activeStrategy }) {
         )}
 
         {/* Table */}
-        {!loading && !error && trades.length > 0 && (
-          <table style={{
-            width: '100%', borderCollapse: 'collapse',
-            fontFamily: mono, fontSize: 12,
-          }}>
-            <thead>
-              <tr style={{ backgroundColor: C.surfaceAlt, borderBottom: `1px solid ${BORDER}` }}>
-                {config.columns.map(col => (
-                  <th key={col.key} style={{
-                    padding: '6px 8px', textAlign: col.align,
-                    color: MUTED, fontWeight: 600, fontSize: 10,
-                    textTransform: 'uppercase', letterSpacing: '0.06em',
-                    whiteSpace: 'nowrap', width: col.width,
-                  }}>
-                    {col.label}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {trades.map((trade, idx) => {
-                const tradeId   = getTradeId(trade, idx);
-                const isSelected = tradeId === selectedId;
-                const badge      = config.getBadge(trade);
-                const pips       = config.getHealthPips(trade, analysisConfig.systemVars);
-
-                return [
-                  // Trade row
-                  <tr
-                    key={`row-${tradeId}`}
-                    onClick={() => handleRowClick(tradeId)}
-                    style={{
-                      cursor: 'pointer',
-                      borderLeft: `3px solid ${isSelected ? ACCENT : 'transparent'}`,
-                      backgroundColor: isSelected ? ACCENT + '08' : 'transparent',
-                      borderBottom: `1px solid ${BORDER}`,
-                      transition: 'background 0.1s',
-                    }}
-                    onMouseEnter={e => { if (!isSelected) e.currentTarget.style.backgroundColor = SURFACE; }}
-                    onMouseLeave={e => { if (!isSelected) e.currentTarget.style.backgroundColor = 'transparent'; }}
-                  >
-                    {config.columns.map((col, ci) => {
-                      const val = trade[col.key];
-
-                      // Special: row index
-                      if (col.key === '#') {
-                        return (
-                          <td key={ci} style={{ padding: '6px 8px', textAlign: 'center', color: MUTED }}>
-                            {idx + 1}
-                          </td>
-                        );
-                      }
-
-                      // Special: type badge
-                      if (col.key === 'badge') {
-                        return (
-                          <td key={ci} style={{ padding: '6px 8px', textAlign: 'center' }}>
-                            <span style={{
-                              display: 'inline-block', padding: '2px 7px', borderRadius: 4,
-                              fontSize: 10, fontWeight: 700, letterSpacing: '0.04em',
-                              color: badge.color, backgroundColor: badge.bg,
-                            }}>
-                              {badge.label}
-                            </span>
-                          </td>
-                        );
-                      }
-
-                      // Special: score bar
-                      if (col.key === 'composite_score') {
-                        return (
-                          <td key={ci} style={{ padding: '4px 8px', textAlign: 'center' }}>
-                            <ScoreBar score={trade.composite_score} />
-                          </td>
-                        );
-                      }
-
-                      // Special: individual health pips
-                      if (col.key === 'pip_rr' || col.key === 'pip_prob' || col.key === 'pip_score') {
-                        const pip = pips[col.key === 'pip_rr' ? 0 : col.key === 'pip_prob' ? 1 : 2];
-                        return (
-                          <td key={ci} style={{ padding: '6px 8px', textAlign: 'center' }} title={col.title}>
-                            <div style={{ width: 10, height: 10, borderRadius: '50%', backgroundColor: pip.color, margin: '0 auto' }} />
-                          </td>
-                        );
-                      }
-
-                      // Standard formatted cell
-                      return (
-                        <td key={ci} style={{
-                          padding: '6px 8px',
-                          textAlign: col.align,
-                          color: TEXT,
-                        }}>
-                          {col.format ? col.format(val, trade, idx) : (val ?? '—')}
-                        </td>
-                      );
-                    })}
-                  </tr>,
-
-                  // Stage 2: Inline expansion — 4-column panel (UI-DECISIONS.md)
-                  isSelected && (
-                    <tr key={`expand-${tradeId}`}>
-                      <td colSpan={config.columns.length} style={{ padding: 0 }}>
-                        <TradeExpansionPanel
-                          trade={trade}
-                          config={config}
-                          symbol={symbol}
-                          underlyingPrice={underlyingPrice}
-                          smaData={smaData}
-                          scorecardStrategies={filteredScorecardScores}
-                          scorecardNotApplicable={notApplicableScores}
-                          scorecardLoading={scorecardLoading}
-                          scorecardError={scorecardData?.error || null}
-                          onLoadScorecard={loadScorecardForTrade}
-                          onFollowTrade={(t) => setPositionModal({ trade: t, type: 'follow' })}
-                          onTakeTrade={(t) => setPositionModal({ trade: t, type: 'take' })}
-                        />
-                      </td>
-                    </tr>
-                  ),
-                ].filter(Boolean);
-              })}
-            </tbody>
-          </table>
+        {!loading && !error && displayResults.length > 0 && (
+          <ResultsTable
+            results={displayResults}
+            columns={tableColumns}
+            context={tableContext}
+            expandedRowId={selectedId}
+            onRowClick={(id) => {
+              setSelectedId(id);
+              setConfigOpen(false);
+            }}
+            renderExpansionRow={(trade) => (
+              <TradeExpansionPanel
+                trade={trade}
+                config={config}
+                symbol={symbol}
+                underlyingPrice={underlyingPrice}
+                smaData={smaData}
+                scorecardStrategies={filteredScorecardScores}
+                scorecardNotApplicable={notApplicableScores}
+                scorecardLoading={scorecardLoading}
+                scorecardError={scorecardData?.error || null}
+                onLoadScorecard={loadScorecardForTrade}
+                onFollowTrade={(t) => setPositionModal({ trade: t, type: 'follow' })}
+                onTakeTrade={(t) => setPositionModal({ trade: t, type: 'take' })}
+              />
+            )}
+            defaultSortKey="composite_score"
+            defaultSortDir="desc"
+          />
         )}
 
         {/* Empty state */}

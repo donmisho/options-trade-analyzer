@@ -58,7 +58,7 @@ const NAV_ITEMS = [
     label:    'Puts & Calls',
     path:     '/naked-options',
     matchFn:  (p) => p === '/naked-options',
-    strategy: 'long-calls',
+    strategy: 'long_calls',
   },
   {
     label:   'Positions',
@@ -124,7 +124,7 @@ export default function Layout({ setActiveStrategy }) {
   // Ensures OptionsTerminal gets the right config even when the user
   // loads /naked-options or /verticals directly (e.g., bookmark).
   useEffect(() => {
-    if (location.pathname === '/naked-options') setActiveStrategy?.('long-calls');
+    if (location.pathname === '/naked-options') setActiveStrategy?.('long_calls');
     else if (location.pathname === '/verticals')    setActiveStrategy?.('verticals');
   }, [location.pathname, setActiveStrategy]);
 
@@ -301,47 +301,55 @@ export default function Layout({ setActiveStrategy }) {
         position: 'relative',
       }}>
 
-        {/* Watchlist toggle — top-right of content zone */}
-        <div style={{ position: 'absolute', top: 8, right: 16, zIndex: 50 }}>
+        {/* Watchlist toggle — visible only on analysis pages, fixed so it always shows */}
+        {/\/(verticals|naked-options|security-strategies)/.test(location.pathname) && (
           <button
             onClick={() => setWatchlistOpen(o => !o)}
             style={{
-              background: 'transparent',
+              position: 'fixed',
+              top: 8,
+              right: watchlistOpen ? 220 : 0,
+              zIndex: 95,
+              background: '#161b22',
               border: `1px solid ${BORD}`,
+              borderRight: watchlistOpen ? `1px solid ${BORD}` : 'none',
               color: MUTED,
-              padding: '4px 10px',
-              borderRadius: 4,
-              fontSize: 11,
+              padding: '8px 6px',
+              borderRadius: watchlistOpen ? '4px 0 0 4px' : '4px 0 0 4px',
+              fontSize: 10,
               fontFamily: 'monospace',
               cursor: 'pointer',
               whiteSpace: 'nowrap',
+              transition: 'right 0.15s ease',
             }}
+            title={watchlistOpen ? 'Hide Watchlist' : 'Show Watchlist'}
           >
-            Watchlist {watchlistOpen ? '▼' : '▶'}
+            {watchlistOpen ? '◀' : '▶'}
           </button>
-
-          {/* Watchlist panel — dropdown from toggle */}
-          {watchlistOpen && (
-            <div style={{
-              position: 'absolute', top: '100%', right: 0, marginTop: 4,
-              width: 200,
-              backgroundColor: '#161b22',
-              border: `1px solid ${BORD}`,
-              borderRadius: 6,
-              boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
-              maxHeight: 'calc(100vh - 80px)',
-              overflowY: 'auto',
-              zIndex: 51,
-            }}>
-              <Watchlist />
-            </div>
-          )}
-        </div>
+        )}
 
         <main className="main-content">
           <Outlet />
         </main>
       </div>
+
+      {/* Watchlist panel — fixed right edge overlay, only on analysis pages */}
+      {watchlistOpen && /\/(verticals|naked-options|security-strategies)/.test(location.pathname) && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          right: 0,
+          width: 220,
+          height: '100vh',
+          backgroundColor: '#161b22',
+          borderLeft: `1px solid ${BORD}`,
+          zIndex: 90,
+          overflowY: 'auto',
+          paddingTop: 16,
+        }}>
+          <Watchlist />
+        </div>
+      )}
 
       <Toast />
       <TradeAgentPanel />

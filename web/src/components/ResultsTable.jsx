@@ -1,86 +1,168 @@
 /**
- * ResultsTable — Scored trades with ☆ favorite and ✦ Ask Claude buttons.
+ * ResultsTable — Pure display component for scored trade results.
+ *
+ * Accepts a `columns` prop array describing exactly what to render.
+ * Never hardcodes column definitions — those live in web/src/config/.
+ *
+ * Manages sort state internally. Calls onRowClick(null) when a sort
+ * header is clicked so the parent can collapse any open expansion row.
  *
  * Props:
- *   trades      — array of scored trade objects
- *   weights     — current weight config (passed to FormulaBreakdown)
- *   selectedId  — currently expanded trade id (or null)
- *   onSelect    — callback(id) to expand/collapse formula breakdown
- *   favorites   — Set of favorited trade ids
- *   onToggleFav — callback(id) to toggle favorite
- *   onEvaluate  — callback(trade) to open Ask Claude panel
+ *   results            — array of trade objects
+ *   columns            — column config array (see web/src/config/*.jsx)
+ *   context            — object passed as 2nd arg to each col.render fn
+ *                        (e.g. { currentPrice, systemVars, idx })
+ *   expandedRowId      — id of currently expanded row (controlled by parent)
+ *   onRowClick         — called with (id) when row clicked; null = collapse
+ *   renderExpansionRow — (trade) => ReactNode rendered in the expanded <tr>
+ *   getRowId           — optional (trade, idx) => string; defaults to String(idx)
+ *   defaultSortKey     — initial sort column key (default 'composite_score')
+ *   defaultSortDir     — initial sort direction (default 'desc')
  */
-import { C, mono } from "../styles/tokens";
-import FormulaBreakdown from "./FormulaBreakdown";
 
-export default function ResultsTable({ trades, weights, selectedId, onSelect, favorites, onToggleFav, onEvaluate }) {
+import { useState, useMemo } from 'react';
+import { C, mono } from '../styles/tokens';
+
+const SURFACE = C.surface;
+const BORDER  = C.border;
+const TEXT    = C.text;
+const MUTED   = C.textMuted;
+const ACCENT  = C.accent;
+const TEAL    = '#2dd4bf';
+
+// Returns the sort key for a column — uses sortKey override if defined, else col.key
+function getSortKey(col) {
+  return col.sortKey || col.key;
+}
+
+export default function ResultsTable({
+  results = [],
+  columns = [],
+  context,
+  expandedRowId,
+  onRowClick,
+  renderExpansionRow,
+  getRowId,
+  defaultSortKey = 'composite_score',
+  defaultSortDir = 'desc',
+}) {
+  const [sortColumn,    setSortColumn]    = useState(defaultSortKey);
+  const [sortDirection, setSortDirection] = useState(defaultSortDir);
+
+  const handleSort = (col) => {
+    // Collapse any open expansion row before reordering
+    onRowClick?.(null);
+    const sk = getSortKey(col);
+    if (sortColumn === sk) {
+      setSortDirection(d => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortColumn(sk);
+      setSortDirection('desc');
+    }
+  };
+
+  const sortedResults = useMemo(() => {
+    if (!results || results.length === 0) return [];
+    return [...results].sort((a, b) => {
+      const aVal = a[sortColumn] ?? 0;
+      const bVal = b[sortColumn] ?? 0;
+      const dir  = sortDirection === 'asc' ? 1 : -1;
+      if (typeof aVal === 'string') return aVal.localeCompare(bVal) * dir;
+      return (aVal - bVal) * dir;
+    });
+  }, [results, sortColumn, sortDirection]);
+
+  const rowId = (trade, idx) => (getRowId ? getRowId(trade, idx) : String(idx));
+
   return (
-    <div>
-      {/* Header row */}
-      <div style={{ display: "grid", gridTemplateColumns: "28px 28px 84px 72px 50px 54px 52px 46px 68px 60px", padding: "8px 10px", fontSize: 9.5, fontWeight: 600, color: C.textMuted, textTransform: "uppercase", letterSpacing: "0.03em", borderBottom: `1px solid ${C.border}` }}>
-        <span></span><span>#</span><span>Spread</span><span>Exp</span><span>Debit</span><span>Max $</span><span>R:R</span><span>Prob</span><span style={{ textAlign: "right" }}>Score</span><span></span>
-      </div>
+    <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: mono, fontSize: 12 }}>
+      <thead>
+        <tr style={{ backgroundColor: C.surfaceAlt, borderBottom: `1px solid ${BORDER}` }}>
+          {columns.map(col => {
+            const isSortable = col.sortable !== false;
+            const sk         = getSortKey(col);
+            const isActive   = isSortable && sortColumn === sk;
+            return (
+              <th
+                key={col.key}
+                onClick={isSortable ? () => handleSort(col) : undefined}
+                title={col.title}
+                style={{
+                  padding: '6px 8px',
+                  textAlign: col.align || 'right',
+                  color: isActive ? TEAL : MUTED,
+                  fontWeight: 600,
+                  fontSize: 10,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.06em',
+                  whiteSpace: 'nowrap',
+                  width: col.width,
+                  cursor: isSortable ? 'pointer' : 'default',
+                  userSelect: 'none',
+                }}
+              >
+                {col.label}
+                {isActive && (
+                  <span style={{ marginLeft: 4, fontSize: 9, color: TEAL }}>
+                    {sortDirection === 'desc' ? '▼' : '▲'}
+                  </span>
+                )}
+              </th>
+            );
+          })}
+        </tr>
+      </thead>
+      <tbody>
+        {sortedResults.map((trade, idx) => {
+          const id         = rowId(trade, idx);
+          const isExpanded = id === expandedRowId;
+          const ctx        = { ...(context || {}), idx };
 
-      {trades.map((t, i) => (
-        <div key={t.id}>
-          {/* Trade row */}
-          <div
-            style={{
-              display: "grid", gridTemplateColumns: "28px 28px 84px 72px 50px 54px 52px 46px 68px 60px",
-              padding: "8px 10px", alignItems: "center",
-              borderBottom: `1px solid ${C.borderSubtle}`,
-              backgroundColor: selectedId === t.id ? C.surfaceAlt : "transparent",
-              borderLeft: selectedId === t.id ? `2px solid ${C.accent}` : "2px solid transparent",
-              cursor: "pointer",
-            }}
-            onClick={() => onSelect(selectedId === t.id ? null : t.id)}
-            onMouseEnter={(e) => { if (selectedId !== t.id) e.currentTarget.style.backgroundColor = C.cardHover; }}
-            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = selectedId === t.id ? C.surfaceAlt : "transparent"; }}
-          >
-            {/* Star */}
-            <button onClick={(e) => { e.stopPropagation(); onToggleFav(t.id); }}
-              style={{ background: "none", border: "none", cursor: "pointer", fontSize: 13, padding: 0, color: favorites.has(t.id) ? C.amber : C.textMuted }}>
-              {favorites.has(t.id) ? "★" : "☆"}
-            </button>
-            {/* Row number */}
-            <span style={{ color: C.textMuted, fontSize: 11 }}>{i + 1}</span>
-            {/* Spread */}
-            <span style={{ fontSize: 12, fontWeight: 600 }}>
-              <span style={{ color: t.spread_type === "bull_call" ? C.green : C.red, fontSize: 10, marginRight: 3 }}>{t.spread_type === "bull_call" ? "▲" : "▼"}</span>
-              <span style={{ color: C.text }}>{t.long_strike}/{t.short_strike}</span>
-            </span>
-            {/* Expiration */}
-            <span style={{ color: C.textDim, fontSize: 11 }}>{t.expiration.slice(5)}</span>
-            {/* Debit */}
-            <span style={{ color: C.text, fontSize: 11, fontFamily: mono }}>${t.net_debit.toFixed(2)}</span>
-            {/* Max profit */}
-            <span style={{ color: C.green, fontSize: 11, fontFamily: mono }}>${(t.max_profit * 100).toFixed(0)}</span>
-            {/* R:R */}
-            <span style={{ color: C.text, fontSize: 11, fontFamily: mono }}>{t.reward_risk_ratio.toFixed(2)}</span>
-            {/* Probability */}
-            <span style={{ color: C.text, fontSize: 11, fontFamily: mono }}>{(t.prob_of_profit * 100).toFixed(0)}%</span>
-            {/* Composite score with bar */}
-            <div style={{ textAlign: "right", display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 4 }}>
-              <div style={{ width: 30, height: 4, borderRadius: 2, backgroundColor: C.border, overflow: "hidden" }}>
-                <div style={{ width: `${t.composite_score * 100}%`, height: "100%", borderRadius: 2, backgroundColor: t.composite_score > 0.7 ? C.green : t.composite_score > 0.5 ? C.amber : C.red }} />
-              </div>
-              <span style={{ color: C.text, fontSize: 12, fontWeight: 700, fontFamily: mono }}>{t.composite_score.toFixed(2)}</span>
-            </div>
-            {/* Ask Claude button */}
-            <button onClick={(e) => { e.stopPropagation(); onEvaluate(t); }}
-              style={{ padding: "3px 8px", borderRadius: 4, border: `1px solid ${C.claudeBorder}`, backgroundColor: C.claudeDim, color: C.claudeAccent, fontSize: 9, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>
-              ✦ Ask
-            </button>
-          </div>
+          return [
+            <tr
+              key={`row-${id}`}
+              onClick={() => onRowClick?.(isExpanded ? null : id)}
+              style={{
+                cursor: 'pointer',
+                borderLeft: `3px solid ${isExpanded ? ACCENT : 'transparent'}`,
+                backgroundColor: isExpanded ? ACCENT + '08' : 'transparent',
+                borderBottom: `1px solid ${BORDER}`,
+                transition: 'background 0.1s',
+              }}
+              onMouseEnter={e => { if (!isExpanded) e.currentTarget.style.backgroundColor = SURFACE; }}
+              onMouseLeave={e => { if (!isExpanded) e.currentTarget.style.backgroundColor = 'transparent'; }}
+            >
+              {columns.map((col, ci) => {
+                const content = col.render
+                  ? col.render(trade, ctx)
+                  : (trade[col.key] ?? '—');
 
-          {/* Expanded formula breakdown */}
-          {selectedId === t.id && (
-            <div style={{ padding: "0 12px 12px", backgroundColor: C.surfaceAlt, borderBottom: `1px solid ${C.border}`, borderLeft: `2px solid ${C.accent}` }}>
-              <FormulaBreakdown trade={t} weights={weights} />
-            </div>
-          )}
-        </div>
-      ))}
-    </div>
+                return (
+                  <td
+                    key={ci}
+                    title={col.title}
+                    style={{
+                      padding: col.key === 'composite_score' ? '4px 8px' : '6px 8px',
+                      textAlign: col.align || 'right',
+                      color: TEXT,
+                    }}
+                  >
+                    {content}
+                  </td>
+                );
+              })}
+            </tr>,
+
+            isExpanded && renderExpansionRow && (
+              <tr key={`exp-${id}`}>
+                <td colSpan={columns.length} style={{ padding: 0 }}>
+                  {renderExpansionRow(trade)}
+                </td>
+              </tr>
+            ),
+          ].filter(Boolean);
+        })}
+      </tbody>
+    </table>
   );
 }

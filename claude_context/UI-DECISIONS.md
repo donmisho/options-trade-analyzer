@@ -9,19 +9,18 @@ Reference mockups are stored in `/project-mockups/` in the project root.
 
 ---
 
-## Navigation Bar
+## Navigation Rail
 
-### Layout: Left Rail
+### Layout
+The app uses a fixed left navigation rail (220px wide). The top horizontal nav bar has been retired.
 
-The navigation is a fixed-width left rail (220px). It does not scroll with the page.
-The main content area occupies the remaining width (`100% minus 220px`).
+### Rail Structure (top to bottom)
+- App logo / name — clicking navigates to Dashboard
+- Nav items (vertically stacked): Dashboard · Security Strategies · Verticals · Puts & Calls · Positions
+- Bottom: Schwab Connected indicator · Settings gear · User / Sign out
 
-### Nav Items (top to bottom in the rail)
-- Dashboard
-- Security Strategies
-- Verticals
-- Puts & Calls
-- Positions
+### Nav Item Order
+Dashboard | Security Strategies | Verticals | Puts & Calls | Positions
 
 ### Active State
 - 3px solid teal left border (#2dd4bf)
@@ -33,18 +32,24 @@ The main content area occupies the remaining width (`100% minus 220px`).
 - Muted gray text (#8b949e)
 - No background
 
-### Bottom of Rail
-- Schwab connection indicator (colored dot + label)
-- Settings gear icon
-- User / sign out
-
 ### Rules
 - Exactly these five items. No more, no less.
-- Strategy scoring lenses (Steady Paycheck, Weekly Grind, Trend Rider, Lottery Ticket)
-  do NOT appear in the rail. They are scoring lenses inside pages only.
+- Strategy tabs (Steady Paycheck, Weekly Grind, Trend Rider, Lottery Ticket) do NOT appear in the rail. They are scoring lenses inside pages only.
 - "Security Strategies" was named deliberately. Do not shorten to "Security".
-- The Watchlist is a collapsible panel within the main content area,
-  not a fixed right column.
+- Active item: 3px solid teal left border (#2dd4bf) + teal text + rgba(45,212,191,0.08) background.
+- Inactive items: muted gray (#8b949e), no border, no background.
+
+### Watchlist Panel
+The Watchlist is a collapsible overlay panel triggered by a toggle button in the main content area.
+Default state: open. State persists in localStorage.
+Toggle button is visible only on analysis pages: Verticals, Puts & Calls, Security Strategies.
+Toggle button is `position: fixed`, right edge shifts with the panel (right: 220px when open, 0 when closed).
+
+### Watchlist Symbol Click — Per-Page Behavior
+- On Verticals (`/verticals`): sets activeSymbol + runs vertical spread analysis immediately. Does not navigate.
+- On Puts & Calls (`/naked-options`): sets activeSymbol + runs analysis immediately. Does not navigate.
+- On Positions (`/positions`): sets activeSymbol only. No navigation, no analysis.
+- On all other pages (Dashboard, Security Strategies): navigates to `/security-strategies/:symbol`.
 
 ---
 
@@ -509,6 +514,77 @@ The "Evaluate with Claude →" button in the expansion panel has three states:
 - Button returns to default "Evaluate with Claude →" label
 - This ensures the user always knows which strategy the visible verdict
   belongs to
+
+---
+
+## ResultsTable — Column Configuration Contract
+
+`ResultsTable` is a pure display component. It never knows what page it is on.
+It accepts a `columns` prop array and renders whatever columns are defined.
+Column definitions live in `web/src/config/`.
+
+### Props
+
+| Prop | Type | Description |
+|------|------|-------------|
+| `results` | `array` | Trade objects to display |
+| `columns` | `array` | Column config array (see below) |
+| `context` | `object` | Passed as 2nd arg to each `col.render(trade, ctx)` |
+| `expandedRowId` | `string` | Controlled by parent — id of open expansion row |
+| `onRowClick` | `fn(id)` | Called with row id on click; `null` = collapse |
+| `renderExpansionRow` | `fn(trade)` | Renders the expansion `<tr>` contents |
+| `getRowId` | `fn(trade, idx)` | Optional; defaults to `String(idx)` |
+| `defaultSortKey` | `string` | Initial sort column (default: `'composite_score'`) |
+| `defaultSortDir` | `'asc'\|'desc'` | Initial sort direction (default: `'desc'`) |
+
+### Column Config Shape
+
+```javascript
+{
+  key: string,          // unique key; also the sort field unless sortKey overrides
+  sortKey: string,      // optional — override which trade field is sorted on
+  label: string,        // header text
+  title: string,        // optional — tooltip on header and cell
+  width: number,        // px width hint for <th>
+  align: string,        // 'left' | 'center' | 'right' (default 'right')
+  sortable: boolean,    // default true; set false to disable sort on click
+  render: (trade, ctx) => ReactNode,  // cell renderer; ctx includes context + idx
+}
+```
+
+### Sorting Behavior
+- Click any sortable header → sort descending by that column
+- Click again → toggle to ascending
+- Active sort column shown with ▼ (desc) or ▲ (asc) indicator in teal
+- Clicking a sort header calls `onRowClick(null)` to collapse any open expansion row
+- Sort state is managed internally; parent does not need to track it
+
+### Verticals Column Set
+`web/src/config/verticals-columns.jsx`
+`#` · TYPE · SPREAD · EXPIRATION · DELTA · THETA · NET · R:R · PROB · SCORE · [R:R pip] · [PROB pip] · [SCR pip]
+Default sort: SCORE descending.
+
+Pip thresholds (from `ctx.systemVars`, with defaults):
+- R:R pip: green ≥1.5, amber ≥1.0
+- Prob pip: green ≥55%, amber ≥45%
+- Score pip: green ≥0.65, amber ≥0.45
+
+### Puts & Calls Column Set
+`web/src/config/long-options-columns.jsx`
+TYPE · STRIKE · EXPIRATION · DELTA · THETA/DAY · PREMIUM · BREAKEVEN · vs ITM · SCORE · [Δ pip] · [IV pip] · [Run pip]
+Default sort: SCORE descending.
+
+Pip thresholds (from `ctx.systemVars`, with defaults):
+- Delta pip: green 0.30–0.65, amber ±0.05 of edges
+- IV pip: green ≤30%, amber ≤50%
+- Runway pip: green ≥30d, amber ≥15d
+
+### vs ITM Column
+- `key: '_vs_itm'`, `sortKey: 'vs_itm_dollars'`
+- Requires parent to pre-compute `trade.vs_itm_dollars = (call: price − strike, put: strike − price)`
+- Displays as `+12.34 / +1.4%` (positive = ITM, negative = OTM)
+- Color: green when ITM (distance > 0), amber when within 5% of money, muted gray otherwise
+- Parent must pass `ctx.currentPrice` for the computation
 
 ---
 
