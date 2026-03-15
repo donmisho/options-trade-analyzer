@@ -15,13 +15,14 @@ import {
   CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, Cell,
 } from 'recharts';
 import { STRATEGY_CONFIGS } from '../strategy-configs/index';
-import { apiPost, getQuote, followTrade, takeTrade, getStrategyScorecard, evaluateStructured } from '../api/client';
+import { apiPost, getQuote, followTrade, takeTrade, getStrategyScorecard } from '../api/client';
 import { useApp } from '../context/AppContext';
 import ConfigDrawer from '../components/ConfigDrawer';
 import QuoteBar from '../components/QuoteBar';
 import ScoreBar from '../components/ScoreBar';
 import StrategyScorecard from '../components/StrategyScorecard';
 import TradeEvaluationCard from '../components/TradeEvaluationCard';
+import TradeExpansionPanel from '../components/TradeExpansionPanel';
 import { C, mono, DEFAULT_PRESETS } from '../styles/tokens';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -304,15 +305,9 @@ export default function OptionsTerminal({ activeStrategy }) {
   const [selectedId,   setSelectedId]   = useState(null);
   const [configOpen,   setConfigOpen]   = useState(false);
 
-  // ── Strategy scorecard state (Stage 2 expansion — B3) ─────────────────────
-  const [scorecardData,         setScorecardData]         = useState(null);
-  const [scorecardLoading,      setScorecardLoading]      = useState(false);
-  const [scorecardSelectedKeys, setScorecardSelectedKeys] = useState([]);
-
-  // ── Per-trade evaluation results (inline in Stage 2) ──────────────────────
-  const [terminalEvalLoading,   setTerminalEvalLoading]   = useState(false);
-  const [terminalEvalError,     setTerminalEvalError]     = useState(null);
-  const [terminalEvaluations,   setTerminalEvaluations]   = useState([]);
+  // ── Strategy scorecard state (used by TradeExpansionPanel) ────────────────
+  const [scorecardData,    setScorecardData]    = useState(null);
+  const [scorecardLoading, setScorecardLoading] = useState(false);
 
   // Follow/Take position modal — { trade, type: 'follow'|'take' }
   const [positionModal, setPositionModal] = useState(null);
@@ -552,30 +547,18 @@ export default function OptionsTerminal({ activeStrategy }) {
     runAnalysis(symbol);
   }, [runAnalysis, symbol]);
 
-  // ── When activeStrategy changes: reset + re-analyze ──────────────────────
+  // ── When activeStrategy changes: reset (no auto-analyze) ─────────────────
   useEffect(() => {
     setTrades([]);
     setSelectedId(null);
     setConfigOpen(false);
     setError(null);
-    if (initialized.current) {
-      runAnalysis(symbol);
-    }
   }, [activeStrategy]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Reset scorecard when symbol changes (new symbol = fresh scores needed) ─
   useEffect(() => {
     setScorecardData(null);
-    setScorecardSelectedKeys([]);
   }, [symbol]);
-
-  // ── Reset scorecard selection and eval when trade row changes ─────────────
-  useEffect(() => {
-    setScorecardSelectedKeys([]);
-    setTerminalEvalLoading(false);
-    setTerminalEvalError(null);
-    setTerminalEvaluations([]);
-  }, [selectedId]);
 
   // ── Regenerate candles when chart start date changes ──────────────────────
   useEffect(() => {
@@ -586,21 +569,10 @@ export default function OptionsTerminal({ activeStrategy }) {
     }
   }, [chartStartDate]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Initial load ──────────────────────────────────────────────────────────
+  // ── Mark initialized on mount (no auto-analyze) ──────────────────────────
   useEffect(() => {
     initialized.current = true;
-    runAnalysis(symbol);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ── Watchlist selection: sync activeSymbol from context ───────────────────
-  useEffect(() => {
-    if (!activeSymbol || !initialized.current) return;
-    setSymbol(activeSymbol);
-    setInputSymbol(activeSymbol);
-    setSelectedId(null);
-    setConfigOpen(false);
-    runAnalysis(activeSymbol);
-  }, [activeSymbol]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── Symbol submit ─────────────────────────────────────────────────────────
   const handleSubmit = (e) => {
@@ -649,45 +621,15 @@ export default function OptionsTerminal({ activeStrategy }) {
     });
   }, [scorecardData, activeStrategy]);
 
+  // P-2: Non-applicable strategies for the current trade type (grayed in Column 3)
   const notApplicableScores = useMemo(() => {
     if (!scorecardData?.strategies || activeStrategy === 'verticals') return [];
-    const applicableKeys = new Set(filteredScorecardScores.map(s => s.key ?? s.strategy_key));
     return scorecardData.strategies.filter(item => {
       const key = item.key ?? item.strategy_key;
-      return !applicableKeys.has(key);
+      const cfg = STRATEGY_CONFIGS[key];
+      return cfg?.trade_structure !== 'long_option';
     });
-  }, [scorecardData, filteredScorecardScores, activeStrategy]);
-
-  // ── Evaluate selected strategies for the expanded trade ───────────────────
-  const handleTerminalEvaluate = useCallback(async (keys) => {
-    if (!keys.length || !symbol || !selectedTrade) return;
-    setTerminalEvalLoading(true);
-    setTerminalEvalError(null);
-    setTerminalEvaluations([]);
-
-    const ivSource = keys
-      .map(k => filteredScorecardScores.find(s => (s.strategy_key ?? s.key) === k))
-      .find(s => s?.best_trade?.iv != null);
-    const iv = ivSource?.best_trade?.iv ?? selectedTrade.iv ?? 0.25;
-
-    try {
-      const data = await evaluateStructured({
-        symbol,
-        current_price: underlyingPrice,
-        iv,
-        sma_alignment: smaData
-          ? { sma_8: smaData.smaShort, sma_21: smaData.smaMid, sma_50: smaData.smaLong }
-          : {},
-        strategy_keys: keys,
-        trade: selectedTrade,
-      });
-      setTerminalEvaluations([...(data.evaluations ?? [])].sort((a, b) => b.score - a.score));
-    } catch (err) {
-      setTerminalEvalError(err.message || 'Evaluation failed');
-    } finally {
-      setTerminalEvalLoading(false);
-    }
-  }, [symbol, underlyingPrice, smaData, selectedTrade, filteredScorecardScores]);
+  }, [scorecardData, activeStrategy]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // RENDER
@@ -1001,144 +943,24 @@ export default function OptionsTerminal({ activeStrategy }) {
                     })}
                   </tr>,
 
-                  // Stage 2: Inline expansion
+                  // Stage 2: Inline expansion — 4-column panel (UI-DECISIONS.md)
                   isSelected && (
                     <tr key={`expand-${tradeId}`}>
-                      <td colSpan={config.columns.length} style={{
-                        backgroundColor: BG,
-                        borderTop: `2px solid ${ACCENT}`,
-                        borderBottom: `1px solid ${BORDER}`,
-                        padding: 16,
-                      }}>
-                        {/* 2-column grid: Scoring Breakdown (left) + Strategy Fit (right) */}
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
-
-                          {/* Left: Scoring Breakdown */}
-                          <div>
-                            <div style={{ fontSize: 10, color: MUTED, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>
-                              Score Breakdown
-                            </div>
-                            <MathMatrix trade={trade} config={config} />
-                          </div>
-
-                          {/* Right: Strategy Fit */}
-                          <div>
-                            <div style={{ fontSize: 10, color: MUTED, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>
-                              Strategy Fit — This Trade
-                            </div>
-
-                            {!scorecardData && !scorecardLoading && (
-                              <button
-                                onClick={loadScorecardForTrade}
-                                style={{
-                                  padding: '7px 14px', borderRadius: 6,
-                                  border: `1px solid ${BORDER}`,
-                                  backgroundColor: 'transparent', color: DIM, fontSize: 12,
-                                  cursor: 'pointer', fontWeight: 500,
-                                }}
-                              >
-                                &#8635; Load Strategy Scores for {symbol}
-                              </button>
-                            )}
-                            {scorecardData?.error && (
-                              <p style={{ color: C.red, fontSize: 12, margin: 0 }}>{scorecardData.error}</p>
-                            )}
-                            {(filteredScorecardScores.length > 0 || scorecardLoading) && (
-                              <StrategyScorecard
-                                scores={filteredScorecardScores}
-                                selectedKeys={scorecardSelectedKeys}
-                                onSelectionChange={setScorecardSelectedKeys}
-                                onEvaluate={handleTerminalEvaluate}
-                                loading={scorecardLoading}
-                              />
-                            )}
-
-                            {/* Non-applicable strategies (Puts & Calls only) */}
-                            {notApplicableScores.length > 0 && scorecardData && !scorecardLoading && (
-                              <div style={{ marginTop: 10 }}>
-                                <div style={{ position: 'relative', textAlign: 'center', marginBottom: 8 }}>
-                                  <div style={{ borderBottom: '1px dashed rgba(48,54,61,0.5)', position: 'absolute', width: '100%', top: '50%' }} />
-                                  <span style={{ position: 'relative', background: BG, padding: '0 8px', fontSize: 9, color: 'rgba(139,148,158,0.5)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                                    not applicable to this trade type
-                                  </span>
-                                </div>
-                                {notApplicableScores.map(item => {
-                                  const key = item.key ?? item.strategy_key;
-                                  const cfg = STRATEGY_CONFIGS[key];
-                                  const reason = cfg?.trade_structure === 'credit_spread'
-                                    ? 'requires credit spread structure'
-                                    : 'not applicable';
-                                  return (
-                                    <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 4px' }}>
-                                      <span style={{ fontSize: 11, color: MUTED, fontStyle: 'italic' }}>{item.label ?? item.strategy_label ?? key}</span>
-                                      <span style={{ fontSize: 10, color: 'rgba(139,148,158,0.5)', fontStyle: 'italic' }}>{reason}</span>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Evaluation results — below the 2-column grid */}
-                        {terminalEvalLoading && (
-                          <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 6, border: `1px solid ${BORDER}`, color: MUTED, fontSize: 12 }}>
-                            Evaluating with Claude…
-                          </div>
-                        )}
-                        {terminalEvalError && !terminalEvalLoading && (
-                          <div style={{ marginTop: 14, padding: '8px 12px', borderRadius: 6, border: `1px solid ${C.red}40`, color: C.red, fontSize: 12 }}>
-                            {terminalEvalError}
-                            <button onClick={() => handleTerminalEvaluate(scorecardSelectedKeys)} style={{ marginLeft: 10, background: 'none', border: 'none', color: C.red, fontSize: 11, cursor: 'pointer', textDecoration: 'underline', padding: 0 }}>
-                              Retry
-                            </button>
-                          </div>
-                        )}
-                        {!terminalEvalLoading && terminalEvaluations.length > 0 && (
-                          <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 14 }}>
-                            {terminalEvaluations.map(card => (
-                              <TradeEvaluationCard
-                                key={card.strategy_key}
-                                card={card}
-                                symbol={symbol}
-                                currentPrice={underlyingPrice}
-                                smaData={{ smaShort: smaData.smaShort, smaMid: smaData.smaMid, smaLong: smaData.smaLong }}
-                                tradeData={selectedTrade}
-                                activeStrategy={card.strategy_key}
-                              />
-                            ))}
-                          </div>
-                        )}
-
-                        {/* Follow / Take Position buttons */}
-                        <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
-                          <button
-                            onClick={() => setPositionModal({ trade, type: 'follow' })}
-                            style={{
-                              flex: 1, height: 36, borderRadius: 6,
-                              border: `1px solid ${C.accent}40`,
-                              backgroundColor: C.accent + '14',
-                              color: C.accent, fontFamily: mono, fontSize: 12,
-                              fontWeight: 700, cursor: 'pointer', letterSpacing: '0.03em',
-                            }}
-                          >
-                            &#128204; Follow (Paper)
-                          </button>
-                          <button
-                            onClick={() => setPositionModal({ trade, type: 'take' })}
-                            style={{
-                              flex: 1, height: 36, borderRadius: 6,
-                              border: `1px solid ${C.green}40`,
-                              backgroundColor: C.green + '14',
-                              color: C.green, fontFamily: mono, fontSize: 12,
-                              fontWeight: 700, cursor: 'pointer', letterSpacing: '0.03em',
-                            }}
-                          >
-                            &#128176; Take Position (Live)
-                          </button>
-                        </div>
-
-
+                      <td colSpan={config.columns.length} style={{ padding: 0 }}>
+                        <TradeExpansionPanel
+                          trade={trade}
+                          config={config}
+                          symbol={symbol}
+                          underlyingPrice={underlyingPrice}
+                          smaData={smaData}
+                          scorecardStrategies={filteredScorecardScores}
+                          scorecardNotApplicable={notApplicableScores}
+                          scorecardLoading={scorecardLoading}
+                          scorecardError={scorecardData?.error || null}
+                          onLoadScorecard={loadScorecardForTrade}
+                          onFollowTrade={(t) => setPositionModal({ trade: t, type: 'follow' })}
+                          onTakeTrade={(t) => setPositionModal({ trade: t, type: 'take' })}
+                        />
                       </td>
                     </tr>
                   ),
@@ -1217,10 +1039,12 @@ export default function OptionsTerminal({ activeStrategy }) {
                 disabled={positionSubmitting}
                 style={{
                   fontSize: 12, fontWeight: 700, padding: '6px 16px', borderRadius: 4,
-                  border: 'none',
-                  background: positionModal.type === 'follow' ? C.accent : C.green,
+                  border: positionModal.type === 'follow'
+                    ? `1px solid ${C.accent}80`
+                    : `1px solid ${C.green}80`,
+                  background: positionModal.type === 'follow' ? C.accent + 'cc' : C.green + 'cc',
                   color: '#fff', cursor: positionSubmitting ? 'wait' : 'pointer',
-                  fontFamily: mono,
+                  fontFamily: mono, width: 'auto',
                 }}
               >
                 {positionSubmitting ? 'Saving...' : 'Confirm'}

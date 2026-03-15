@@ -8,43 +8,57 @@
  *   4. SCORE  — normalized score × weight = weighted contribution
  *
  * Props:
- *   trade   — a scored trade object with _norm data
+ *   trade   — a scored trade object (with score_breakdown from API when available)
  *   weights — { expected_value, reward_risk, probability, liquidity, theta_efficiency }
  */
 import { C, mono, WEIGHT_COLORS, WEIGHT_LABELS } from "../styles/tokens";
 
 export default function FormulaBreakdown({ trade: t, weights: w }) {
+  // Use score_breakdown from API when available for accurate norm bounds
+  const sb = t.score_breakdown || {};
+
+  function normStr(metricKey, rawVal, rawFmt) {
+    const m = sb[metricKey];
+    if (m && m.norm_min != null && m.norm_max != null && m.norm_min !== m.norm_max) {
+      return `(${rawFmt} − ${m.norm_min}) / (${m.norm_max} − ${m.norm_min})`;
+    }
+    return 'normalized (min-max scaling)';
+  }
+
+  const liqRaw = t.long_volume + t.short_volume + t.long_oi + t.short_oi;
+  const thRaw  = t.net_theta && t.max_loss ? Math.abs(t.net_theta / (t.max_loss * 100)) : 0;
+
   const formulas = [
     { key: "ev", name: WEIGHT_LABELS.expected_value, color: WEIGHT_COLORS.expected_value, wt: w.expected_value,
       formula: "(prob × maxProfit) − ((1−prob) × maxLoss)",
-      comp: `(${t.prob_of_profit.toFixed(2)} × ${(t.max_profit * 100).toFixed(2)}) − (${(1 - t.prob_of_profit).toFixed(2)} × ${(t.max_loss * 100).toFixed(2)})`,
-      raw: `${t.ev_raw.toFixed(2)}`,
-      norm: `(${t.ev_raw.toFixed(0)} − ${t._norm.ev_min}) / (${t._norm.ev_max} − ${t._norm.ev_min})`,
-      ns: t.ev_score, wc: t.ev_score * w.expected_value },
+      comp: `(${t.prob_of_profit?.toFixed(2)} × ${((t.max_profit ?? 0) * 100).toFixed(2)}) − (${(1 - (t.prob_of_profit ?? 0)).toFixed(2)} × ${((t.max_loss ?? 0) * 100).toFixed(2)})`,
+      raw: `${(t.ev_raw ?? 0).toFixed(2)}`,
+      norm: normStr('expected_value', t.ev_raw, (t.ev_raw ?? 0).toFixed(0)),
+      ns: t.ev_score ?? 0, wc: (t.ev_score ?? 0) * w.expected_value },
     { key: "rr", name: WEIGHT_LABELS.reward_risk, color: WEIGHT_COLORS.reward_risk, wt: w.reward_risk,
       formula: "maxProfit / maxLoss",
-      comp: `${(t.max_profit * 100).toFixed(2)} / ${(t.max_loss * 100).toFixed(2)}`,
-      raw: `${t.reward_risk_ratio.toFixed(2)} : 1`,
-      norm: `(${t.reward_risk_ratio.toFixed(2)} − ${t._norm.rr_min}) / (${t._norm.rr_max} − ${t._norm.rr_min})`,
-      ns: t.rr_score, wc: t.rr_score * w.reward_risk },
+      comp: `${((t.max_profit ?? 0) * 100).toFixed(2)} / ${((t.max_loss ?? 0) * 100).toFixed(2)}`,
+      raw: `${(t.reward_risk_ratio ?? 0).toFixed(2)} : 1`,
+      norm: normStr('reward_risk', t.reward_risk_ratio, (t.reward_risk_ratio ?? 0).toFixed(2)),
+      ns: t.rr_score ?? 0, wc: (t.rr_score ?? 0) * w.reward_risk },
     { key: "prob", name: WEIGHT_LABELS.probability, color: WEIGHT_COLORS.probability, wt: w.probability,
       formula: "≈ short leg delta",
-      comp: `Short delta = ${t.prob_of_profit.toFixed(2)}`,
-      raw: `${(t.prob_of_profit * 100).toFixed(0)}%`,
-      norm: `(${t.prob_of_profit.toFixed(2)} − ${t._norm.prob_min}) / (${t._norm.prob_max} − ${t._norm.prob_min})`,
-      ns: t.prob_score, wc: t.prob_score * w.probability },
+      comp: `Short delta = ${(t.prob_of_profit ?? 0).toFixed(2)}`,
+      raw: `${((t.prob_of_profit ?? 0) * 100).toFixed(0)}%`,
+      norm: normStr('probability', t.prob_of_profit, (t.prob_of_profit ?? 0).toFixed(2)),
+      ns: t.prob_score ?? 0, wc: (t.prob_score ?? 0) * w.probability },
     { key: "liq", name: WEIGHT_LABELS.liquidity, color: WEIGHT_COLORS.liquidity, wt: w.liquidity,
       formula: "longVol + shortVol + longOI + shortOI",
-      comp: `${t.long_volume} + ${t.short_volume} + ${t.long_oi} + ${t.short_oi}`,
-      raw: `${t.long_volume + t.short_volume + t.long_oi + t.short_oi}`,
-      norm: `(${t.long_volume + t.short_volume + t.long_oi + t.short_oi} − ${t._norm.liq_min}) / (${t._norm.liq_max} − ${t._norm.liq_min})`,
-      ns: t.liquidity_score, wc: t.liquidity_score * w.liquidity },
+      comp: `${t.long_volume ?? 0} + ${t.short_volume ?? 0} + ${t.long_oi ?? 0} + ${t.short_oi ?? 0}`,
+      raw: `${liqRaw}`,
+      norm: normStr('liquidity', liqRaw, String(liqRaw)),
+      ns: t.liquidity_score ?? 0, wc: (t.liquidity_score ?? 0) * w.liquidity },
     { key: "th", name: WEIGHT_LABELS.theta_efficiency, color: WEIGHT_COLORS.theta_efficiency, wt: w.theta_efficiency,
       formula: "|net_theta / net_debit| (lower = better)",
-      comp: `|${t.net_theta.toFixed(4)} / ${t.net_debit.toFixed(2)}| = ${Math.abs(t.net_theta / t.net_debit).toFixed(4)}`,
-      raw: `${Math.abs(t.net_theta / t.net_debit).toFixed(4)}`,
-      norm: "inverted (lower scores higher)",
-      ns: t.theta_score, wc: t.theta_score * w.theta_efficiency },
+      comp: `|${(t.net_theta ?? 0).toFixed(4)} / ${(t.net_debit ?? 0).toFixed(2)}| = ${thRaw.toFixed(4)}`,
+      raw: `${thRaw.toFixed(4)}`,
+      norm: normStr('theta_efficiency', thRaw, thRaw.toFixed(4)),
+      ns: t.theta_score ?? 0, wc: (t.theta_score ?? 0) * w.theta_efficiency },
   ];
   const total = formulas.reduce((s, f) => s + f.wc, 0);
 

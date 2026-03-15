@@ -8,12 +8,11 @@
  *  - JWT 401 from any API call → apiFetch auto-redirects to /login
  *
  * HOW ROUTING WORKS:
- * React Router v6 nested layout: <Layout> renders header + watchlist + <Outlet>.
- * /login and /connect render outside Layout (no header/watchlist).
+ * React Router v6 nested layout: <Layout> renders the left nav rail + <Outlet>.
+ * /login and /connect render outside Layout (no nav chrome).
  *
- * Phase 2.7: /verticals and /naked-options now both render OptionsTerminal.
- * activeStrategy state (lives here) controls which config the terminal uses.
- * Header tabs set activeStrategy; OptionsTerminal reads it.
+ * activeStrategy (lives here) controls which config OptionsTerminal uses.
+ * Layout's nav items call setActiveStrategy on click.
  */
 
 import { useState } from 'react';
@@ -81,7 +80,7 @@ export default function App() {
             element={
               <RequireAuth>
                 <AppProvider>
-                  <Layout activeStrategy={activeStrategy} setActiveStrategy={setActiveStrategy} />
+                  <Layout setActiveStrategy={setActiveStrategy} />
                 </AppProvider>
               </RequireAuth>
             }

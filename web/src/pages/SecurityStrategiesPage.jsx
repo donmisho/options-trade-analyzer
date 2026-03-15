@@ -3,8 +3,9 @@
  * Accessed via /security-strategies/:symbol or /security-strategies
  *
  * Layout (top to bottom):
- *   QuoteBar — shared header with all 12 fields
- *   CandlestickChart — price history with SMA lines
+ *   Symbol input + Analyze button
+ *   QuoteBar — shared header with all fields
+ *   CandlestickChart — price history with SMA lines + SMA config panel
  *   StrategyScorecard — all 4 strategies scored
  *   TradeEvaluationCards — rendered after evaluate
  */
@@ -14,19 +15,23 @@ import {
   ComposedChart, Bar, Line, ReferenceLine, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { getQuote, getStrategyScorecard, evaluateStructured } from '../api/client';
 import { STRATEGY_CONFIGS } from '../strategy-configs/index';
+import ConfigDrawer from '../components/ConfigDrawer';
 import QuoteBar from '../components/QuoteBar';
 import StrategyScorecard from '../components/StrategyScorecard';
 import TradeEvaluationCard from '../components/TradeEvaluationCard';
-import { C, mono } from '../styles/tokens';
+import { C, mono, DEFAULT_PRESETS } from '../styles/tokens';
 
-// ─── Chart helpers (parallel to OptionsTerminal) ───────────────────────────
+// ─── Chart helpers ──────────────────────────────────────────────────────────
 
 const GREEN = C.candleGreen;
 const RED   = C.red;
+const SMA8_COLOR  = C.smaCyan;
+const SMA21_COLOR = C.smaOrange;
+const SMA50_COLOR = C.smaRed;
 
 function tradingDaysAgo(n) {
   const d = new Date();
@@ -151,10 +156,15 @@ const MOCK_SCORES = [
 
 export default function SecurityStrategiesPage() {
   const { symbol: symbolParam } = useParams();
-  const { activeSymbol, setActiveSymbol, prices } = useApp();
+  const { activeSymbol, setActiveSymbol, prices, configOpen, setConfigOpen } = useApp();
+  const navigate = useNavigate();
+  const location = useLocation();
 
-  const symbolUpper = (symbolParam || activeSymbol || '').toUpperCase();
+  const initSymbol = (symbolParam || activeSymbol || 'SPY').toUpperCase();
 
+  // ── State ──────────────────────────────────────────────────────────────────
+  const [symbol,         setSymbol]         = useState(initSymbol);
+  const [inputSymbol,    setInputSymbol]    = useState(initSymbol);
   const [quote,          setQuote]          = useState(null);
   const [candles,        setCandles]        = useState([]);
   const [scores,         setScores]         = useState(null);
@@ -165,51 +175,44 @@ export default function SecurityStrategiesPage() {
   const [evalLoading,    setEvalLoading]    = useState(false);
   const [evalError,      setEvalError]      = useState(null);
   const [evaluations,    setEvaluations]    = useState([]);
+  const [lastAnalyzed,   setLastAnalyzed]   = useState(null);
+  const [chartStartDate, setChartStartDate] = useState(() => tradingDaysAgo(90));
+  const chartStartDateRef = useRef(chartStartDate);
 
-  const chartStartDate = useRef(tradingDaysAgo(90));
+  // ── Analysis config (smaPeriods used by chart legend + ConfigDrawer) ───────
+  const [presets,        setPresets]        = useState(DEFAULT_PRESETS);
+  const [activePresetId, setActivePresetId] = useState('balanced');
+  const [analysisConfig, setAnalysisConfig] = useState(() => {
+    const preset = DEFAULT_PRESETS.find(p => p.id === 'balanced') || DEFAULT_PRESETS[0];
+    return { smaPeriods: { short: 8, mid: 21, long: 50 }, ...preset };
+  });
+  const smaPeriods = analysisConfig.smaPeriods || { short: 8, mid: 21, long: 50 };
 
-  // Sync activeSymbol with URL param
-  useEffect(() => {
-    if (symbolUpper && symbolUpper !== activeSymbol) {
-      setActiveSymbol(symbolUpper);
-    }
-  }, [symbolUpper]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Reset on symbol change
-  useEffect(() => {
-    setScores(null);
-    setSmaSignal(null);
-    setError(null);
-    setSelectedKeys([]);
-    setEvaluations([]);
-    setEvalError(null);
-    setQuote(null);
-    setCandles([]);
-  }, [symbolUpper]);
-
-  // Fetch quote + generate candles
-  const fetchQuote = useCallback(async () => {
-    if (!symbolUpper) return;
+  // ── Fetch quote + generate candles ─────────────────────────────────────
+  const fetchQuote = useCallback(async (sym) => {
+    const target = sym || symbol;
+    if (!target) return;
     try {
-      const data = await getQuote(symbolUpper);
+      const data = await getQuote(target);
       setQuote(data);
       if (data?.price > 0) {
-        const count = countTradingDays(chartStartDate.current);
+        const count = countTradingDays(chartStartDateRef.current);
         setCandles(generateCandles(data.price, count));
       }
     } catch { /* quote fetch is best-effort */ }
-  }, [symbolUpper]);
+  }, [symbol]);
 
-  // Fetch scorecard
-  const fetchScorecard = useCallback(async () => {
-    if (!symbolUpper) return;
+  // ── Fetch scorecard ─────────────────────────────────────────────────────
+  const fetchScorecard = useCallback(async (sym) => {
+    const target = sym || symbol;
+    if (!target) return;
     setLoading(true);
     setError(null);
     try {
-      const data = await getStrategyScorecard(symbolUpper);
+      const data = await getStrategyScorecard(target);
       setScores(data.strategies || []);
       setSmaSignal(data.sma_signal || null);
-      // Pre-check highest scorer
+      setLastAnalyzed(new Date());
       const sorted = [...(data.strategies || [])].sort((a, b) => b.score - a.score);
       if (sorted.length > 0) {
         const topKey = sorted[0].key ?? sorted[0].strategy_key;
@@ -220,24 +223,74 @@ export default function SecurityStrategiesPage() {
     } finally {
       setLoading(false);
     }
-  }, [symbolUpper]);
+  }, [symbol]);
 
+  // ── Watchlist click: URL param changes with fromWatchlist state ──────────
+  // Only auto-fetch on explicit watchlist navigation, not bare page load.
+  const prevSymbolParam = useRef(null);
   useEffect(() => {
-    if (symbolUpper) {
-      fetchQuote();
-      fetchScorecard();
-    }
-  }, [fetchQuote, fetchScorecard]);
+    if (!symbolParam) return;
+    const sym = symbolParam.toUpperCase();
+    setSymbol(sym);
+    setInputSymbol(sym);
+    if (sym !== activeSymbol) setActiveSymbol(sym);
 
-  // SMA from candles
+    const isWatchlistNav = location.state?.fromWatchlist === true;
+    const symbolChanged  = symbolParam !== prevSymbolParam.current;
+    prevSymbolParam.current = symbolParam;
+
+    if (isWatchlistNav || (symbolChanged && prevSymbolParam.current !== null)) {
+      // Reset stale data for new symbol
+      setScores(null); setSmaSignal(null); setError(null);
+      setSelectedKeys([]); setEvaluations([]); setEvalError(null);
+      setQuote(null); setCandles([]); setLastAnalyzed(null);
+      fetchQuote(sym);
+      fetchScorecard(sym);
+    }
+  }, [symbolParam, location.state]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Regenerate candles when chart start date changes ─────────────────────
+  useEffect(() => {
+    chartStartDateRef.current = chartStartDate;
+    if (quote?.price > 0) {
+      const count = countTradingDays(chartStartDate);
+      setCandles(generateCandles(quote.price, count));
+    }
+  }, [chartStartDate]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Symbol submit (Analyze button) ─────────────────────────────────────
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    const sym = inputSymbol.trim().toUpperCase();
+    if (!sym) return;
+    setSymbol(sym);
+    setActiveSymbol(sym);
+    // Reset stale data
+    setScores(null); setSmaSignal(null); setError(null);
+    setSelectedKeys([]); setEvaluations([]); setEvalError(null);
+    setQuote(null); setCandles([]); setLastAnalyzed(null);
+    // Update URL (no fromWatchlist state — fetch is driven explicitly here)
+    prevSymbolParam.current = sym.toLowerCase();
+    navigate(`/security-strategies/${sym}`);
+    fetchQuote(sym);
+    fetchScorecard(sym);
+  };
+
+  // ── Config apply ────────────────────────────────────────────────────────
+  const handleConfigApply = useCallback((newConfig) => {
+    setAnalysisConfig(prev => ({ ...prev, ...newConfig }));
+    setConfigOpen(false);
+  }, [setConfigOpen]);
+
+  // ── SMA computation from candles ───────────────────────────────────────
   const smaData = useMemo(() => {
     if (!candles.length) return null;
     const sma = (period) => {
       const slice = candles.slice(-period);
       return slice.reduce((s, c) => s + c.close, 0) / slice.length;
     };
-    return { smaShort: sma(8), smaMid: sma(21), smaLong: sma(50) };
-  }, [candles]);
+    return { smaShort: sma(smaPeriods.short), smaMid: sma(smaPeriods.mid), smaLong: sma(smaPeriods.long) };
+  }, [candles, smaPeriods]);
 
   const smaSignalStr = smaSignal?.alignment || (
     smaData && candles.length
@@ -246,7 +299,7 @@ export default function SecurityStrategiesPage() {
       : undefined
   );
 
-  // Chart data with SMA values
+  // ── Chart data with SMA values ─────────────────────────────────────────
   const chartData = useMemo(() => {
     return candles.map((c, i) => {
       const sma = (period) => {
@@ -254,9 +307,9 @@ export default function SecurityStrategiesPage() {
         const slice = candles.slice(i - period + 1, i + 1);
         return slice.reduce((s, c) => s + c.close, 0) / slice.length;
       };
-      return { ...c, sma8: sma(8), sma21: sma(21), sma50: sma(50) };
+      return { ...c, sma8: sma(smaPeriods.short), sma21: sma(smaPeriods.mid), sma50: sma(smaPeriods.long) };
     });
-  }, [candles]);
+  }, [candles, smaPeriods]);
 
   const chartBounds = useMemo(() => {
     if (!chartData.length) return { low: 0, high: 100 };
@@ -272,9 +325,9 @@ export default function SecurityStrategiesPage() {
     return chartData.map(c => ({ ...c, chartLow: chartBounds.low }));
   }, [chartData, chartBounds]);
 
-  // Evaluate
+  // ── Evaluate ────────────────────────────────────────────────────────────
   const handleEvaluate = useCallback(async (keys) => {
-    if (!keys.length || !symbolUpper) return;
+    if (!keys.length || !symbol) return;
     setEvalLoading(true);
     setEvalError(null);
     setEvaluations([]);
@@ -283,10 +336,10 @@ export default function SecurityStrategiesPage() {
       .map(k => currentScores.find(s => (s.strategy_key ?? s.key) === k))
       .find(s => s?.best_trade?.iv != null);
     const iv = ivSource?.best_trade?.iv ?? 0.25;
-    const currentPrice = quote?.price || prices[symbolUpper]?.price || 0;
+    const currentPrice = quote?.price || prices[symbol]?.price || 0;
     try {
       const data = await evaluateStructured({
-        symbol:        symbolUpper,
+        symbol,
         current_price: currentPrice,
         iv,
         sma_alignment: smaData
@@ -301,11 +354,11 @@ export default function SecurityStrategiesPage() {
     } finally {
       setEvalLoading(false);
     }
-  }, [symbolUpper, scores, smaData, quote, prices]);
+  }, [symbol, scores, smaData, quote, prices]);
 
   const displayScores = scores || MOCK_SCORES;
   const usingMock = !scores && !loading;
-  const currentPrice = quote?.price || prices[symbolUpper]?.price || 0;
+  const currentPrice = quote?.price || prices[symbol]?.price || 0;
 
   const smaForCards = smaData
     ? { smaShort: smaData.smaShort, smaMid: smaData.smaMid, smaLong: smaData.smaLong }
@@ -314,18 +367,102 @@ export default function SecurityStrategiesPage() {
   return (
     <div style={{ backgroundColor: C.bg, minHeight: '100%', paddingBottom: 32 }}>
 
-      {/* QuoteBar */}
+      {/* ── Symbol input + Analyze ── */}
+      <div style={{ padding: '10px 16px 10px' }}>
+        <form onSubmit={handleSubmit} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <input
+            value={inputSymbol}
+            onChange={e => setInputSymbol(e.target.value.toUpperCase())}
+            placeholder="Enter symbol…"
+            style={{
+              flex: 1, maxWidth: 220, padding: '6px 10px', borderRadius: 6,
+              border: `1px solid ${C.border}`, backgroundColor: C.surface,
+              color: C.text, fontSize: 13, fontFamily: mono, outline: 'none',
+            }}
+          />
+          <button type="submit" style={{
+            padding: '6px 18px', borderRadius: 6, border: 'none',
+            backgroundColor: C.accent, color: '#fff', fontFamily: mono,
+            fontSize: 13, fontWeight: 700, cursor: 'pointer',
+          }}>
+            Analyze
+          </button>
+          {loading && (
+            <div style={{
+              width: 16, height: 16, border: `2px solid ${C.border}`,
+              borderTopColor: C.accent, borderRadius: '50%',
+              animation: 'spin 0.7s linear infinite',
+            }} />
+          )}
+        </form>
+      </div>
+
+      {/* ── QuoteBar ── */}
       <QuoteBar
-        symbol={symbolUpper || undefined}
+        symbol={symbol || undefined}
         quote={quote}
         smaSignal={smaSignalStr}
+        lastAnalyzed={lastAnalyzed}
       />
 
-      {/* Candlestick Chart */}
+      {/* ── Candlestick Chart ── */}
       {candles.length > 0 && (
-        <div style={{ borderBottom: `1px solid ${C.border}`, backgroundColor: C.bg }}>
-          <ResponsiveContainer width="100%" height={180}>
-            <ComposedChart data={chartDataWithMeta} margin={{ top: 8, right: 60, bottom: 4, left: 0 }}>
+        <div style={{ borderBottom: `1px solid ${C.border}`, backgroundColor: C.bg, position: 'relative' }}>
+          {/* SMA + Date config panel — right side overlay */}
+          <div style={{
+            position: 'absolute', top: 0, right: 0, bottom: 0, zIndex: 10,
+            width: 130,
+            display: 'flex', flexDirection: 'column', justifyContent: 'center',
+            padding: '8px 10px',
+            borderLeft: `1px solid ${C.border}`,
+            background: `linear-gradient(135deg, ${C.surfaceAlt} 0%, ${C.card} 100%)`,
+            borderRadius: '0 4px 4px 0',
+          }}>
+            <div style={{
+              fontSize: 8, fontWeight: 700, color: C.textMuted,
+              letterSpacing: '0.07em', textTransform: 'uppercase',
+              marginBottom: 7, textAlign: 'center',
+              borderBottom: `1px solid ${C.border}`, paddingBottom: 5,
+            }}>
+              SMA Configuration
+            </div>
+            {[
+              { period: smaPeriods.short, color: SMA8_COLOR  },
+              { period: smaPeriods.mid,   color: SMA21_COLOR },
+              { period: smaPeriods.long,  color: SMA50_COLOR },
+            ].map(({ period, color }) => (
+              <div key={period} style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 5 }}>
+                <div style={{ width: 12, height: 12, backgroundColor: color, borderRadius: 2, flexShrink: 0 }} />
+                <span style={{ fontSize: 11, fontFamily: mono, color, fontWeight: 700 }}>{period}-day</span>
+              </div>
+            ))}
+
+            <div style={{
+              fontSize: 8, fontWeight: 700, color: C.textMuted,
+              letterSpacing: '0.07em', textTransform: 'uppercase',
+              marginTop: 10, marginBottom: 6, textAlign: 'center',
+              borderTop: `1px solid ${C.border}`, paddingTop: 8,
+            }}>
+              Chart Start Date
+            </div>
+            <input
+              type="date"
+              value={chartStartDate}
+              max={new Date().toISOString().slice(0, 10)}
+              onChange={e => e.target.value && setChartStartDate(e.target.value)}
+              style={{
+                width: '100%', boxSizing: 'border-box',
+                backgroundColor: C.bg, border: `1px solid ${C.border}`,
+                borderRadius: 4, color: C.textDim, fontSize: 10,
+                padding: '3px 4px', fontFamily: mono,
+                outline: 'none', cursor: 'pointer',
+                colorScheme: 'dark',
+              }}
+            />
+          </div>
+
+          <ResponsiveContainer width="100%" height={215}>
+            <ComposedChart data={chartDataWithMeta} margin={{ top: 8, right: 138, bottom: 4, left: 0 }}>
               <CartesianGrid vertical={false} stroke={C.borderSubtle} />
               <XAxis
                 dataKey="day" interval={13}
@@ -343,9 +480,9 @@ export default function SecurityStrategiesPage() {
               <Tooltip content={<CandleTooltip />} />
               <Bar dataKey="high" baseValue={chartBounds.low} shape={<CandleShape />}
                 isAnimationActive={false} fill="transparent" />
-              <Line type="monotone" dataKey="sma8"  stroke={C.smaCyan}   strokeWidth={1.5} dot={false} isAnimationActive={false} />
-              <Line type="monotone" dataKey="sma21" stroke={C.smaOrange} strokeWidth={1.5} dot={false} isAnimationActive={false} />
-              <Line type="monotone" dataKey="sma50" stroke={C.smaRed}    strokeWidth={1.5} dot={false} isAnimationActive={false} />
+              <Line type="monotone" dataKey="sma8"  stroke={SMA8_COLOR}  strokeWidth={1.5} dot={false} isAnimationActive={false} />
+              <Line type="monotone" dataKey="sma21" stroke={SMA21_COLOR} strokeWidth={1.5} dot={false} isAnimationActive={false} />
+              <Line type="monotone" dataKey="sma50" stroke={SMA50_COLOR} strokeWidth={1.5} dot={false} isAnimationActive={false} />
               {currentPrice > 0 && (
                 <ReferenceLine y={currentPrice} stroke={C.accent + '90'} strokeDasharray="4 4" />
               )}
@@ -354,32 +491,8 @@ export default function SecurityStrategiesPage() {
         </div>
       )}
 
-      {/* Scorecard section */}
+      {/* ── Scorecard section ── */}
       <div style={{ padding: '16px 16px 0' }}>
-
-        {/* Header row */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 10.5, color: C.textMuted, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-              Strategy Scorecard
-            </span>
-            {symbolUpper && (
-              <span style={{ fontSize: 11, color: C.textDim, fontFamily: mono, padding: '1px 7px', borderRadius: 4, border: `1px solid ${C.border}` }}>
-                {symbolUpper}
-              </span>
-            )}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 10, color: C.textMuted }}>Select strategies to evaluate</span>
-            <button
-              onClick={() => fetchScorecard()}
-              disabled={loading}
-              style={{ background: 'none', border: `1px solid ${C.border}`, color: loading ? C.textMuted : C.textDim, fontSize: 13, cursor: loading ? 'default' : 'pointer', padding: '2px 7px', borderRadius: 5 }}
-            >
-              {loading ? '…' : '⟳'}
-            </button>
-          </div>
-        </div>
 
         {/* Mock data notice */}
         {usingMock && !error && (
@@ -392,7 +505,7 @@ export default function SecurityStrategiesPage() {
         {error && !loading && (
           <div style={{ marginBottom: 12, padding: '8px 12px', borderRadius: 6, border: `1px solid ${C.red}40`, backgroundColor: C.redDim, color: C.red, fontSize: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span>{error}</span>
-            <button onClick={fetchScorecard} style={{ background: 'none', border: 'none', color: C.red, fontSize: 11, cursor: 'pointer', textDecoration: 'underline', padding: 0 }}>Retry</button>
+            <button onClick={() => fetchScorecard()} style={{ background: 'none', border: 'none', color: C.red, fontSize: 11, cursor: 'pointer', textDecoration: 'underline', padding: 0 }}>Retry</button>
           </div>
         )}
 
@@ -406,7 +519,7 @@ export default function SecurityStrategiesPage() {
         />
       </div>
 
-      {/* Evaluation results */}
+      {/* ── Evaluation results ── */}
       {(evalLoading || evalError || evaluations.length > 0) && (
         <div style={{ padding: '16px 16px 0' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
@@ -446,7 +559,7 @@ export default function SecurityStrategiesPage() {
                   <TradeEvaluationCard
                     key={card.strategy_key}
                     card={card}
-                    symbol={symbolUpper}
+                    symbol={symbol}
                     currentPrice={currentPrice}
                     smaData={smaForCards}
                     tradeData={matchingScore?.best_trade ?? null}
@@ -458,6 +571,44 @@ export default function SecurityStrategiesPage() {
           )}
         </div>
       )}
+
+      {/* ── Bottom bar with Config button ── */}
+      <div style={{
+        display: 'flex', justifyContent: 'flex-end', alignItems: 'center',
+        padding: '12px 16px 0', gap: 10,
+      }}>
+        <button
+          onClick={() => setConfigOpen(true)}
+          style={{
+            padding: '4px 10px', borderRadius: 5, fontSize: 11,
+            border: `1px solid ${C.border}`, background: 'none',
+            color: C.textDim, cursor: 'pointer',
+          }}
+        >
+          ⚙ Config
+        </button>
+      </div>
+
+      {/* ── Config drawer (opened via ⚙ Config or Header gear) ── */}
+      <ConfigDrawer
+        mode="verticals"
+        open={configOpen}
+        onClose={() => setConfigOpen(false)}
+        config={analysisConfig}
+        onApply={handleConfigApply}
+        presets={presets}
+        activePresetId={activePresetId}
+        onPresetSelect={(id) => {
+          setActivePresetId(id);
+          const preset = presets.find(p => p.id === id);
+          if (preset) setAnalysisConfig(prev => ({ ...prev, ...preset, smaPeriods: preset.smaPeriods || prev.smaPeriods }));
+        }}
+        onSavePreset={(name, cfg) => {
+          const id = name.toLowerCase().replace(/\s+/g, '-');
+          setPresets(prev => [...prev, { id, name, ...cfg }]);
+          setActivePresetId(id);
+        }}
+      />
     </div>
   );
 }

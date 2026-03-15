@@ -108,7 +108,11 @@ class ScoredSpread:
     # Convenience
     reward_risk_ratio: float = 0.0
     required_move_pct: float = 0.0  # % the underlying must move to profit
-    
+
+    # Score breakdown — populated by score_spreads() with per-metric details
+    # Format: { metric_key: { raw, normalized, weight, contribution, norm_min, norm_max } }
+    score_breakdown: dict = field(default_factory=dict)
+
     def to_dict(self):
         return asdict(self)
 
@@ -591,12 +595,19 @@ class VerticalSpreadEngine:
         """
         if len(spreads) <= 1:
             if spreads:
-                spreads[0].ev_score = 1.0
-                spreads[0].rr_score = 1.0
-                spreads[0].prob_score = 1.0
-                spreads[0].liquidity_score = 1.0
-                spreads[0].theta_score = 1.0
-                spreads[0].composite_score = 1.0
+                s = spreads[0]
+                s.ev_score = s.rr_score = s.prob_score = s.liquidity_score = s.theta_score = 1.0
+                s.composite_score = 1.0
+                w = self.weights
+                liq_raw = s.long_volume + s.short_volume + s.long_oi + s.short_oi
+                th_raw  = s.net_theta / s.max_loss if s.max_loss > 0 else 0
+                s.score_breakdown = {
+                    "expected_value":   {"raw": s.ev_raw, "normalized": 1.0, "weight": w.expected_value, "contribution": w.expected_value, "norm_min": s.ev_raw, "norm_max": s.ev_raw},
+                    "reward_risk":      {"raw": s.reward_risk_ratio, "normalized": 1.0, "weight": w.reward_risk, "contribution": w.reward_risk, "norm_min": s.reward_risk_ratio, "norm_max": s.reward_risk_ratio},
+                    "probability":      {"raw": s.prob_of_profit, "normalized": 1.0, "weight": w.probability, "contribution": w.probability, "norm_min": s.prob_of_profit, "norm_max": s.prob_of_profit},
+                    "liquidity":        {"raw": liq_raw, "normalized": 1.0, "weight": w.liquidity, "contribution": w.liquidity, "norm_min": liq_raw, "norm_max": liq_raw},
+                    "theta_efficiency": {"raw": th_raw, "normalized": 1.0, "weight": w.theta_efficiency, "contribution": w.theta_efficiency, "norm_min": th_raw, "norm_max": th_raw},
+                }
             return spreads
         
         # Extract raw values for normalization
@@ -632,14 +643,21 @@ class VerticalSpreadEngine:
         prob_scores = normalize(probs, higher_is_better=True)
         liq_scores = normalize(liqs, higher_is_better=True)
         theta_scores = normalize(thetas, higher_is_better=True)
-        
+
+        # Capture normalization bounds for score_breakdown
+        ev_min, ev_max     = min(evs), max(evs)
+        rr_min, rr_max     = min(rrs), max(rrs)
+        prob_min, prob_max = min(probs), max(probs)
+        liq_min, liq_max   = min(liqs), max(liqs)
+        th_min, th_max     = min(thetas), max(thetas)
+
         w = self.weights
         for i, s in enumerate(spreads):
-            s.ev_score = round(ev_scores[i], 4)
-            s.rr_score = round(rr_scores[i], 4)
-            s.prob_score = round(prob_scores[i], 4)
+            s.ev_score        = round(ev_scores[i], 4)
+            s.rr_score        = round(rr_scores[i], 4)
+            s.prob_score      = round(prob_scores[i], 4)
             s.liquidity_score = round(liq_scores[i], 4)
-            s.theta_score = round(theta_scores[i], 4)
+            s.theta_score     = round(theta_scores[i], 4)
             s.composite_score = round(
                 s.ev_score * w.expected_value +
                 s.rr_score * w.reward_risk +
@@ -648,5 +666,34 @@ class VerticalSpreadEngine:
                 s.theta_score * w.theta_efficiency,
                 4
             )
-        
+            liq_raw = liqs[i]
+            th_raw  = thetas[i]
+            s.score_breakdown = {
+                "expected_value": {
+                    "raw": round(s.ev_raw, 4), "normalized": s.ev_score,
+                    "weight": w.expected_value, "contribution": round(s.ev_score * w.expected_value, 4),
+                    "norm_min": round(ev_min, 4), "norm_max": round(ev_max, 4),
+                },
+                "reward_risk": {
+                    "raw": round(s.reward_risk_ratio, 4), "normalized": s.rr_score,
+                    "weight": w.reward_risk, "contribution": round(s.rr_score * w.reward_risk, 4),
+                    "norm_min": round(rr_min, 4), "norm_max": round(rr_max, 4),
+                },
+                "probability": {
+                    "raw": round(s.prob_of_profit, 4), "normalized": s.prob_score,
+                    "weight": w.probability, "contribution": round(s.prob_score * w.probability, 4),
+                    "norm_min": round(prob_min, 4), "norm_max": round(prob_max, 4),
+                },
+                "liquidity": {
+                    "raw": liq_raw, "normalized": s.liquidity_score,
+                    "weight": w.liquidity, "contribution": round(s.liquidity_score * w.liquidity, 4),
+                    "norm_min": liq_min, "norm_max": liq_max,
+                },
+                "theta_efficiency": {
+                    "raw": round(th_raw, 6), "normalized": s.theta_score,
+                    "weight": w.theta_efficiency, "contribution": round(s.theta_score * w.theta_efficiency, 4),
+                    "norm_min": round(th_min, 6), "norm_max": round(th_max, 6),
+                },
+            }
+
         return spreads

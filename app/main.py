@@ -16,6 +16,7 @@ Pydantic, and dependency injection. It's the natural choice for a modern
 Python API that will serve a web app, Excel Python, and MCP.
 """
 
+import asyncio
 import logging
 import os
 import shutil
@@ -155,11 +156,12 @@ async def lifespan(app: FastAPI):
     init_market_routes(provider_factory)
     init_analysis_routes(provider_factory)
 
-    # 5. Initialize Schwab OAuth token manager
+    # 5. Initialize Schwab OAuth token manager + proactive background refresh
     schwab_token_manager = SchwabTokenManager(secrets_manager)
     init_schwab_auth_routes(schwab_token_manager)
     provider_factory.init_schwab(schwab_token_manager)
-    logger.info("Schwab OAuth token manager initialized")
+    token_refresh_task = asyncio.create_task(schwab_token_manager.start_background_refresh())
+    logger.info("Schwab OAuth token manager initialized (background refresh started)")
 
     logger.info(f"Provider factory initialized. Available: {provider_factory.list_providers()}")
 
@@ -276,6 +278,7 @@ async def lifespan(app: FastAPI):
     yield  # App runs here
 
     # --- SHUTDOWN ---
+    token_refresh_task.cancel()
     if scheduler is not None:
         scheduler.shutdown(wait=False)
     await provider_factory.clear_cache()

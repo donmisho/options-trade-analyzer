@@ -1,8 +1,10 @@
 /**
- * Header — Top bar with logo, nav tabs, Schwab status.
+ * Header — RETIRED (Phase 3.6 left-nav migration).
  *
- * Nav: Dashboard | Verticals | Puts & Calls | Positions
- * Strategy configs are NOT rendered as tabs — they feed StrategyScorecard instead.
+ * All nav, Schwab status, settings, and sign-out now live in Layout.jsx's
+ * left rail. This file is kept for reference but no longer imported.
+ *
+ * Original nav: Dashboard | Security Strategies | Verticals | Puts & Calls | Positions
  */
 import { useState, useEffect, useCallback } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';

@@ -24,7 +24,7 @@ export default function Watchlist() {
 
   const handleClick = (symbol) => {
     setActiveSymbol(symbol);
-    navigate(`/security-strategies/${symbol}`);
+    navigate(`/security-strategies/${symbol}`, { state: { fromWatchlist: true } });
   };
 
   const handleRefresh = async () => {

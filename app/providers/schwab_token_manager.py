@@ -268,6 +268,40 @@ class SchwabTokenManager:
             "needs_reauth": not (has_refresh and refresh_valid),
         }
 
+    async def start_background_refresh(self) -> None:
+        """
+        Background task: check token expiry every 5 minutes and proactively
+        refresh if the access token expires within 10 minutes.
+
+        Wire this into the FastAPI lifespan:
+            task = asyncio.create_task(token_manager.start_background_refresh())
+            # on shutdown:
+            task.cancel()
+        """
+        import asyncio
+        while True:
+            try:
+                await asyncio.sleep(300)  # check every 5 minutes
+                status = self.get_status()
+                if not status.get("connected"):
+                    continue  # no tokens — nothing to refresh
+                expires_in = status.get("access_token_expires_in_seconds")
+                if expires_in is not None and expires_in < 600:
+                    logger.info(
+                        f"SchwabTokenManager: Proactive refresh — "
+                        f"access token expires in {expires_in}s"
+                    )
+                    try:
+                        await self._refresh_access_token()
+                        logger.info("SchwabTokenManager: Proactive refresh succeeded")
+                    except Exception as e:
+                        logger.error(f"SchwabTokenManager: Proactive refresh failed: {e}")
+            except asyncio.CancelledError:
+                logger.info("SchwabTokenManager: Background refresh task cancelled")
+                break
+            except Exception as e:
+                logger.error(f"SchwabTokenManager: Background refresh loop error: {e}")
+
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------

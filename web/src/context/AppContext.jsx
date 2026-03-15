@@ -253,8 +253,8 @@ export function AppProvider({ children }) {
     return () => clearTimeout(timer);
   }, [toast]);
 
-  const showToast = useCallback((message) => {
-    setToast(message);
+  const showToast = useCallback((msgOrObj) => {
+    setToast(typeof msgOrObj === 'string' ? { message: msgOrObj } : msgOrObj);
   }, []);
 
   /**
