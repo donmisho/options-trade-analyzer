@@ -3,6 +3,62 @@
 
 ---
 
+## Strategy Scorecard — Scoring Engine Data Inputs (Phase 2.9)
+
+`POST /api/v1/analyze/scorecard` — single chain fetch, four scores returned.
+
+All four scores are calculated live from the options chain for the requested symbol.
+There are no hardcoded values. Scores are 0–100, normalized with min-max scaling
+across all candidates per strategy.
+
+### Chain fetch
+- `provider.get_chain(symbol, min_dte=0, max_dte=70, strike_range_pct=20)`
+- Returns: `contracts[]`, `underlying_price`
+- One fetch per scorecard call regardless of strategy count.
+
+### Steady Paycheck — 25–50 DTE credit spreads
+| Metric | Weight | Source |
+|---|---|---|
+| `theta_margin_ratio` | 30% | `abs(net_theta) / max_loss` — theta collected per dollar at risk |
+| `probability_of_profit` | 25% | Delta-derived PoP from VerticalSpreadEngine |
+| `expected_value` | 20% | `(credit × PoP) - (max_loss × (1-PoP))` |
+| `reward_risk` | 15% | `credit / max_loss` |
+| `iv_rank` | 10% | Proxy: `atm_iv / 0.60` clamped 0–1 (ATM IV from nearest 5 calls) |
+
+### Weekly Grind — 5–16 DTE credit spreads
+| Metric | Weight | Source |
+|---|---|---|
+| `theta_gamma_ratio` | 35% | `abs(net_theta) / max_loss` proxy (true gamma not in ScoredSpread) |
+| `probability_of_profit` | 25% | Delta-derived PoP |
+| `credit_width_pct` | 20% | `(credit / spread_width) × 100` — premium quality |
+| `expected_value` | 15% | EV from VerticalSpreadEngine |
+| `liquidity` | 5% | `long_volume + short_volume + long_oi + short_oi` |
+
+### Trend Rider — 25–65 DTE long calls
+| Metric | Weight | Source |
+|---|---|---|
+| `sma_alignment_score` | 30% | Client-supplied float 0–1 via `user_config.sma_alignment_score`; defaults to 0.5 |
+| `delta_quality` | 25% | Proximity to 0.50–0.70 delta target range |
+| `expected_value` | 20% | `delta × underlying × 0.05 - mid_price` |
+| `iv_percentile_cost` | 15% | `1 - (iv_decimal / 1.0)` — lower IV = cheaper options for buyers |
+| `runway_score` | 10% | `theta_runway_days` from LongCallEngine |
+
+### Lottery Ticket — 1–8 DTE deep OTM calls
+| Metric | Weight | Source |
+|---|---|---|
+| `payout_ratio` | 45% | `(delta × price × 0.10 × 100) / premium_dollars` — return on 10% move |
+| `delta_otm_score` | 25% | `1 - (delta / 0.25)` — lower delta = more OTM = higher score |
+| `bid_ask_tightness` | 20% | `1 - (bid_ask_spread_pct / 100)` — fill quality |
+| `open_interest` | 10% | Raw OI on the contract |
+
+### Why scores differ meaningfully per symbol
+- **High-IV symbols** (SQQQ, leveraged ETFs): more premium available → higher Steady Paycheck / Weekly Grind scores
+- **Trending symbols** with clean SMA stacks: `sma_alignment_score` driven by frontend SMA state → higher Trend Rider
+- **Low-price / illiquid symbols**: fewer candidates in DTE windows → scores may be 0 (no candidates)
+- **ATM IV proxy**: computed from the actual chain, so a symbol with 15% IV scores very differently from one with 60% IV
+
+---
+
 ## What This Document Is
 
 This is the architectural specification for how AI agents are built, deployed, observed,

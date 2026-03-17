@@ -225,8 +225,18 @@ export default function SecurityStrategiesPage() {
     }
   }, [symbol]);
 
+  // ── Initial mount: auto-fetch when no URL param drives the fetch ─────────
+  // When the page loads at /security-strategies (no param), the symbolParam
+  // effect returns early, so nothing fetches. This fills that gap.
+  useEffect(() => {
+    if (!symbolParam) {
+      fetchQuote(initSymbol);
+      fetchScorecard(initSymbol);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Watchlist click: URL param changes with fromWatchlist state ──────────
-  // Only auto-fetch on explicit watchlist navigation, not bare page load.
+  // Fires on mount (when URL has a param) and on subsequent param changes.
   const prevSymbolParam = useRef(null);
   useEffect(() => {
     if (!symbolParam) return;
@@ -239,7 +249,7 @@ export default function SecurityStrategiesPage() {
     const symbolChanged  = symbolParam !== prevSymbolParam.current;
     prevSymbolParam.current = symbolParam;
 
-    if (isWatchlistNav || (symbolChanged && prevSymbolParam.current !== null)) {
+    if (isWatchlistNav || symbolChanged) {
       // Reset stale data for new symbol
       setScores(null); setSmaSignal(null); setError(null);
       setSelectedKeys([]); setEvaluations([]); setEvalError(null);

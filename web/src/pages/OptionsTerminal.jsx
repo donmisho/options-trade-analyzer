@@ -186,14 +186,14 @@ function MathMatrix({ trade, config }) {
   const { scoreMetrics } = config;
   const total = scoreMetrics.reduce((sum, m) => {
     const val = trade?.[m.field];
-    return sum + (val != null ? val * (m.weightPct / 100) : 0);
+    return sum + (val != null ? val * m.weightPct : 0);
   }, 0);
 
   return (
     <div>
       {scoreMetrics.map((m, idx) => {
         const score = trade?.[m.field];
-        const contribution = score != null ? score * (m.weightPct / 100) : null;
+        const contribution = score != null ? score * m.weightPct : null;
 
         return (
           <div key={m.key} style={{
@@ -212,7 +212,7 @@ function MathMatrix({ trade, config }) {
                 }}>{m.weightPct}%</span>
               </div>
               <span style={{ color: m.color, fontWeight: 700, fontFamily: mono, fontSize: 12 }}>
-                {contribution != null ? `+${contribution.toFixed(4)}` : '—'}
+                {contribution != null ? `+${contribution.toFixed(2)}` : '—'}
               </span>
             </div>
 
@@ -247,10 +247,10 @@ function MathMatrix({ trade, config }) {
       }}>
         <span style={{ color: TEXT, fontWeight: 700, fontSize: 13 }}>Composite Score</span>
         <span style={{
-          color: total > 0.65 ? GREEN : total > 0.45 ? AMBER : RED,
+          color: total > 65 ? GREEN : total > 45 ? AMBER : RED,
           fontWeight: 800, fontSize: 18, fontFamily: mono,
         }}>
-          {total.toFixed(4)}
+          {total.toFixed(2)}
         </span>
       </div>
     </div>

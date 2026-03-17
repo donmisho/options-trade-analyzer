@@ -77,6 +77,14 @@ export const longOptionsColumns = [
     render: (trade) => trade.delta != null ? trade.delta.toFixed(4) : '—',
   },
   {
+    key: 'iv',
+    label: 'IV',
+    title: 'Implied volatility of this contract',
+    width: 60,
+    align: 'right',
+    render: (trade) => trade.iv != null ? (trade.iv * 100).toFixed(1) + '%' : '—',
+  },
+  {
     key: 'theta_per_day_dollars',
     label: 'Theta/Day',
     width: 80,
@@ -165,8 +173,8 @@ export const longOptionsColumns = [
     render: (trade, ctx) => {
       const sv    = ctx?.systemVars || {};
       const iv    = trade.iv || 0;
-      const green = sv.pip_iv_green ?? 30;
-      const amber = sv.pip_iv_amber ?? 50;
+      const green = sv.pip_iv_green ?? 0.30;
+      const amber = sv.pip_iv_amber ?? 0.50;
       return <Pip color={pipColor(iv, green, amber, false)} />;
     },
   },

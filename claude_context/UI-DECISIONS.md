@@ -240,7 +240,7 @@ Text muted:    #8b949e  (--muted)
 - Table cells: 11px
 - Strategy names in scorecard: 12px bold
 - Score numbers: 13px bold
-- Claude read text: 11px italic, muted, line-height 1.6
+- Claude read text: 10px normal (non-italic), color #c9d1d9, line-height 1.65
 - Section titles: 10px uppercase, letter-spacing 0.6px, muted
 
 ---
@@ -374,7 +374,7 @@ between columns):
 
 Column 1 — Claude's Read:
 - 9px uppercase muted section label
-- 10px italic #c9d1d9 prose, line-height 1.65
+- 10px normal (non-italic) #c9d1d9 prose, line-height 1.65
 - Two paragraphs separated by 8px margin
 
 Column 2 — Exit Plan:
@@ -561,8 +561,11 @@ Column definitions live in `web/src/config/`.
 
 ### Verticals Column Set
 `web/src/config/verticals-columns.jsx`
-`#` · TYPE · SPREAD · EXPIRATION · DELTA · THETA · NET · R:R · PROB · SCORE · [R:R pip] · [PROB pip] · [SCR pip]
+`#` · TYPE · SPREAD · EXPIRATION · DELTA · IV · THETA · NET · R:R · PROB · SCORE · [R:R pip] · [PROB pip] · [SCR pip]
 Default sort: SCORE descending.
+
+IV column: short leg implied volatility, stored as decimal (0.2616), displayed as percentage (26.2%).
+Format: `(val * 100).toFixed(1) + '%'`. Shows '—' if null.
 
 Pip thresholds (from `ctx.systemVars`, with defaults):
 - R:R pip: green ≥1.5, amber ≥1.0
@@ -571,12 +574,15 @@ Pip thresholds (from `ctx.systemVars`, with defaults):
 
 ### Puts & Calls Column Set
 `web/src/config/long-options-columns.jsx`
-TYPE · STRIKE · EXPIRATION · DELTA · THETA/DAY · PREMIUM · BREAKEVEN · vs ITM · SCORE · [Δ pip] · [IV pip] · [Run pip]
+TYPE · STRIKE · EXPIRATION · DELTA · IV · THETA/DAY · PREMIUM · BREAKEVEN · vs ITM · SCORE · [Δ pip] · [IV pip] · [Run pip]
 Default sort: SCORE descending.
+
+IV column: contract implied volatility, stored as decimal (0.2616), displayed as percentage (26.2%).
+Format: `(val * 100).toFixed(1) + '%'`. Shows '—' if null.
 
 Pip thresholds (from `ctx.systemVars`, with defaults):
 - Delta pip: green 0.30–0.65, amber ±0.05 of edges
-- IV pip: green ≤30%, amber ≤50%
+- IV pip: green ≤0.30 (30%), amber ≤0.50 (50%) — thresholds are decimal fractions, not percentages
 - Runway pip: green ≥30d, amber ≥15d
 
 ### vs ITM Column

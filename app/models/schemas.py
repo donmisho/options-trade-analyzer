@@ -302,19 +302,24 @@ class TradeEvaluationCard(BaseModel):
     strategy_key: str
     strategy_label: str
     trade_structure: str            # e.g. "Sell 415P / Buy 410P, Dec 19"
-    entry_price: float
-    max_profit: float
-    max_loss: float
-    exit_warning_price: float       # underlying price that triggers warning
-    exit_warning_pnl: float         # P&L at warning (negative = loss)
-    exit_target_debit: float        # debit to close at ~50% profit
-    exit_stop_debit: float          # debit to close at 2× credit
+    entry_price: float = 0.0
+    max_profit: float = 0.0         # unlimited for long calls → default 0
+    max_loss: float = 0.0
+    exit_warning_price: float = 0.0 # underlying price that triggers warning
+    exit_warning_pnl: float = 0.0   # P&L at warning (negative = loss)
+    exit_target_debit: float = 0.0  # debit to close at ~50% profit (spreads only)
+    exit_stop_debit: float = 0.0    # debit to close at 2× credit (spreads only)
     probability_matrix: dict        # serialized ProbabilityMatrix from B-S
     score: int                      # 0-100 from strategy scorer (or Claude estimate)
     verdict: str                    # EXECUTE | WAIT | PASS
     claude_read: str                # 2-3 sentences on fit with current conditions
     key_risks: List[str]            # 2-3 items, each under 15 words
     thesis_invalidators: List[str]  # 2-3 specific price/event conditions
+    # Exit levels — underlying stock prices (not option premiums). Populated from
+    # Claude's exit_plan response or from top-level fallback fields.
+    take_profit: Optional[float] = None    # underlying price at which to close for full profit
+    warning_level: Optional[float] = None  # underlying early-warning trigger price
+    hard_stop: Optional[float] = None      # underlying price at which to cut the loss
 
     @field_validator("verdict")
     @classmethod

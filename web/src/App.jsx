@@ -27,7 +27,6 @@ import OptionsTerminal from './pages/OptionsTerminal';
 // import FavoritesPage from './pages/FavoritesPage';  // DEPRECATED — /favorites redirects to /positions
 import PositionsPage from './pages/PositionsPage';
 import DashboardPage from './pages/DashboardPage';
-import SecurityDashboard from './pages/SecurityDashboard';
 import SecurityStrategiesPage from './pages/SecurityStrategiesPage';
 import LoginPage from './pages/LoginPage';
 import BrokerConnectPage from './pages/BrokerConnectPage';

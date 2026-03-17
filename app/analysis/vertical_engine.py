@@ -29,6 +29,16 @@ from typing import Optional
 import math
 
 
+def _normalize_iv(raw_iv):
+    """Schwab returns IV as decimal fraction (0.2616 = 26.16%).
+    Guard against double-conversion where value is already a percentage."""
+    if raw_iv is None:
+        return None
+    if raw_iv > 2.0:
+        return raw_iv / 100.0
+    return raw_iv
+
+
 # ─── Data Structures ─────────────────────────────────────────────
 
 @dataclass
@@ -108,6 +118,7 @@ class ScoredSpread:
     # Convenience
     reward_risk_ratio: float = 0.0
     required_move_pct: float = 0.0  # % the underlying must move to profit
+    iv: Optional[float] = None      # Short leg implied volatility (decimal, e.g. 0.2616 = 26.16%)
 
     # Score breakdown — populated by score_spreads() with per-metric details
     # Format: { metric_key: { raw, normalized, weight, contribution, norm_min, norm_max } }
@@ -431,6 +442,9 @@ class VerticalSpreadEngine:
         else:
             required_move = ((price - breakeven) / price) * 100
         
+        short_iv_raw = short_leg.get("implied_volatility", 0) or short_leg.get("iv", 0) or 0
+        short_iv = _normalize_iv(short_iv_raw)
+
         return ScoredSpread(
             spread_type=spread_type,
             long_strike=long_leg["strike"],
@@ -457,8 +471,9 @@ class VerticalSpreadEngine:
             ev_raw=round(ev, 2),
             reward_risk_ratio=round(rr, 2),
             required_move_pct=round(required_move, 2),
+            iv=round(short_iv, 4) if short_iv is not None else None,
         )
-    
+
     def _try_build_credit_spread(
         self,
         spread_type: str,
@@ -547,6 +562,9 @@ class VerticalSpreadEngine:
         else:
             required_move = ((breakeven - price) / price) * 100
 
+        short_iv_raw = short_leg.get("implied_volatility", 0) or short_leg.get("iv", 0) or 0
+        short_iv = _normalize_iv(short_iv_raw)
+
         return ScoredSpread(
             spread_type=spread_type,
             long_strike=long_leg["strike"],
@@ -573,6 +591,7 @@ class VerticalSpreadEngine:
             ev_raw=round(ev, 2),
             reward_risk_ratio=round(rr, 2),
             required_move_pct=round(required_move, 2),
+            iv=round(short_iv, 4) if short_iv is not None else None,
         )
 
     # ─── Scoring ──────────────────────────────────────────────
@@ -597,16 +616,16 @@ class VerticalSpreadEngine:
             if spreads:
                 s = spreads[0]
                 s.ev_score = s.rr_score = s.prob_score = s.liquidity_score = s.theta_score = 1.0
-                s.composite_score = 1.0
+                s.composite_score = 100.0
                 w = self.weights
                 liq_raw = s.long_volume + s.short_volume + s.long_oi + s.short_oi
                 th_raw  = s.net_theta / s.max_loss if s.max_loss > 0 else 0
                 s.score_breakdown = {
-                    "expected_value":   {"raw": s.ev_raw, "normalized": 1.0, "weight": w.expected_value, "contribution": w.expected_value, "norm_min": s.ev_raw, "norm_max": s.ev_raw},
-                    "reward_risk":      {"raw": s.reward_risk_ratio, "normalized": 1.0, "weight": w.reward_risk, "contribution": w.reward_risk, "norm_min": s.reward_risk_ratio, "norm_max": s.reward_risk_ratio},
-                    "probability":      {"raw": s.prob_of_profit, "normalized": 1.0, "weight": w.probability, "contribution": w.probability, "norm_min": s.prob_of_profit, "norm_max": s.prob_of_profit},
-                    "liquidity":        {"raw": liq_raw, "normalized": 1.0, "weight": w.liquidity, "contribution": w.liquidity, "norm_min": liq_raw, "norm_max": liq_raw},
-                    "theta_efficiency": {"raw": th_raw, "normalized": 1.0, "weight": w.theta_efficiency, "contribution": w.theta_efficiency, "norm_min": th_raw, "norm_max": th_raw},
+                    "expected_value":   {"raw": s.ev_raw, "normalized": 1.0, "weight": w.expected_value, "contribution": round(w.expected_value * 100, 2), "norm_min": s.ev_raw, "norm_max": s.ev_raw, "formula": "(prob × maxProfit) − ((1−prob) × maxLoss)"},
+                    "reward_risk":      {"raw": s.reward_risk_ratio, "normalized": 1.0, "weight": w.reward_risk, "contribution": round(w.reward_risk * 100, 2), "norm_min": s.reward_risk_ratio, "norm_max": s.reward_risk_ratio, "formula": "maxProfit / maxLoss"},
+                    "probability":      {"raw": s.prob_of_profit, "normalized": 1.0, "weight": w.probability, "contribution": round(w.probability * 100, 2), "norm_min": s.prob_of_profit, "norm_max": s.prob_of_profit, "formula": "≈ short leg delta"},
+                    "liquidity":        {"raw": liq_raw, "normalized": 1.0, "weight": w.liquidity, "contribution": round(w.liquidity * 100, 2), "norm_min": liq_raw, "norm_max": liq_raw, "formula": "longVol + shortVol + longOI + shortOI"},
+                    "theta_efficiency": {"raw": th_raw, "normalized": 1.0, "weight": w.theta_efficiency, "contribution": round(w.theta_efficiency * 100, 2), "norm_min": th_raw, "norm_max": th_raw, "formula": "net_theta / max_loss (higher = better)"},
                 }
             return spreads
         
@@ -659,40 +678,45 @@ class VerticalSpreadEngine:
             s.liquidity_score = round(liq_scores[i], 4)
             s.theta_score     = round(theta_scores[i], 4)
             s.composite_score = round(
-                s.ev_score * w.expected_value +
+                (s.ev_score * w.expected_value +
                 s.rr_score * w.reward_risk +
                 s.prob_score * w.probability +
                 s.liquidity_score * w.liquidity +
-                s.theta_score * w.theta_efficiency,
-                4
+                s.theta_score * w.theta_efficiency) * 100,
+                2
             )
             liq_raw = liqs[i]
             th_raw  = thetas[i]
             s.score_breakdown = {
                 "expected_value": {
                     "raw": round(s.ev_raw, 4), "normalized": s.ev_score,
-                    "weight": w.expected_value, "contribution": round(s.ev_score * w.expected_value, 4),
+                    "weight": w.expected_value, "contribution": round(s.ev_score * w.expected_value * 100, 2),
                     "norm_min": round(ev_min, 4), "norm_max": round(ev_max, 4),
+                    "formula": "(prob × maxProfit) − ((1−prob) × maxLoss)",
                 },
                 "reward_risk": {
                     "raw": round(s.reward_risk_ratio, 4), "normalized": s.rr_score,
-                    "weight": w.reward_risk, "contribution": round(s.rr_score * w.reward_risk, 4),
+                    "weight": w.reward_risk, "contribution": round(s.rr_score * w.reward_risk * 100, 2),
                     "norm_min": round(rr_min, 4), "norm_max": round(rr_max, 4),
+                    "formula": "maxProfit / maxLoss",
                 },
                 "probability": {
                     "raw": round(s.prob_of_profit, 4), "normalized": s.prob_score,
-                    "weight": w.probability, "contribution": round(s.prob_score * w.probability, 4),
+                    "weight": w.probability, "contribution": round(s.prob_score * w.probability * 100, 2),
                     "norm_min": round(prob_min, 4), "norm_max": round(prob_max, 4),
+                    "formula": "≈ short leg delta",
                 },
                 "liquidity": {
                     "raw": liq_raw, "normalized": s.liquidity_score,
-                    "weight": w.liquidity, "contribution": round(s.liquidity_score * w.liquidity, 4),
+                    "weight": w.liquidity, "contribution": round(s.liquidity_score * w.liquidity * 100, 2),
                     "norm_min": liq_min, "norm_max": liq_max,
+                    "formula": "longVol + shortVol + longOI + shortOI",
                 },
                 "theta_efficiency": {
                     "raw": round(th_raw, 6), "normalized": s.theta_score,
-                    "weight": w.theta_efficiency, "contribution": round(s.theta_score * w.theta_efficiency, 4),
+                    "weight": w.theta_efficiency, "contribution": round(s.theta_score * w.theta_efficiency * 100, 2),
                     "norm_min": round(th_min, 6), "norm_max": round(th_max, 6),
+                    "formula": "net_theta / max_loss (higher = better)",
                 },
             }
 

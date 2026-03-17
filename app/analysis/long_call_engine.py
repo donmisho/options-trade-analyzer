@@ -34,6 +34,17 @@ from dataclasses import dataclass, asdict
 from typing import Optional
 
 
+def _normalize_iv(raw_iv):
+    """Schwab returns IV as decimal fraction (0.2616 = 26.16%).
+    Guard against double-conversion where value is already a percentage."""
+    if raw_iv is None:
+        return None
+    # If value is > 2.0, it's already been multiplied by 100 somewhere — divide back
+    if raw_iv > 2.0:
+        return raw_iv / 100.0
+    return raw_iv
+
+
 @dataclass
 class NakedOptionWeights:
     """Weights for naked option scoring — must sum to 1.0"""
@@ -276,7 +287,7 @@ class NakedOptionEngine:
             gamma=round(gamma, 4),
             theta=round(theta, 4),
             vega=round(vega, 4),
-            iv=round(iv * 100 if iv < 1 else iv, 2),
+            iv=round(_normalize_iv(iv) or 0, 4),
             volume=volume,
             open_interest=oi,
             bid_ask_spread_pct=round(ba_spread_pct * 100, 2),
@@ -299,9 +310,9 @@ class NakedOptionEngine:
         """
         if len(candidates) <= 1:
             if candidates:
-                for attr in ["delta_score", "theta_score", "iv_score",
-                             "rr_score", "liquidity_score", "composite_score"]:
+                for attr in ["delta_score", "theta_score", "iv_score", "rr_score", "liquidity_score"]:
                     setattr(candidates[0], attr, 1.0)
+                candidates[0].composite_score = 100.0
             return candidates
 
         def normalize(values, higher_is_better=True):
@@ -352,12 +363,12 @@ class NakedOptionEngine:
             c.rr_score = round(rr_scores[i], 4)
             c.liquidity_score = round(liq_scores[i], 4)
             c.composite_score = round(
-                c.delta_score * w.delta_alignment +
+                (c.delta_score * w.delta_alignment +
                 c.theta_score * w.theta_efficiency +
                 c.iv_score * w.iv_value +
                 c.rr_score * w.reward_risk +
-                c.liquidity_score * w.liquidity,
-                4
+                c.liquidity_score * w.liquidity) * 100,
+                2
             )
 
         return candidates

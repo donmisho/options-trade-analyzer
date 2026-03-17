@@ -220,31 +220,36 @@ export default function StrategyScorecard({
         }
       </div>
 
-      {/* Evaluate button */}
+      {/* Evaluate button — teal outlined per UI-DECISIONS Button Standards */}
       {!loading && scores.length > 0 && (
-        <button
-          onClick={() => onEvaluate && onEvaluate(selectedKeys)}
-          disabled={!hasSelection}
-          style={{
-            marginTop: 10,
-            width: '100%',
-            padding: '10px 0',
-            borderRadius: 6,
-            border: 'none',
-            backgroundColor: hasSelection ? C.accent : C.border,
-            color: hasSelection ? '#fff' : C.textMuted,
-            fontSize: 13,
-            fontWeight: 700,
-            fontFamily: mono,
-            cursor: hasSelection ? 'pointer' : 'not-allowed',
-            letterSpacing: '0.04em',
-            transition: 'background-color 0.15s, color 0.15s',
-          }}
-        >
-          {hasSelection
-            ? `\u2726 Evaluate Selected (${selectedKeys.length})`
-            : 'Select strategies to evaluate'}
-        </button>
+        <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 10 }}>
+          <button
+            onClick={() => onEvaluate && onEvaluate(selectedKeys)}
+            disabled={!hasSelection}
+            style={{
+              background: 'rgba(45,212,191,0.1)',
+              border: '1px solid rgba(45,212,191,0.4)',
+              color: '#2dd4bf',
+              padding: '7px 16px',
+              borderRadius: 4,
+              fontSize: 11,
+              fontFamily: mono,
+              cursor: 'pointer',
+              width: 'auto',
+              opacity: hasSelection ? 1 : 0.35,
+              pointerEvents: hasSelection ? 'auto' : 'none',
+            }}
+          >
+            {hasSelection
+              ? `\u2726 Evaluate Selected (${selectedKeys.length})`
+              : '\u2726 Evaluate Selected'}
+          </button>
+          {!hasSelection && (
+            <span style={{ fontSize: 10, color: '#8b949e', fontFamily: mono }}>
+              Select strategies above
+            </span>
+          )}
+        </div>
       )}
     </div>
   );

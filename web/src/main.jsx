@@ -10,7 +10,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
-import { msalInstance } from './auth/msalConfig';
+import { msalInstance, loginRequest } from './auth/msalConfig';
 import { entraLogin, getSchwabStatus } from './api/client';
 import './styles/global.css';
 
@@ -21,8 +21,11 @@ import './styles/global.css';
 // the time routing runs, ota_token is already in localStorage and RequireAuth
 // sends the user straight to /connect or /verticals instead of /login.
 msalInstance.initialize().then(async () => {
+  let redirectToLogin = false;
+
   try {
     const result = await msalInstance.handleRedirectPromise();
+
     if (result?.idToken && !localStorage.getItem('ota_token')) {
       const data = await entraLogin(result.idToken);
       localStorage.setItem('ota_token', data.access_token);
@@ -38,9 +41,33 @@ msalInstance.initialize().then(async () => {
       // the auth code. We override it here — before React renders — so BrowserRouter
       // starts at the correct page instead of re-rendering the login screen.
       window.history.replaceState(null, '', targetRoute);
+
+    } else if (!result) {
+      // No redirect in progress. If MSAL has cached accounts but we have no app
+      // token, the cached account is stale — clear it so the next loginRedirect
+      // goes straight to Microsoft without a silent SSO attempt that will fail.
+      const accounts = msalInstance.getAllAccounts();
+      if (accounts.length > 0 && !localStorage.getItem('ota_token')) {
+        console.warn('[MSAL] Stale cached accounts found without app token — clearing MSAL cache.');
+        msalInstance.clearCache();
+      }
     }
   } catch (err) {
+    // handleRedirectPromise failed — stale nonce, expired state, or network error.
+    // Clear all MSAL state so the next loginRedirect starts clean, then
+    // force the user back through interactive login rather than silently
+    // landing on the login screen with broken auth state.
     console.error('[MSAL] Redirect processing failed:', err);
+    try { msalInstance.clearCache(); } catch (clearErr) {
+      console.warn('[MSAL] Cache clear failed:', clearErr);
+    }
+    redirectToLogin = true;
+  }
+
+  if (redirectToLogin) {
+    // Navigate away to interactive login — nothing below this runs.
+    await msalInstance.loginRedirect(loginRequest);
+    return;
   }
 
   createRoot(document.getElementById('root')).render(

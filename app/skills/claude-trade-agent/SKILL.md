@@ -52,6 +52,11 @@ the JSON structure. Each element of the array is one TradeEvaluationCard.
     "exit_warning_pnl": -85.00,
     "exit_target_debit": 1.23,
     "exit_stop_debit": 4.90,
+    "exit_plan": {
+      "take_profit": 418.50,
+      "warning_level": 413.25,
+      "hard_stop": 409.00
+    },
     "probability_matrix": {},
     "score": 84,
     "verdict": "EXECUTE",
@@ -61,6 +66,10 @@ the JSON structure. Each element of the array is one TradeEvaluationCard.
   }
 ]
 ```
+
+IMPORTANT: exit_plan values refer to the UNDERLYING STOCK PRICE, not the option premium.
+For example, if MSFT is at 394.88, take_profit might be 398.00 (underlying reaches this
+price → spread is at max profit). Do NOT use option debit/credit prices for exit_plan.
 
 For `verdict`:
 - `EXECUTE`: score ≥ 70, IV rank favorable, SMA alignment matches trade direction,
@@ -177,6 +186,11 @@ no explanation outside the array. Each element must match this exact schema:
   "exit_warning_pnl": -85.00,
   "exit_target_debit": 1.23,
   "exit_stop_debit": 4.90,
+  "exit_plan": {
+    "take_profit": 418.50,
+    "warning_level": 413.25,
+    "hard_stop": 409.00
+  },
   "probability_matrix": {},
   "score": 84,
   "verdict": "EXECUTE",
@@ -184,6 +198,15 @@ no explanation outside the array. Each element must match this exact schema:
   "key_risks": ["Risk item under 15 words", "Risk item under 15 words"],
   "thesis_invalidators": ["Specific price or event condition", "Specific price or event condition"]
 }
+
+EXIT PLAN RULES — CRITICAL:
+exit_plan.take_profit, exit_plan.warning_level, and exit_plan.hard_stop are
+UNDERLYING STOCK PRICES — the price of the stock/ETF itself, NOT the option premium.
+Example: if AAPL is at 220.00 and you're evaluating a 225/230 call spread:
+  take_profit = 230.00 (underlying reaches the short strike — max profit zone)
+  warning_level = 227.00 (underlying approaching the short strike — monitor closely)
+  hard_stop = 218.00 (underlying breaks below this — cut the loss)
+Do NOT use the option debit or credit amount for these three fields.
 
 Verdict rules:
 - EXECUTE: score >= 70, IV favorable, SMA alignment matches trade direction

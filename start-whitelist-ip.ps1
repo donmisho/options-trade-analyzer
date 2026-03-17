@@ -15,8 +15,20 @@ $server        = "options-analyzer-sql"
 
 # Get current public IP
 Write-Host "Detecting current public IP..." -ForegroundColor Cyan
-$ip = (Invoke-RestMethod -Uri "https://api.ipify.org" -UseBasicParsing)
-Write-Host "  Your IP: $ip" -ForegroundColor Yellow
+$ip = (Invoke-RestMethod -Uri "https://api.ipify.org" -UseBasicParsing).Trim()
+Write-Host "  Detected IP: $ip" -ForegroundColor Yellow
+
+# Compute /22 range around the detected IP.
+# WHY /22: Mobile hotspots use carrier-grade NAT — your laptop's detected IP and
+# the IP Azure SQL actually sees can differ by 1-2 in the third octet (e.g.
+# ipify returns 166.198.113.x but Azure sees 166.198.114.x). A /22 covers 4
+# adjacent /24 subnets (1024 addresses), which is wide enough to capture both.
+$parts    = $ip -split '\.'
+$octet3   = [int]$parts[2]
+$base3    = [math]::Floor($octet3 / 4) * 4   # round down to nearest multiple of 4
+$startIP  = "$($parts[0]).$($parts[1]).$base3.0"
+$endIP    = "$($parts[0]).$($parts[1]).$($base3 + 3).255"
+Write-Host "  Whitelisting /22 range: $startIP – $endIP" -ForegroundColor Yellow
 
 # Rule name includes date so history is visible in Azure portal
 $ruleName = "LocalDev-$(Get-Date -Format 'yyyyMMdd')"
@@ -36,15 +48,15 @@ foreach ($old in ($existing -split "`n" | Where-Object { $_ -and $_ -ne $ruleNam
         --name $old | Out-Null
 }
 
-# Create (or update) today's rule
-Write-Host "Setting firewall rule '$ruleName' for $ip..." -ForegroundColor Cyan
+# Create (or update) today's rule covering the full /22
+Write-Host "Setting firewall rule '$ruleName'..." -ForegroundColor Cyan
 az sql server firewall-rule create `
     --server $server `
     --resource-group $resourceGroup `
     --name $ruleName `
-    --start-ip-address $ip `
-    --end-ip-address $ip | Out-Null
+    --start-ip-address $startIP `
+    --end-ip-address $endIP | Out-Null
 
-Write-Host "Done. Azure SQL will accept connections from $ip." -ForegroundColor Green
+Write-Host "Done. Azure SQL will accept connections from $startIP – $endIP." -ForegroundColor Green
 Write-Host "Note: Azure SQL firewall rules don't expire automatically." -ForegroundColor DarkGray
-Write-Host "      Run this script again whenever your IP changes." -ForegroundColor DarkGray
+Write-Host "      Run this script again whenever your carrier IP block changes." -ForegroundColor DarkGray

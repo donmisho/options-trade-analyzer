@@ -171,8 +171,8 @@ const config = {
     const rrA   = systemVars?.pip_rr_amber    ?? 1.0;
     const prG   = systemVars?.pip_prob_green  ?? 0.55;
     const prA   = systemVars?.pip_prob_amber  ?? 0.45;
-    const scG   = systemVars?.pip_score_green ?? 0.65;
-    const scA   = systemVars?.pip_score_amber ?? 0.45;
+    const scG   = systemVars?.pip_score_green ?? 65;
+    const scA   = systemVars?.pip_score_amber ?? 45;
     return [
       { color: rr    >= rrG ? '#26a69a' : rr    >= rrA ? '#f59e0b' : '#ef5350' },
       { color: prob  >= prG ? '#26a69a' : prob  >= prA ? '#f59e0b' : '#ef5350' },

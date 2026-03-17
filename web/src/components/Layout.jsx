@@ -22,6 +22,7 @@ import Toast from './Toast';
 import TradeAgentPanel from './TradeAgentPanel';
 import { useApp } from '../context/AppContext';
 import { getSchwabStatus, getSchwabAuthUrl } from '../api/client';
+import { msalInstance } from '../auth/msalConfig';
 import './Layout.css';
 
 // ─── Spec-exact colors ────────────────────────────────────────────────────────
@@ -276,7 +277,13 @@ export default function Layout({ setActiveStrategy }) {
 
           {/* Sign out */}
           <button
-            onClick={() => { localStorage.removeItem('ota_token'); window.location.href = '/login'; }}
+            onClick={() => {
+              localStorage.removeItem('ota_token');
+              // Clear MSAL session state so the next sign-in doesn't find a
+              // stale cached account and silently fail.
+              try { msalInstance.clearCache(); } catch {}
+              window.location.href = '/login';
+            }}
             style={{
               display: 'flex', alignItems: 'center', gap: 8,
               padding: '8px 16px', background: 'none', border: 'none',

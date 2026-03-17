@@ -206,7 +206,7 @@ export async function apiPost(path, data) {
  * @param {Object} userConfig — Optional strategy config overrides from localStorage
  */
 export async function getStrategyScorecard(symbol, userConfig = null) {
-  return apiFetch('/analysis/scorecard', {
+  return apiFetch('/analyze/scorecard', {
     method: 'POST',
     body: JSON.stringify({ symbol: symbol.toUpperCase(), user_config: userConfig || undefined }),
   });
@@ -217,7 +217,7 @@ export async function getStrategyScorecard(symbol, userConfig = null) {
  * Returns { price_levels, dates, matrix }
  */
 export async function getProbabilityMatrix({ symbol, current_price, iv, dte }) {
-  return apiFetch('/analysis/probability-matrix', {
+  return apiFetch('/analyze/probability-matrix', {
     method: 'POST',
     body: JSON.stringify({ symbol, current_price, iv, dte }),
   });

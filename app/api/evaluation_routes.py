@@ -18,9 +18,13 @@ STRUCTURED OUTPUTS:
 """
 
 import json
+import logging
+import re
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from typing import Any, Optional, List
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
@@ -61,16 +65,31 @@ def _get_adapter() -> Any:
 
 # ─── Helpers ─────────────────────────────────────────────────────
 
+def calculate_dte(expiration_str: str) -> int:
+    """Parse expiration date string in any common format and return days to expiration."""
+    if not expiration_str:
+        return 0
+    for fmt in ("%Y-%m-%d", "%m-%d-%Y", "%m/%d/%Y"):
+        try:
+            exp_date = datetime.strptime(expiration_str, fmt).date()
+            return max(0, (exp_date - date.today()).days)
+        except ValueError:
+            continue
+    return 0
+
+
 def _extract_json_array(text: str) -> str:
-    """Strip markdown code fences and return bare JSON."""
+    """Strip markdown code fences and return bare JSON array."""
     text = text.strip()
-    if text.startswith("```"):
-        lines = text.splitlines()
-        # Drop opening fence line; strip closing fence if present
-        inner = "\n".join(lines[1:]).strip()
-        if inner.endswith("```"):
-            inner = inner[:-3].strip()
-        text = inner
+    # Match ``` fences anywhere in the response (handles preamble text before fence)
+    fence_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text)
+    if fence_match:
+        return fence_match.group(1).strip()
+    # Fallback: extract from first [ to last ] to ignore any surrounding prose
+    start = text.find('[')
+    end = text.rfind(']')
+    if start != -1 and end != -1 and end > start:
+        return text[start:end + 1]
     return text
 
 
@@ -78,7 +97,24 @@ def _try_parse_cards(raw: str) -> Optional[List[TradeEvaluationCard]]:
     """Attempt to parse raw text into a list of TradeEvaluationCard. Returns None on failure."""
     try:
         data = json.loads(_extract_json_array(raw))
-        return [TradeEvaluationCard(**item) for item in data]
+        cards = []
+        for item in data:
+            # Defensive extraction: Claude may return exit levels nested under exit_plan
+            # or at the top level. Check both locations.
+            exit_plan = item.get("exit_plan", {}) or {}
+            take_profit = exit_plan.get("take_profit") or item.get("take_profit")
+            warning_level = exit_plan.get("warning_level") or item.get("warning_level")
+            hard_stop = exit_plan.get("hard_stop") or item.get("hard_stop")
+            # Flatten into top-level fields for schema validation
+            item["take_profit"] = take_profit
+            item["warning_level"] = warning_level
+            item["hard_stop"] = hard_stop
+            logger.info(
+                f"Exit levels — strategy: {item.get('strategy_key')}, "
+                f"take_profit: {take_profit}, warning_level: {warning_level}, hard_stop: {hard_stop}"
+            )
+            cards.append(TradeEvaluationCard(**item))
+        return cards
     except Exception:
         return None
 
@@ -291,15 +327,17 @@ async def evaluate_structured(
     # Derive DTE for the probability matrix
     dte = 30  # default
     if request.trade:
-        if "dte" in request.trade:
-            dte = int(request.trade["dte"])
-        elif "expiration" in request.trade:
-            from datetime import date
-            try:
-                exp = date.fromisoformat(request.trade["expiration"])
-                dte = max(1, (exp - date.today()).days)
-            except ValueError:
-                pass
+        raw_dte = request.trade.get("dte")
+        if raw_dte and int(raw_dte) > 0:
+            dte = int(raw_dte)
+        elif request.trade.get("expiration"):
+            computed = calculate_dte(request.trade["expiration"])
+            if computed > 0:
+                dte = computed
+
+    logger.info(f"Evaluation request payload: symbol={request.symbol}, price={request.current_price}, "
+                f"iv={request.iv}, strategies={request.strategy_keys}, dte={dte}, "
+                f"trade_keys={list(request.trade.keys()) if request.trade else None}")
 
     # Compute probability matrix once (same IV/price/DTE across all strategies)
     pm = compute_probability_matrix(

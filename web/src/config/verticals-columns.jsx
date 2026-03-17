@@ -88,6 +88,14 @@ export const verticalsColumns = [
     render: (trade) => trade.net_delta != null ? trade.net_delta.toFixed(4) : '—',
   },
   {
+    key: 'iv',
+    label: 'IV',
+    title: 'Implied volatility of the short leg',
+    width: 60,
+    align: 'right',
+    render: (trade) => trade.iv != null ? (trade.iv * 100).toFixed(1) + '%' : '—',
+  },
+  {
     key: 'net_theta',
     label: 'Theta',
     width: 65,
@@ -161,15 +169,15 @@ export const verticalsColumns = [
   {
     key: 'pip_score',
     label: 'Scr',
-    title: 'Composite Score — green ≥0.65, amber ≥0.45, red <0.45',
+    title: 'Composite Score — green ≥65, amber ≥45, red <45',
     width: 36,
     align: 'center',
     sortable: false,
     render: (trade, ctx) => {
       const sv    = ctx?.systemVars || {};
       const score = trade.composite_score || 0;
-      const green = sv.pip_score_green ?? 0.65;
-      const amber = sv.pip_score_amber ?? 0.45;
+      const green = sv.pip_score_green ?? 65;
+      const amber = sv.pip_score_amber ?? 45;
       return <Pip color={pipColor(score, green, amber)} />;
     },
   },

@@ -10,20 +10,19 @@
 import './ScoreBar.css';
 
 function getBarColor(score) {
-  if (score >= 0.75) return 'var(--accent-green)';
-  if (score >= 0.55) return 'var(--accent-cyan)';
-  if (score >= 0.40) return 'var(--accent-yellow)';
+  if (score >= 75) return 'var(--accent-green)';
+  if (score >= 55) return 'var(--accent-cyan)';
+  if (score >= 40) return 'var(--accent-yellow)';
   return 'var(--accent-orange)';
 }
 
 export default function ScoreBar({ score }) {
-  const pct = Math.round(score * 100);
   return (
     <div className="score-bar-wrap">
       <div className="score-bar-track">
         <div
           className="score-bar-fill"
-          style={{ width: `${pct}%`, background: getBarColor(score) }}
+          style={{ width: `${Math.min(score, 100)}%`, background: getBarColor(score) }}
         />
       </div>
       <span className="score-bar-val">{score.toFixed(2)}</span>

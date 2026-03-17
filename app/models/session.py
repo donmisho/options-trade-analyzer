@@ -33,13 +33,17 @@ if database_url.startswith("mssql+pyodbc://"):
     port = parsed.port or 1433
     database = parsed.path.lstrip("/")
 
-    # Base ODBC string — no auth attributes (token injected at connect time)
+    # Base ODBC string — no auth attributes (token injected at connect time).
+    # MARS_Connection=Yes: required because SQLAlchemy's create_all fires
+    # multiple has_table() queries concurrently on one connection; without MARS
+    # pyodbc raises "Connection is busy with results for another command".
     _odbc_connect = (
         f"Driver={{ODBC Driver 18 for SQL Server}};"
         f"Server={server},{port};"
         f"Database={database};"
         f"Encrypt=yes;"
         f"TrustServerCertificate=no;"
+        f"MARS_Connection=Yes;"
     )
 
     SQL_COPT_SS_ACCESS_TOKEN = 1256  # pyodbc constant for AAD token injection

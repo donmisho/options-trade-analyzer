@@ -25,7 +25,7 @@
  *   - Width: auto on all buttons (never full-width)
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { STRATEGY_CONFIGS } from '../strategy-configs/index';
 import { evaluateStructured, followupTrade } from '../api/client';
 
@@ -140,6 +140,37 @@ function AnimatedDots() {
 
 /** Return actual calculation string for column 2 */
 function getCalcDisplay(metricKey, trade) {
+  // Long options (naked calls/puts) have different fields than vertical spreads
+  const isLongOpt = !trade.spread_type && !!trade.option_type;
+
+  if (isLongOpt) {
+    const delta    = trade.delta ?? 0;
+    const prem     = trade.premium_dollars ?? 0;
+    const thetaPD  = trade.theta_per_day_dollars ?? 0;
+    const runway   = trade.theta_runway_days ?? 0;
+    const iv       = trade.iv ?? 0;
+    const vol      = trade.volume ?? 0;
+    const oi       = trade.open_interest ?? 0;
+
+    switch (metricKey) {
+      case 'delta_alignment':
+        return `Δ ${delta.toFixed(3)}`;
+      case 'iv_value':
+        return `IV ${(iv * 100).toFixed(1)}%`;
+      case 'theta_efficiency':
+        if (!prem) return '—';
+        return `θ $${thetaPD.toFixed(2)}/day · ${runway}d runway`;
+      case 'reward_risk':
+        if (!prem) return '—';
+        return `(Δ ${delta.toFixed(3)} × 100) / ${prem.toFixed(2)} = ${(delta * 100 / prem).toFixed(2)}`;
+      case 'liquidity':
+        return `vol ${vol.toLocaleString()} · OI ${oi.toLocaleString()}`;
+      default:
+        return '—';
+    }
+  }
+
+  // Vertical spreads
   const prob  = trade.prob_of_profit ?? 0;
   const maxP  = ((trade.max_profit  ?? 0) * 100);
   const maxL  = ((trade.max_loss    ?? Math.abs(trade.net_debit ?? 0)) * 100);
@@ -228,7 +259,7 @@ function getSignals(strategyKey, trade, smaData) {
   }
 
   // 4. Composite score
-  const scorePct = Math.round((trade.composite_score ?? 0) * 100);
+  const scorePct = trade.composite_score ?? 0;
   signals.push({
     label: `Composite score ${scorePct} / 100`,
     status: scorePct >= 70 ? 'green' : scorePct >= 40 ? 'amber' : 'red',
@@ -285,7 +316,7 @@ function ScoreBreakdownCol({ trade, config }) {
 // ─── Column 2: Actual Calculation ─────────────────────────────────────────────
 function ActualCalcCol({ trade, config }) {
   const metrics = config.scoreMetrics || [];
-  const total   = metrics.reduce((sum, m) => sum + (trade[m.field] ?? 0) * (m.weightPct / 100), 0);
+  const total   = metrics.reduce((sum, m) => sum + (trade[m.field] ?? 0) * m.weightPct, 0);
 
   return (
     <div style={{ padding: '16px 14px' }}>
@@ -295,7 +326,7 @@ function ActualCalcCol({ trade, config }) {
       {metrics.map((m, i) => {
         const color   = METRIC_COLORS[m.key] || m.color;
         const norm    = Math.max(0, Math.min(1, trade[m.field] ?? 0));
-        const contrib = norm * (m.weightPct / 100);
+        const contrib = norm * m.weightPct;
         return (
           <div key={m.key} style={{ marginBottom: i < metrics.length - 1 ? 10 : 0 }}>
             <div style={{ fontSize: 9, color: MUTED, marginBottom: 2 }}>{m.label}</div>
@@ -318,7 +349,7 @@ function ActualCalcCol({ trade, config }) {
                 <div style={{ height: '100%', width: `${norm * 100}%`, background: color, borderRadius: 1 }} />
               </div>
               <span style={{ fontSize: 9, color, minWidth: 48, textAlign: 'right', fontFamily: 'monospace' }}>
-                {contrib >= 0 ? '+' : ''}{contrib.toFixed(3)}
+                {contrib >= 0 ? '+' : ''}{contrib.toFixed(2)}
               </span>
             </div>
           </div>
@@ -331,13 +362,13 @@ function ActualCalcCol({ trade, config }) {
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
       }}>
         <span style={{ fontSize: 9, color: MUTED }}>
-          composite → {Math.round(total * 100)}
+          composite → {total.toFixed(2)}
         </span>
         <span style={{
           fontSize: 14, fontWeight: 700, fontFamily: 'monospace',
-          color: scoreColor(Math.round(total * 100)),
+          color: scoreColor(total),
         }}>
-          {Math.round(total * 100)}
+          {total.toFixed(2)}
         </span>
       </div>
     </div>
@@ -430,7 +461,7 @@ function StrategyFitCol({ strategies, notApplicable, selectedKey, onSelect, onEv
                   <div style={{ height: 2, background: BG3, borderRadius: 1, marginBottom: 3 }}>
                     <div style={{ height: '100%', width: `${score}%`, background: MUTED, borderRadius: 1 }} />
                   </div>
-                  <div style={{ fontSize: 9, fontStyle: 'italic', color: MUTED }}>requires credit spread structure</div>
+                  <div style={{ fontSize: 9, fontStyle: 'italic', color: MUTED }}>{STRATEGY_CONFIGS[key]?.non_applicable_reason ?? 'not applicable to this trade type'}</div>
                 </div>
               );
             })}
@@ -543,6 +574,9 @@ function VerdictCard({ verdictData, trade, symbol, strategyKey, onFollow, onTake
   const [followUpText,    setFollowUpText]    = useState('');
   const [followUpLoading, setFollowUpLoading] = useState(false);
   const [followUpHistory, setFollowUpHistory] = useState([]);
+  // Ref-based in-flight guard: prevents double-submission from rapid Enter presses
+  // before the followUpLoading state update has propagated.
+  const followUpInFlight = useRef(false);
 
   const verdict = verdictData.verdict || 'WAIT';
   const vc      = VERDICT_COLORS[verdict] || VERDICT_COLORS.WAIT;
@@ -551,40 +585,60 @@ function VerdictCard({ verdictData, trade, symbol, strategyKey, onFollow, onTake
   // Trade reference string
   const isCredit     = trade.net_debit != null && trade.net_debit < 0;
   const credit       = isCredit ? Math.abs(trade.net_debit) : 0;
+  const isLongOpt    = !trade.spread_type && !!trade.option_type;
+  const optSuffix    = isLongOpt ? (trade.option_type === 'put' ? 'P' : 'C') : '';
   const strikeStr    = trade.long_strike && trade.short_strike
     ? `${trade.long_strike}/${trade.short_strike}`
-    : trade.strike ? String(trade.strike) : '';
-  const typeStr      = trade.spread_type?.replace('_', ' ')?.toUpperCase()
-                    || trade.option_type?.toUpperCase()
-                    || '';
-  const tradeRef     = [symbol, typeStr, strikeStr, trade.expiration?.slice(5), credit ? `${credit.toFixed(2)} cr` : '']
+    : trade.strike ? `${trade.strike}${optSuffix}` : '';
+  const typeStr      = isLongOpt
+    ? `Long ${trade.option_type === 'put' ? 'Put' : 'Call'}`
+    : trade.spread_type?.replace('_', ' ')?.toUpperCase() || trade.option_type?.toUpperCase() || '';
+  const debitAmt     = !isCredit ? Math.abs(trade.net_debit ?? trade.premium_dollars ?? 0) : 0;
+  const priceStr     = credit ? `${credit.toFixed(2)} cr` : (debitAmt > 0 ? `${debitAmt.toFixed(2)} debit` : '');
+  const tradeRef     = [symbol, typeStr, strikeStr, trade.expiration?.slice(5), priceStr]
     .filter(Boolean).join(' · ');
   const ts = verdictData.evaluated_at
     ? new Date(verdictData.evaluated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     : '';
 
-  // Exit levels — computed client-side per spec
+  // Exit levels — prefer Claude's underlying-price exit plan (from verdictData),
+  // fall back to client-side estimation if Claude didn't return them.
   const isLongOption = !trade.spread_type && !!trade.option_type;
   const isPut        = trade.spread_type?.includes('put') || trade.option_type === 'put';
   const shortStrike  = trade.short_strike ?? trade.strike ?? 0;
-  const debit        = !isCredit ? Math.abs(trade.net_debit ?? trade.premium_dollars ?? 0) : 0;
-  const takeProfitPx = isLongOption
-    ? (debit > 0 ? (debit * 2).toFixed(2) : '—')
-    : credit ? (credit * 0.5).toFixed(2) : '—';
-  const hardStopPx   = isLongOption
-    ? (debit > 0 ? (debit * 0.5).toFixed(2) : '—')
-    : credit ? (credit * 2.0).toFixed(2) : '—';
-  const warningUndrl = shortStrike ? (shortStrike * (isPut ? 1.0125 : 0.9875)).toFixed(2) : '—';
+  // Client-side fallback values for warning level (underlying-based)
+  const warningFallback = shortStrike ? (shortStrike * (isPut ? 1.0125 : 0.9875)).toFixed(2) : '—';
+  // Use Claude's underlying prices when available; fall back to client-side
+  const takeProfitVal  = verdictData.take_profit  != null ? verdictData.take_profit.toFixed(2)  : '—';
+  const warningLevelVal = verdictData.warning_level != null ? verdictData.warning_level.toFixed(2) : warningFallback;
+  const hardStopVal    = verdictData.hard_stop    != null ? verdictData.hard_stop.toFixed(2)    : '—';
 
   // Pre-screen checks
   const rr    = trade.reward_risk_ratio ?? 0;
   const pop   = trade.prob_of_profit ?? 0;
-  const score = (trade.composite_score ?? 0) * 100;
-  const dte   = trade.dte ?? 0;
+  const score = trade.composite_score ?? 0;
+  // DTE: use trade.dte if > 0, otherwise compute from trade.expiration
+  let dte = trade.dte ?? 0;
+  if (!dte && trade.expiration) {
+    const expStr = trade.expiration;
+    let expDate;
+    if (/^\d{4}-\d{2}-\d{2}/.test(expStr)) {
+      expDate = new Date(expStr + 'T00:00:00');
+    } else if (/^\d{2}-\d{2}-\d{4}/.test(expStr)) {
+      const [m, d, y] = expStr.split('-');
+      expDate = new Date(`${y}-${m}-${d}T00:00:00`);
+    } else if (/^\d{2}\/\d{2}\/\d{4}/.test(expStr)) {
+      const [m, d, y] = expStr.split('/');
+      expDate = new Date(`${y}-${m}-${d}T00:00:00`);
+    }
+    if (expDate && !isNaN(expDate)) {
+      dte = Math.max(0, Math.floor((expDate - new Date()) / (1000 * 60 * 60 * 24)));
+    }
+  }
   const checks = [
     { label: `R:R ${rr.toFixed(2)}`, status: rr >= 1.0 ? 'pass' : rr >= 0.5 ? 'caution' : 'fail' },
-    { label: `PoP ${(pop * 100).toFixed(0)}%`, status: pop >= 0.55 ? 'pass' : pop >= 0.45 ? 'caution' : 'fail' },
-    { label: `Score ${Math.round(score)}`, status: score >= 65 ? 'pass' : score >= 45 ? 'caution' : 'fail' },
+    { label: `PoP ${(pop * 100).toFixed(2)}%`, status: pop >= 0.55 ? 'pass' : pop >= 0.45 ? 'caution' : 'fail' },
+    { label: `Score ${score.toFixed(2)}`, status: score >= 65 ? 'pass' : score >= 45 ? 'caution' : 'fail' },
     { label: `DTE ${dte}`, status: dte >= 7 ? 'pass' : 'caution' },
   ];
 
@@ -596,22 +650,39 @@ function VerdictCard({ verdictData, trade, symbol, strategyKey, onFollow, onTake
 
   const handleFollowUp = async () => {
     const q = followUpText.trim();
-    if (!q || followUpLoading) return;
+    // Ref check prevents double-submission before React state update propagates
+    if (!q || followUpLoading || followUpInFlight.current) return;
+    followUpInFlight.current = true;
     setFollowUpText('');
     setFollowUpLoading(true);
+
+    // Build spread_label: vertical spreads have spread_type but not spread_label.
+    // The backend FollowUpRequest requires spread_label as a non-optional string.
+    const spreadLabel = trade.spread_label
+      || trade.label
+      || [
+          (trade.spread_type || trade.option_type || 'option').replace(/_/g, ' '),
+          trade.long_strike && trade.short_strike
+            ? `${trade.long_strike}/${trade.short_strike}`
+            : (trade.strike != null ? String(trade.strike) : ''),
+        ].filter(Boolean).join(' ')
+      || 'trade';
+
     try {
       const res = await followupTrade(
-        { ...trade, symbol },
+        { ...trade, symbol, spread_label: spreadLabel },
         verdict,
         verdictData.claude_read || '',
         q,
         null,
       );
-      setFollowUpHistory(prev => [...prev, { question: q, answer: res.answer || 'No response received.' }]);
+      // Backend returns { response: "..." } — not "answer"
+      setFollowUpHistory(prev => [...prev, { question: q, answer: res.response || 'No response received.' }]);
     } catch {
       setFollowUpHistory(prev => [...prev, { question: q, answer: 'Follow-up failed — please try again.' }]);
     } finally {
       setFollowUpLoading(false);
+      followUpInFlight.current = false;
     }
   };
 
@@ -660,7 +731,7 @@ function VerdictCard({ verdictData, trade, symbol, strategyKey, onFollow, onTake
           <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.6px', color: MUTED, marginBottom: 8 }}>
             Claude's Read
           </div>
-          <div style={{ fontSize: 10, fontStyle: 'italic', color: '#c9d1d9', lineHeight: 1.65 }}>
+          <div style={{ fontSize: 10, color: '#c9d1d9', lineHeight: 1.65 }}>
             {verdictData.claude_read || 'No evaluation text available.'}
           </div>
           {verdictData.key_risks?.length > 0 && (
@@ -674,7 +745,7 @@ function VerdictCard({ verdictData, trade, symbol, strategyKey, onFollow, onTake
           {followUpHistory.map((entry, i) => (
             <div key={i} style={{ marginTop: 10, paddingTop: 8, borderTop: `1px solid ${BORD}` }}>
               <div style={{ fontSize: 9, color: DIM, marginBottom: 3 }}>Q: {entry.question}</div>
-              <div style={{ fontSize: 10, color: '#c9d1d9', lineHeight: 1.6, fontStyle: 'italic' }}>
+              <div style={{ fontSize: 10, color: '#c9d1d9', lineHeight: 1.6 }}>
                 {entry.answer}
               </div>
             </div>
@@ -687,9 +758,9 @@ function VerdictCard({ verdictData, trade, symbol, strategyKey, onFollow, onTake
             Exit Plan
           </div>
           {[
-            { label: 'TAKE PROFIT',   sub: isLongOption ? '100% gain (2× premium paid)' : '50% of credit received',   value: takeProfitPx, color: GREEN },
-            { label: 'WARNING LEVEL', sub: '1.25% from strike (underlying)',                                            value: warningUndrl, color: AMBER },
-            { label: 'HARD STOP',     sub: isLongOption ? '50% of premium paid' : '2× credit received',               value: hardStopPx,   color: RED   },
+            { label: 'TAKE PROFIT',   sub: 'underlying price — full profit exit',  value: takeProfitVal,   color: GREEN },
+            { label: 'WARNING LEVEL', sub: 'underlying price — early warning',      value: warningLevelVal, color: AMBER },
+            { label: 'HARD STOP',     sub: 'underlying price — cut the loss',       value: hardStopVal,     color: RED   },
           ].map((row, i, arr) => (
             <div key={row.label} style={{
               display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',

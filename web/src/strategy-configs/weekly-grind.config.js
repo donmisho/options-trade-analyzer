@@ -15,6 +15,7 @@ const config = {
   // ── Strategy classification ────────────────────────────────────────────
   scorecardStrategy: true,
   trade_structure: 'credit_spread',
+  non_applicable_reason: 'requires credit spread structure',
   dte_min: 5,
   dte_max: 16,
 

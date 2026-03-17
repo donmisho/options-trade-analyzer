@@ -154,8 +154,8 @@ web/src/
 │   ├── trend-rider.config.js            # [NEW 2.9]
 │   └── lottery-ticket.config.js         # [NEW 2.9]
 ├── components/
-│   ├── Layout.jsx
-│   ├── Header.jsx
+│   ├── Layout.jsx                           # Left rail + watchlist toggle + Outlet
+│   ├── Header.jsx                           # RETIRED — replaced by Layout.jsx left rail
 │   ├── Watchlist.jsx
 │   ├── QuoteBar.jsx
 │   ├── ConfigDrawer.jsx                 # [UPDATED 2.9] Strategy-aware config schema
@@ -265,8 +265,8 @@ Every AI agent invocation writes one row. Never deleted.
 ## Key API Endpoints (New/Updated)
 
 ### Phase 2.9 — Strategy Scoring
-- `POST /api/v1/analysis/scorecard` — runs all strategies for a symbol, returns 0-100 per strategy
-- `POST /api/v1/analysis/probability-matrix` — Black-Scholes matrix for a trade
+- `POST /api/v1/analyze/scorecard` — runs all strategies for a symbol, returns 0-100 per strategy
+- `POST /api/v1/analyze/probability-matrix` — Black-Scholes matrix for a trade
 
 ### Phase 2.11 — Structured Evaluation
 - `POST /api/v1/evaluate/structured` — Claude deep dive, returns structured cards
@@ -295,7 +295,7 @@ Every AI agent invocation writes one row. Never deleted.
 1. Create `web/src/strategy-configs/your-strategy.config.js` with full config schema
 2. Register in `strategy-configs/index.js`
 3. Add scoring logic to `app/analysis/strategy_scorer.py`
-4. Tab appears in Header, terminal and scorecard render it automatically
+4. Strategy scores appear in the scorecard panel and OptionsTerminal renders it automatically
 
 ### Adding a New Signal Source (Phase 3.5+)
 

@@ -82,7 +82,7 @@ export default function FavoritesTab({ favorites, trades, candles, smaPeriods, o
             <span style={{ color: C.text, fontSize: 11, fontFamily: mono, minWidth: 40 }}>{t.reward_risk_ratio.toFixed(2)}</span>
             <span style={{ color: C.text, fontSize: 11, fontFamily: mono, minWidth: 35 }}>{(t.prob_of_profit * 100).toFixed(0)}%</span>
             <div style={{ flex: 1 }} />
-            <span style={{ fontSize: 12, fontWeight: 700, fontFamily: mono, color: t.composite_score > 0.7 ? C.green : t.composite_score > 0.5 ? C.amber : C.red }}>{t.composite_score.toFixed(2)}</span>
+            <span style={{ fontSize: 12, fontWeight: 700, fontFamily: mono, color: t.composite_score > 70 ? C.green : t.composite_score > 50 ? C.amber : C.red }}>{t.composite_score.toFixed(2)}</span>
             <button onClick={() => onEvaluate(t)} style={{ padding: "4px 10px", borderRadius: 5, border: `1px solid ${C.claudeBorder}`, backgroundColor: C.claudeDim, color: C.claudeAccent, fontSize: 10, fontWeight: 600, cursor: "pointer" }}>✦ Evaluate</button>
           </div>
         ))}
