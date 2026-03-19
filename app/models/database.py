@@ -621,6 +621,34 @@ class Insight(Base):
 # ─── Position Tracking ────────────────────────────────────────────────────────
 
 
+class ValidationAssessment(Base):
+    """
+    One row per trade assessed during a structured validation run.
+
+    Tracks human agreement with Claude/engine verdicts to establish
+    baseline agreement rates across Jira milestones.
+    """
+    __tablename__ = "validation_assessments"
+
+    assessment_id   = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    assessment_date = Column(DateTime, nullable=False)
+    jira_ticket     = Column(String(20), nullable=False)
+    ticker          = Column(String(20), nullable=False)
+    tab             = Column(String(20), nullable=False)   # 'VERTICALS' | 'PUTS_AND_CALLS'
+    strike          = Column(String(20), nullable=False)
+    expiration      = Column(String(20), nullable=False)
+    score           = Column(Numeric(5, 2), nullable=False)
+    verdict         = Column(String(20), nullable=False)   # 'EXECUTE' | 'WATCH' | 'PASS'
+    agreement       = Column(Boolean, nullable=False)      # True = agree, False = disagree
+    notes           = Column(String(500), nullable=True)
+    created_at      = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_validation_assessments_ticket", "jira_ticket"),
+        Index("ix_validation_assessments_ticker", "ticker"),
+    )
+
+
 class Position(Base):
     """
     A tracked options position, paper or live.

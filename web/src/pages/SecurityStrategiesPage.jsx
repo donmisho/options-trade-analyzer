@@ -176,6 +176,7 @@ export default function SecurityStrategiesPage() {
   const [evalError,      setEvalError]      = useState(null);
   const [evaluations,    setEvaluations]    = useState([]);
   const [lastAnalyzed,   setLastAnalyzed]   = useState(null);
+  const [chartRange,     setChartRange]     = useState(90);
   const [chartStartDate, setChartStartDate] = useState(() => tradingDaysAgo(90));
   const chartStartDateRef = useRef(chartStartDate);
 
@@ -383,7 +384,7 @@ export default function SecurityStrategiesPage() {
           <input
             value={inputSymbol}
             onChange={e => setInputSymbol(e.target.value.toUpperCase())}
-            placeholder="Enter symbol…"
+            placeholder="Enter a symbol"
             style={{
               flex: 1, maxWidth: 220, padding: '6px 10px', borderRadius: 6,
               border: `1px solid ${C.border}`, backgroundColor: C.surface,
@@ -453,22 +454,24 @@ export default function SecurityStrategiesPage() {
               marginTop: 10, marginBottom: 6, textAlign: 'center',
               borderTop: `1px solid ${C.border}`, paddingTop: 8,
             }}>
-              Chart Start Date
+              Chart Range
             </div>
-            <input
-              type="date"
-              value={chartStartDate}
-              max={new Date().toISOString().slice(0, 10)}
-              onChange={e => e.target.value && setChartStartDate(e.target.value)}
-              style={{
-                width: '100%', boxSizing: 'border-box',
-                backgroundColor: C.bg, border: `1px solid ${C.border}`,
-                borderRadius: 4, color: C.textDim, fontSize: 10,
-                padding: '3px 4px', fontFamily: mono,
-                outline: 'none', cursor: 'pointer',
-                colorScheme: 'dark',
-              }}
-            />
+            {[30, 90, 180].map(n => (
+              <button
+                key={n}
+                onClick={() => { setChartRange(n); setChartStartDate(tradingDaysAgo(n)); }}
+                style={{
+                  display: 'block', width: '100%', marginBottom: 4,
+                  padding: '3px 0', borderRadius: 4, fontSize: 10,
+                  fontFamily: mono, cursor: 'pointer',
+                  border: `1px solid ${chartRange === n ? C.accent : C.border}`,
+                  background: chartRange === n ? C.accent + '20' : 'none',
+                  color: chartRange === n ? C.accent : C.textDim,
+                }}
+              >
+                {n}d
+              </button>
+            ))}
           </div>
 
           <ResponsiveContainer width="100%" height={215}>

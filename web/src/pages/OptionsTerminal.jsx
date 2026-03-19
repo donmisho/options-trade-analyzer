@@ -307,10 +307,8 @@ export default function OptionsTerminal({ activeStrategy }) {
   const [loading,        setLoading]        = useState(false);
   const [error,          setError]          = useState(null);
   const [lastAnalyzed,   setLastAnalyzed]   = useState(null);
-  const [chartStartDate, setChartStartDate] = useState(() => {
-    const saved = sessionStorage.getItem('chartStartDate');
-    return saved || tradingDaysAgo(90);
-  });
+  const [chartRange,     setChartRange]     = useState(90);
+  const [chartStartDate, setChartStartDate] = useState(() => tradingDaysAgo(90));
   const chartStartDateRef = useRef(chartStartDate);
   const [selectedId,   setSelectedId]   = useState(null);
   const [configOpen,   setConfigOpen]   = useState(false);
@@ -663,7 +661,7 @@ export default function OptionsTerminal({ activeStrategy }) {
           <input
             value={inputSymbol}
             onChange={e => setInputSymbol(e.target.value.toUpperCase())}
-            placeholder="Enter symbol…"
+            placeholder="Enter a symbol"
             style={{
               flex: 1, maxWidth: 220, padding: '6px 10px', borderRadius: 6,
               border: `1px solid ${BORDER}`, backgroundColor: SURFACE,
@@ -736,34 +734,31 @@ export default function OptionsTerminal({ activeStrategy }) {
                 </div>
               ))}
 
-              {/* Chart start date section */}
+              {/* Chart range section */}
               <div style={{
                 fontSize: 8, fontWeight: 700, color: MUTED,
                 letterSpacing: '0.07em', textTransform: 'uppercase',
                 marginTop: 10, marginBottom: 6, textAlign: 'center',
                 borderTop: `1px solid ${BORDER}`, paddingTop: 8,
               }}>
-                Chart Start Date
+                Chart Range
               </div>
-              <input
-                type="date"
-                value={chartStartDate}
-                max={new Date().toISOString().slice(0, 10)}
-                onChange={e => {
-                  if (e.target.value) {
-                    setChartStartDate(e.target.value);
-                    sessionStorage.setItem('chartStartDate', e.target.value);
-                  }
-                }}
-                style={{
-                  width: '100%', boxSizing: 'border-box',
-                  backgroundColor: C.bg, border: `1px solid ${BORDER}`,
-                  borderRadius: 4, color: DIM, fontSize: 10,
-                  padding: '3px 4px', fontFamily: mono,
-                  outline: 'none', cursor: 'pointer',
-                  colorScheme: 'dark',
-                }}
-              />
+              {[30, 90, 180].map(n => (
+                <button
+                  key={n}
+                  onClick={() => { setChartRange(n); setChartStartDate(tradingDaysAgo(n)); }}
+                  style={{
+                    display: 'block', width: '100%', marginBottom: 4,
+                    padding: '3px 0', borderRadius: 4, fontSize: 10,
+                    fontFamily: mono, cursor: 'pointer',
+                    border: `1px solid ${chartRange === n ? C.accent : BORDER}`,
+                    background: chartRange === n ? C.accent + '20' : 'none',
+                    color: chartRange === n ? C.accent : DIM,
+                  }}
+                >
+                  {n}d
+                </button>
+              ))}
             </div>
 
           <ResponsiveContainer width="100%" height={215}>

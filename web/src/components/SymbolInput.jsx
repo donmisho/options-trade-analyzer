@@ -57,7 +57,7 @@ export default function SymbolInput() {
         value={value}
         onChange={(e) => setValue(e.target.value.toUpperCase())}
         onKeyDown={handleKeyDown}
-        placeholder="Symbol"
+        placeholder="Enter a symbol"
         maxLength={10}
         spellCheck={false}
         autoComplete="off"

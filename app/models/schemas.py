@@ -427,6 +427,31 @@ class DeviationResult(BaseModel):
     description: str = ""                   # human-readable, included in Claude prompt
 
 
+# ============================================================
+# Validation Assessment Schemas (OTA-149)
+# ============================================================
+
+class ValidationAssessmentCreate(BaseModel):
+    assessment_date: datetime
+    jira_ticket: str
+    ticker: str
+    tab: str          # 'VERTICALS' | 'PUTS_AND_CALLS'
+    strike: str
+    expiration: str   # mm-dd-yyyy
+    score: float
+    verdict: str      # 'EXECUTE' | 'WATCH' | 'PASS'
+    agreement: bool
+    notes: Optional[str] = None
+
+
+class ValidationAssessmentOut(ValidationAssessmentCreate):
+    assessment_id: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 class InsightResponse(BaseModel):
     """Insight returned to the frontend."""
     insight_id: str
