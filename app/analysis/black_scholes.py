@@ -1,7 +1,7 @@
 import math
 from dataclasses import dataclass
 from datetime import date, timedelta
-from typing import List
+from typing import List, Dict
 
 from scipy.stats import norm
 
@@ -93,3 +93,71 @@ def compute_probability_matrix(
         dates=snapshot_dates,
         matrix=matrix,
     )
+
+
+# ─── Phase 2.9 — CDF-based probability functions for the A2 scorer ───────────
+
+def black_scholes_probability(
+    S: float,       # current underlying price
+    K: float,       # target price level
+    T: float,       # time to expiry in years
+    r: float,       # risk-free rate (e.g. 0.05)
+    sigma: float    # implied volatility as decimal (e.g. 0.30)
+) -> float:
+    """
+    Probability that price >= K at time T using log-normal distribution.
+    Returns float between 0.0 and 1.0.
+    """
+    if T <= 0 or sigma <= 0:
+        return 1.0 if S >= K else 0.0
+    d2 = (math.log(S / K) + (r - 0.5 * sigma ** 2) * T) / (sigma * math.sqrt(T))
+    return float(norm.cdf(d2))
+
+
+def build_probability_matrix(
+    current_price: float,
+    iv: float,              # decimal e.g. 0.30
+    dte: int,               # days to expiry
+    risk_free_rate: float = 0.05,
+    price_range_pct: float = 0.10,   # +/- 10%
+    price_step: float = 10.0         # $10 steps
+) -> Dict:
+    """
+    Build a probability matrix showing P(price >= level) at 4 time slices.
+    Returns dict matching the schema expected by Claude's evaluation prompt.
+    """
+    T_full = dte / 365.0
+
+    # Price levels: current_price +/- price_range_pct, in price_step increments
+    low = current_price * (1 - price_range_pct)
+    high = current_price * (1 + price_range_pct)
+    levels = []
+    level = math.floor(low / price_step) * price_step
+    while level <= high:
+        levels.append(round(level, 2))
+        level += price_step
+
+    # Time slices: expiry, expiry-3, expiry-6, expiry-9
+    time_slices = {
+        "expiry": T_full,
+        "expiry_minus_3": max((dte - 3) / 365.0, 0.001),
+        "expiry_minus_6": max((dte - 6) / 365.0, 0.001),
+        "expiry_minus_9": max((dte - 9) / 365.0, 0.001),
+    }
+
+    matrix = {}
+    for slice_name, T in time_slices.items():
+        matrix[slice_name] = {
+            str(level): round(black_scholes_probability(
+                current_price, level, T, risk_free_rate, iv
+            ), 4)
+            for level in levels
+        }
+
+    return {
+        "current_price": current_price,
+        "iv": iv,
+        "dte": dte,
+        "price_levels": levels,
+        "probabilities": matrix,
+    }

@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Optional
 
 
 @dataclass
@@ -23,7 +23,16 @@ class StrategyDefinition:
     dte_min: int
     dte_max: int
     scoring_weights: dict   # metric_name → weight (must sum to 1.0)
-    config_schema: List[ConfigField]
+    config_schema: List[ConfigField] = field(default_factory=list)
+    # Extended fields used by STRATEGY_DEFINITIONS (Phase 2.9 scorer)
+    name: Optional[str] = None          # same as label; preferred by A2 scorer
+    delta_min: float = 0.0
+    delta_max: float = 1.0
+    iv_rank_min: float = 0.0            # 0.0–1.0 decimal
+    credit_pct_min: float = 0.0         # min credit as % of spread width
+    credit_pct_max: float = 1.0         # max credit as % of spread width
+    exit_profit_pct: float = 0.50       # take profit target as % of max profit
+    exit_loss_multiplier: float = 2.0   # stop loss as multiple of credit received
 
 
 STRATEGIES = {
@@ -114,5 +123,105 @@ STRATEGIES = {
             ConfigField('min_payout_ratio', 'Min Payout Ratio', 'slider', 3, 15, 5, 0.5, ':1'),
             ConfigField('max_cost_per_contract', 'Max Cost/Contract', 'number', 10, 500, 100, 10, '$'),
         ]
+    ),
+}
+
+
+# ─── Phase 2.9 — Richer strategy definitions used by the A2 scorer ───────────
+# These instances carry the full parameter set (delta ranges, iv_rank gates,
+# exit rules, scoring weights) that the strategy scoring engine needs.
+# strategy_scorer.py continues to use STRATEGIES above; this dict is consumed
+# by the new strategy_scorer_v2 and Claude evaluation prompts.
+
+STRATEGY_DEFINITIONS = {
+    "steady-paycheck": StrategyDefinition(
+        key="steady-paycheck",
+        name="Steady Paycheck",
+        label="Steady Paycheck",
+        description="30-45 DTE credit spreads, high IV rank, income focus",
+        trade_structure="credit_spread",
+        dte_min=30,
+        dte_max=45,
+        delta_min=0.20,
+        delta_max=0.30,
+        iv_rank_min=0.40,
+        credit_pct_min=0.30,
+        credit_pct_max=1.0,
+        exit_profit_pct=0.50,
+        exit_loss_multiplier=2.0,
+        scoring_weights={
+            "theta_margin_ratio": 0.30,
+            "iv_rank": 0.20,
+            "probability_of_profit": 0.25,
+            "credit_pct_of_width": 0.15,
+            "dte_fit": 0.10,
+        },
+    ),
+    "weekly-grind": StrategyDefinition(
+        key="weekly-grind",
+        name="Weekly Grind",
+        label="Weekly Grind",
+        description="7-14 DTE credit spreads, Theta/Gamma efficiency focus",
+        trade_structure="credit_spread",
+        dte_min=7,
+        dte_max=14,
+        delta_min=0.20,
+        delta_max=0.25,
+        iv_rank_min=0.30,
+        credit_pct_min=0.30,
+        credit_pct_max=1.0,
+        exit_profit_pct=0.50,
+        exit_loss_multiplier=2.0,
+        scoring_weights={
+            "theta_gamma_ratio": 0.35,
+            "credit_pct_of_width": 0.25,
+            "probability_of_profit": 0.20,
+            "iv_rank": 0.10,
+            "dte_fit": 0.10,
+        },
+    ),
+    "trend-rider": StrategyDefinition(
+        key="trend-rider",
+        name="Trend Rider",
+        label="Trend Rider",
+        description="30-60 DTE long calls on strong SMA-aligned stocks",
+        trade_structure="long_option",
+        dte_min=30,
+        dte_max=60,
+        delta_min=0.50,
+        delta_max=0.70,
+        iv_rank_min=0.0,
+        credit_pct_min=0.0,
+        credit_pct_max=0.40,
+        exit_profit_pct=0.75,
+        exit_loss_multiplier=1.0,
+        scoring_weights={
+            "delta_fit": 0.25,
+            "sma_alignment": 0.35,
+            "dte_fit": 0.20,
+            "iv_rank_inverse": 0.20,
+        },
+    ),
+    "lottery-ticket": StrategyDefinition(
+        key="lottery-ticket",
+        name="Lottery Ticket",
+        label="Lottery Ticket",
+        description="1-7 DTE deep OTM, asymmetric payout, catalyst required",
+        trade_structure="long_option",
+        dte_min=1,
+        dte_max=7,
+        delta_min=0.05,
+        delta_max=0.15,
+        iv_rank_min=0.0,
+        credit_pct_min=0.0,
+        credit_pct_max=0.40,
+        exit_profit_pct=0.80,
+        exit_loss_multiplier=1.0,
+        scoring_weights={
+            "payout_ratio": 0.45,
+            "delta_fit": 0.25,
+            "dte_fit": 0.20,
+            "cost_pct_of_max": 0.10,
+        },
     ),
 }

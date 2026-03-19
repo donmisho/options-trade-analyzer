@@ -37,6 +37,30 @@ from app.ai.prompts import TRADE_EVALUATION_SYSTEM_PROMPT, FOLLOW_UP_SYSTEM_PROM
 logger = logging.getLogger(__name__)
 
 
+def _build_json_schema(model_class) -> dict:
+    """
+    Convert a Pydantic model to a strict JSON schema for Anthropic structured outputs.
+
+    Adds additionalProperties: false and all properties in required at every
+    object level, as required by the Anthropic structured output API.
+    """
+    schema = model_class.model_json_schema()
+
+    def _enforce_strict(s):
+        if s.get("type") == "object" and "properties" in s:
+            s["additionalProperties"] = False
+            s["required"] = list(s["properties"].keys())
+            for prop in s["properties"].values():
+                _enforce_strict(prop)
+        if s.get("type") == "array" and "items" in s:
+            _enforce_strict(s["items"])
+        for def_schema in s.get("$defs", {}).values():
+            _enforce_strict(def_schema)
+        return s
+
+    return _enforce_strict(schema)
+
+
 def _extract_json(text: str) -> str:
     """
     Extract the JSON object from Claude's response text.

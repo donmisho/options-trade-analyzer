@@ -24,39 +24,6 @@ import TradeEvaluationCard from '../components/TradeEvaluationCard';
 import ConfigDrawer from '../components/ConfigDrawer';
 import { C, mono } from '../styles/tokens';
 
-// Sample data shown before the first live scorecard loads.
-// Scores here are intentionally spread to illustrate the range (not all high).
-const MOCK_SCORES = [
-  {
-    key: 'steady-paycheck',
-    label: 'Steady Paycheck',
-    score: 84,
-    best_trade: 'Sample — connect Schwab for live data',
-    signal_summary: '30-45 DTE credit spreads. Sample data only.',
-  },
-  {
-    key: 'weekly-grind',
-    label: 'Weekly Grind',
-    score: 71,
-    best_trade: 'Sample — connect Schwab for live data',
-    signal_summary: '7-14 DTE. Theta/Gamma ratio focus. Sample data only.',
-  },
-  {
-    key: 'trend-rider',
-    label: 'Trend Rider',
-    score: 91,
-    best_trade: 'Sample — connect Schwab for live data',
-    signal_summary: 'SMA-aligned long calls. Sample data only.',
-  },
-  {
-    key: 'lottery-ticket',
-    label: 'Lottery Ticket',
-    score: 23,
-    best_trade: 'Sample — connect Schwab for live data',
-    signal_summary: 'Deep OTM. Payout ratio below minimum. Sample data only.',
-  },
-];
-
 // ── Skeleton card shown while evaluation is loading ───────────────────────────
 function EvalSkeleton({ label }) {
   return (
@@ -164,7 +131,7 @@ export default function SecurityDashboard() {
   }, [fetchScorecard]);
 
   // ConfigDrawer: show the first selected strategy's config, or first in the list
-  const activeStrategyKey = selectedKeys[0] || scores?.[0]?.key || MOCK_SCORES[0].key;
+  const activeStrategyKey = selectedKeys[0] || scores?.[0]?.key || 'steady-paycheck';
   const activeStrategyCfg = STRATEGY_CONFIGS[activeStrategyKey];
   const hasConfigSchema = !!(activeStrategyCfg?.configSchema?.length);
 
@@ -209,9 +176,7 @@ export default function SecurityDashboard() {
     fetchScorecard(overrides);
   }, [fetchScorecard]);
 
-  // Display: use real scores if loaded, otherwise mock data as preview
-  const displayScores = scores || MOCK_SCORES;
-  const usingMockData = !scores && !loading;
+  const displayScores = scores || [];
 
   // SMA signal for QuoteBar
   const smaAlignment = smaSignal?.alignment;
@@ -297,21 +262,6 @@ export default function SecurityDashboard() {
             )}
           </div>
         </div>
-
-        {/* Mock data notice */}
-        {usingMockData && !error && (
-          <div style={{
-            marginBottom: 12,
-            padding: '7px 12px',
-            borderRadius: 6,
-            border: `1px solid ${C.border}`,
-            backgroundColor: C.surfaceAlt,
-            color: C.textDim,
-            fontSize: 11,
-          }}>
-            Showing sample data — connect Schwab and click &#8627; for live scores
-          </div>
-        )}
 
         {/* Error banner */}
         {error && !loading && (
@@ -430,7 +380,7 @@ export default function SecurityDashboard() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               {selectedKeys.map(k => (
                 <EvalSkeleton key={k} label={
-                  (scores || MOCK_SCORES).find(s => (s.strategy_key ?? s.key) === k)?.label ?? k
+                  scores?.find(s => (s.strategy_key ?? s.key) === k)?.label ?? k
                 } />
               ))}
             </div>
@@ -440,8 +390,7 @@ export default function SecurityDashboard() {
           {!evalLoading && evaluations.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               {evaluations.map(card => {
-                const currentScores = scores || MOCK_SCORES;
-                const matchingScore = currentScores.find(
+                const matchingScore = scores?.find(
                   s => (s.strategy_key ?? s.key) === card.strategy_key
                 );
                 const smaForCard = smaSignal

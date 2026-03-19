@@ -543,24 +543,11 @@ async def get_strategy_scorecard(
     factory = _get_factory()
     provider = factory.get_market_data(settings.default_market_data_provider, user_id=user.get("sub"))
 
-    scores = await score_all_strategies(
+    scores, underlying_price = await score_all_strategies(
         symbol=sym,
         provider=provider,
         user_config=req.user_config,
     )
-
-    # Resolve underlying_price from first score's best_trade, or 0
-    underlying_price = 0.0
-    for s in scores:
-        if s.best_trade:
-            # best_trade is a spread or option dict — try common price fields
-            underlying_price = (
-                s.best_trade.get("underlying_price") or
-                s.best_trade.get("current_price") or
-                0.0
-            )
-            if underlying_price:
-                break
 
     return ScorecardResponse(
         symbol=sym,

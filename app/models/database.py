@@ -649,6 +649,28 @@ class ValidationAssessment(Base):
     )
 
 
+class StrategyConfig(Base):
+    """
+    Per-user overrides to strategy defaults (Phase 2.9).
+
+    Stores user-customised parameters for each strategy as a JSON blob.
+    The canonical defaults live in strategy_definitions.STRATEGY_DEFINITIONS;
+    this table holds only the deltas the user has chosen to change.
+    """
+    __tablename__ = "strategy_configs"
+
+    config_id    = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id      = Column(String(36), nullable=False)
+    strategy_key = Column(String(50), nullable=False)   # 'steady-paycheck' etc.
+    config_json  = Column(Text, nullable=False)          # JSON: user overrides to defaults
+    created_at   = Column(DateTime, default=datetime.utcnow)
+    updated_at   = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_strategy_configs_user_key", "user_id", "strategy_key"),
+    )
+
+
 class Position(Base):
     """
     A tracked options position, paper or live.

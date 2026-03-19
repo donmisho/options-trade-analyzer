@@ -455,7 +455,7 @@ async def score_all_strategies(
                 metric_scores={},
             )
             for k, s in STRATEGIES.items()
-        ]
+        ], 0.0
 
     contracts = chain_data.get("contracts", [])
     underlying_price = chain_data.get("underlying_price", 0)
@@ -471,7 +471,7 @@ async def score_all_strategies(
                 metric_scores={},
             )
             for k, s in STRATEGIES.items()
-        ]
+        ], 0.0
 
     # ATM IV estimate from chain — used as iv_rank proxy for credit strategies
     atm_iv = _get_atm_iv(contracts, underlying_price)
@@ -492,4 +492,4 @@ async def score_all_strategies(
         ),
     ]
 
-    return scores
+    return scores, underlying_price

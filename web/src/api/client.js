@@ -212,6 +212,9 @@ export async function getStrategyScorecard(symbol, userConfig = null) {
   });
 }
 
+/** Alias for getStrategyScorecard — used by SecurityDashboard Task 1 spec. */
+export const runScorecard = getStrategyScorecard;
+
 /**
  * Compute Black-Scholes probability matrix for a trade.
  * Returns { price_levels, dates, matrix }
@@ -222,6 +225,9 @@ export async function getProbabilityMatrix({ symbol, current_price, iv, dte }) {
     body: JSON.stringify({ symbol, current_price, iv, dte }),
   });
 }
+
+/** Alias for getProbabilityMatrix — used by SecurityDashboard Task 1 spec. */
+export const computeProbabilityMatrix = getProbabilityMatrix;
 
 /**
  * Run structured Claude evaluation for one or more strategies.
