@@ -14,6 +14,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useApp } from '../context/AppContext';
 import { getQuote } from '../api/client';
+import { formatDate } from '../utils/formatDate';
 import './QuoteBar.css';
 
 function daysUntil(dateStr) {
@@ -26,23 +27,12 @@ function daysUntil(dateStr) {
 }
 
 function fmtDateShort(dateStr) {
-  if (!dateStr) return null;
-  const d = new Date(dateStr);
-  if (isNaN(d)) return null;
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${mm}/${dd}`;
+  return formatDate(dateStr);
 }
 
 function fmtLastAnalyzed(val) {
   if (!val) return null;
-  const d = val instanceof Date ? val : new Date(val);
-  if (isNaN(d)) return null;
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  const hh = String(d.getHours()).padStart(2, '0');
-  const min = String(d.getMinutes()).padStart(2, '0');
-  return `${mm}/${dd} ${hh}:${min}`;
+  return formatDate(val, true);
 }
 
 function fmtVol(n) {

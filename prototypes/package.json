@@ -1,0 +1,18 @@
+{
+  "name": "ota-prototype",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 5199 --open"
+  },
+  "dependencies": {
+    "react": "^18",
+    "react-dom": "^18",
+    "recharts": "^2",
+    "lucide-react": "^0.400.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4",
+    "vite": "^5"
+  }
+}

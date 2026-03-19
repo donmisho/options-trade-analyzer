@@ -19,9 +19,11 @@
  */
 
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { followTrade, takeTrade } from '../api/client';
 import { C, mono } from '../styles/tokens';
 import ProbabilityMatrix from './ProbabilityMatrix';
+import { useToast } from './Toast';
 
 // ─── Verdict config ───────────────────────────────────────────────────────────
 
@@ -37,6 +39,61 @@ function scoreColor(score) {
   if (score >= 65) return C.green;
   if (score >= 35) return C.amber;
   return C.red;
+}
+
+// ─── DTE Warning Banner ───────────────────────────────────────────────────────
+
+function DTEWarningBanner({ warning }) {
+  if (!warning) return null;
+  return (
+    <div style={{
+      margin: '0 16px',
+      padding: '8px 12px',
+      backgroundColor: C.amber + '18',
+      border: `1px solid ${C.amber}50`,
+      borderRadius: 6,
+      display: 'flex',
+      alignItems: 'flex-start',
+      gap: 8,
+      fontSize: 12,
+      color: C.amber,
+    }}>
+      <span style={{ flexShrink: 0, fontSize: 14 }}>⚠</span>
+      <span style={{ lineHeight: 1.5 }}>{warning}</span>
+    </div>
+  );
+}
+
+// ─── Pre-Screen Checks section ────────────────────────────────────────────────
+
+function PreScreenSection({ card }) {
+  const { credit_pct_of_width, debit_pct_of_width } = card;
+  if (credit_pct_of_width == null && debit_pct_of_width == null) return null;
+
+  const isCredit = credit_pct_of_width != null;
+  const pct = isCredit ? credit_pct_of_width : debit_pct_of_width;
+  const pctDisplay = (pct * 100).toFixed(1);
+
+  let qualityColor;
+  if (isCredit) {
+    qualityColor = pct >= 0.30 ? C.green : pct >= 0.25 ? C.amber : C.red;
+  } else {
+    qualityColor = pct <= 0.35 ? C.green : pct <= 0.40 ? C.amber : C.red;
+  }
+
+  return (
+    <Section>
+      <SectionLabel>Pre-Screen Checks</SectionLabel>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12 }}>
+        <span style={{ color: C.textDim }}>
+          {isCredit ? 'Credit Quality' : 'Debit Quality'}
+        </span>
+        <span style={{ color: qualityColor, fontFamily: mono, fontWeight: 600 }}>
+          {pctDisplay}% of width
+        </span>
+      </div>
+    </Section>
+  );
 }
 
 // ─── Shared section layout ────────────────────────────────────────────────────
@@ -293,9 +350,36 @@ function MatrixSection({ card, currentPrice, tradeData }) {
   );
 }
 
-// ─── Section 4: Claude's Read ─────────────────────────────────────────────────
+// ─── Section 4: Claude's Read (or Auto-Pass Reason) ──────────────────────────
 
 function ClaudeSection({ card }) {
+  if (card.auto_pass_reason) {
+    return (
+      <Section>
+        <SectionLabel>Auto-Pass Reason</SectionLabel>
+        <div style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          gap: 10,
+          padding: '10px 12px',
+          backgroundColor: C.amber + '12',
+          border: `1px solid ${C.amber}40`,
+          borderRadius: 6,
+        }}>
+          <span style={{ fontSize: 15, color: C.amber, flexShrink: 0, lineHeight: 1.6 }}>ℹ</span>
+          <p style={{
+            fontSize: 12.5,
+            color: C.amber,
+            lineHeight: 1.65,
+            margin: 0,
+          }}>
+            {card.auto_pass_reason}
+          </p>
+        </div>
+      </Section>
+    );
+  }
+
   return (
     <Section>
       <SectionLabel>Claude's Read</SectionLabel>
@@ -383,6 +467,8 @@ function BulletList({ items, color }) {
 function ActionBar({ card, symbol, currentPrice, smaData, tradeData, activeStrategy }) {
   const [state, setState] = useState('idle'); // 'idle' | 'loading_follow' | 'loading_take' | 'done_follow' | 'done_take' | 'error'
   const [errorMsg, setErrorMsg] = useState(null);
+  const { showToast } = useToast();
+  const navigate = useNavigate();
 
   const buildPayload = () => {
     // Prefer tradeData for structured fields; fall back to card fields
@@ -425,9 +511,19 @@ function ActionBar({ card, symbol, currentPrice, smaData, tradeData, activeStrat
       if (type === 'follow') {
         await followTrade(payload);
         setState('done_follow');
+        showToast({
+          message: 'Position added to Positions page',
+          actionText: 'View Positions',
+          onAction: () => navigate('/positions'),
+        });
       } else {
         await takeTrade(payload);
         setState('done_take');
+        showToast({
+          message: 'Live position created',
+          actionText: 'View Positions',
+          onAction: () => navigate('/positions'),
+        });
       }
     } catch (err) {
       setErrorMsg(err.message || 'Failed. Try again.');
@@ -500,8 +596,8 @@ function ActionButton({ label, loading, disabled, onClick, color }) {
       onClick={onClick}
       disabled={disabled || loading}
       style={{
-        flex: 1,
-        padding: '10px 0',
+        width: 'auto',
+        padding: '7px 16px',
         borderRadius: 6,
         border: `1px solid ${(disabled || loading) ? C.border : color + '60'}`,
         backgroundColor: (disabled || loading) ? C.surface : color + '12',
@@ -531,6 +627,9 @@ export default function TradeEvaluationCard({
 }) {
   if (!card) return null;
 
+  const isAutoPass = !!card.auto_pass_reason;
+  const hasMatrix = card.probability_matrix && Object.keys(card.probability_matrix).length > 0;
+
   return (
     <div style={{
       borderRadius: 8,
@@ -540,8 +639,12 @@ export default function TradeEvaluationCard({
     }}>
       <CardHeader card={card} />
       <TradeSection card={card} symbol={symbol} />
-      {card.probability_matrix && (
+      <PreScreenSection card={card} />
+      {!isAutoPass && hasMatrix && (
         <MatrixSection card={card} currentPrice={currentPrice} tradeData={tradeData} />
+      )}
+      {!isAutoPass && card.dte_warning && (
+        <DTEWarningBanner warning={card.dte_warning} />
       )}
       <ClaudeSection card={card} />
       <ActionBar

@@ -57,7 +57,27 @@
       "Bash(cd \"C:\\\\Users\\\\DonMishory\\\\OneDrive - jmholistic.com\\\\VS Code Projects\\\\Options Analyzer\\\\options-analyzer\\\\web\" && npx eslint src/pages/OptionsTerminal.jsx src/components/TradeExpansionPanel.jsx --max-warnings=30 2>&1 | grep -E \"error|warning\" | head -30)",
       "Bash(cd \"C:\\\\Users\\\\DonMishory\\\\OneDrive - jmholistic.com\\\\VS Code Projects\\\\Options Analyzer\\\\options-analyzer\\\\web\" && npx eslint src/pages/OptionsTerminal.jsx src/components/TradeExpansionPanel.jsx 2>&1 | grep \"error\" | head -20)",
       "Bash(cd \"C:\\\\Users\\\\DonMishory\\\\OneDrive - jmholistic.com\\\\VS Code Projects\\\\Options Analyzer\\\\options-analyzer\\\\web\" && npx eslint src/components/TradeExpansionPanel.jsx 2>&1)",
-      "Bash(find \"C:/Users/DonMishory/OneDrive - jmholistic.com/VS Code Projects/Options Analyzer/options-analyzer/web/src\" -name \"*.js\" -o -name \"*.jsx\" | xargs grep -l -i \"msal\\\\|acquireToken\\\\|loginRedirect\\\\|loginPopup\\\\|MsalProvider\\\\|PublicClientApplication\" 2>/dev/null)"
+      "Bash(find \"C:/Users/DonMishory/OneDrive - jmholistic.com/VS Code Projects/Options Analyzer/options-analyzer/web/src\" -name \"*.js\" -o -name \"*.jsx\" | xargs grep -l -i \"msal\\\\|acquireToken\\\\|loginRedirect\\\\|loginPopup\\\\|MsalProvider\\\\|PublicClientApplication\" 2>/dev/null)",
+      "Bash(cd \"C:\\\\Users\\\\DonMishory\\\\mcp-jira-server\" && npm run build 2>&1)",
+      "Bash(claude mcp:*)",
+      "Bash(cd \"C:/Users/DonMishory/mcp-jira-server\" && node start.js 2>&1 | head -20)",
+      "Bash(cd \"C:/Users/DonMishory/mcp-jira-server\" && node start.cjs 2>&1 | head -5)",
+      "mcp__jira__create-issue",
+      "mcp__jira__get-fields",
+      "Read(//c/Users/DonMishory/AppData/Roaming/Claude/**)",
+      "Bash(ls \"C:/Users/DonMishory/.claude/plugins/\" && cat \"C:/Users/DonMishory/.claude/plugins/\"*.json 2>/dev/null | head -50)",
+      "Read(//c/Users/DonMishory/mcp-jira-server/**)",
+      "Bash(cat \"C:/Users/DonMishory/mcp-jira-server/run.sh\" 2>/dev/null; ls \"C:/Users/DonMishory/mcp-jira-server/\" | grep -i env; find \"C:/Users/DonMishory/mcp-jira-server\" -name \".env*\" 2>/dev/null)",
+      "mcp__jira__transition-issue",
+      "Bash(cd \"C:/Users/DonMishory/OneDrive - jmholistic.com/VS Code Projects/Options Analyzer/options-analyzer/web\" && npm run build 2>&1)",
+      "Bash(cd \"C:/Users/DonMishory/OneDrive - jmholistic.com/VS Code Projects/Options Analyzer/options-analyzer\" && echo \"=== formatDate.js ===\" && cat web/src/utils/formatDate.js | head -5 && echo \"=== No rogue date formats ===\" && grep -rn \"toLocaleDateString\\\\|\\\\.toDateString\\\\|Intl\\\\.DateTimeFormat\" web/src/ --include=\"*.jsx\" --include=\"*.js\" && echo \"\\(none found - clean\\)\" && echo \"=== CLAUDE.md date rule ===\" && grep \"formatDate\\\\|mm-dd-yyyy\" claude_context/CLAUDE.md && echo \"=== Empty symbol placeholder ===\" && grep -r \"Enter a symbol\" web/src/ --include=\"*.jsx\" && echo \"=== TYPE sortable check ===\" && grep -A3 \"key: 'spread_type'\" web/src/config/verticals-columns.jsx | grep -i \"sortable\" || echo \"\\(sortable: false removed\\)\" && grep -A3 \"key: 'option_type'\" web/src/config/long-options-columns.jsx | grep -i \"sortable\" || echo \"\\(sortable: false removed\\)\" && echo \"=== Chart sessionStorage ===\" && grep -n \"chartStartDate\\\\|sessionStorage\" web/src/pages/OptionsTerminal.jsx && echo \"=== Theta display ===\" && grep -n \"thetaPct\\\\|thetaThreshold\\\\|theta_per_day\" web/src/config/long-options-columns.jsx 2>/dev/null)",
+      "Bash(grep -rn \"showToast\\\\|useToast\" \"C:\\\\Users\\\\DonMishory\\\\OneDrive - jmholistic.com\\\\VS Code Projects\\\\Options Analyzer\\\\options-analyzer\\\\web\\\\src\" --include=\"*.jsx\" 2>/dev/null | grep -v \"node_modules\")",
+      "Bash(cd \"C:/Users/DonMishory/OneDrive - jmholistic.com/VS Code Projects/Options Analyzer/options-analyzer\" && venv/Scripts/pytest 2>&1 | tail -10)",
+      "Bash(grep -rn \"width.*100%\" \"C:\\\\Users\\\\DonMishory\\\\OneDrive - jmholistic.com\\\\VS Code Projects\\\\Options Analyzer\\\\options-analyzer\\\\web\\\\src\\\\components\" \"C:\\\\Users\\\\DonMishory\\\\OneDrive - jmholistic.com\\\\VS Code Projects\\\\Options Analyzer\\\\options-analyzer\\\\web\\\\src\\\\pages\" --include=\"*.jsx\" --include=\"*.css\" 2>/dev/null | grep -i \"button\\\\|btn\" | grep -v \"node_modules\")",
+      "Bash(grep -n \"width.*100%\" \"C:\\\\Users\\\\DonMishory\\\\OneDrive - jmholistic.com\\\\VS Code Projects\\\\Options Analyzer\\\\options-analyzer\\\\web\\\\src\\\\pages\\\\Analysis.jsx\" 2>/dev/null | head -5)",
+      "Bash(cd \"C:\\\\Users\\\\DonMishory\\\\OneDrive - jmholistic.com\\\\VS Code Projects\\\\Options Analyzer\\\\options-analyzer\" && uv run pytest 2>&1 | tail -20)",
+      "Bash(cd \"C:\\\\Users\\\\DonMishory\\\\OneDrive - jmholistic.com\\\\VS Code Projects\\\\Options Analyzer\\\\options-analyzer\" && .venv/Scripts/pytest 2>&1 | tail -20)",
+      "Bash(cd \"C:\\\\Users\\\\DonMishory\\\\OneDrive - jmholistic.com\\\\VS Code Projects\\\\Options Analyzer\\\\options-analyzer\" && venv/Scripts/pytest tests/ 2>&1 | tail -15)"
     ]
   }
 }

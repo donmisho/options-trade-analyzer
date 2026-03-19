@@ -24,3 +24,7 @@ build/
 Thumbs.db
 
 certs/
+
+# SSL certificates (self-signed, dev only — NEVER commit to repo)
+cert.pem
+key.pem

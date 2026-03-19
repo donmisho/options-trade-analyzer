@@ -383,6 +383,7 @@ Key decisions summarized:
 
 ## House Style Rules
 
+- **Date format**: ALWAYS mm-dd-yyyy. With time: mm-dd-yyyy hh:mm. Use `formatDate()` from `web/src/utils/formatDate.js`. No other date formatting allowed.
 - **No `$` in UI**: Display `567.23` not `$567.23`
 - **Health pips**: Each pip is its own column — never group in a single cell
 - **`getHealthPips` signature**: Always `getHealthPips(trade, systemVars)`

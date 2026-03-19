@@ -35,7 +35,6 @@ export const longOptionsColumns = [
     label: 'Type',
     width: 100,
     align: 'center',
-    sortable: false,
     render: (trade) => {
       const isCall = trade.option_type === 'call';
       const label  = isCall ? 'LONG CALL' : 'LONG PUT';
@@ -87,11 +86,22 @@ export const longOptionsColumns = [
   {
     key: 'theta_per_day_dollars',
     label: 'Theta/Day',
-    width: 80,
+    width: 100,
     align: 'right',
-    render: (trade) => trade.theta_per_day_dollars != null
-      ? `${trade.theta_per_day_dollars.toFixed(2)}`
-      : '—',
+    render: (trade, ctx) => {
+      const theta = trade.theta_per_day_dollars;
+      if (theta == null) return '—';
+      const dollarDisplay = theta.toFixed(2);
+      const premium = trade.mid_price;
+      if (!premium || premium === 0) return dollarDisplay;
+      const totalPremium = premium * 100;
+      const thetaPct = (theta / totalPremium) * 100;
+      const threshold = ctx?.thetaThreshold ?? 10;
+      if (thetaPct <= threshold) {
+        return `${dollarDisplay} / ${thetaPct.toFixed(2)}%`;
+      }
+      return dollarDisplay;
+    },
   },
   {
     key: 'mid_price',

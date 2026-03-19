@@ -50,7 +50,6 @@ export const verticalsColumns = [
     label: 'Type',
     width: 100,
     align: 'center',
-    sortable: false,
     render: (trade) => {
       const badge = getBadge(trade);
       return (

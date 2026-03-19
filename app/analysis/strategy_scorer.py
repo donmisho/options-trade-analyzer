@@ -76,6 +76,39 @@ def _get_atm_iv(contracts: list, underlying_price: float) -> float:
     return sum(ivs) / len(ivs) if ivs else 0.30
 
 
+# ─── Cushion Penalty ──────────────────────────────────────────────────────────
+
+def cushion_penalty(trade: dict, current_price: float) -> tuple:
+    """
+    Deterministic scoring penalty for thin short strike cushion.
+
+    cushion_pct = |current_price - short_strike| / current_price * 100
+
+    Penalties:
+    - cushion_pct < 1.0%: -20 points
+    - cushion_pct < 2.0%: -10 points
+    - cushion_pct >= 2.0%: 0 (no penalty)
+
+    Only applies to trades with a short strike (credit spreads).
+    Returns (penalty: int, cushion_pct: float).
+
+    # TODO: Phase 2.4.x — when ATR(14) is available, add flag:
+    # "Insufficient buffer — one average daily move breaches short strike"
+    # when cushion < 1.0 × ATR(14). This is a flag, not a gate.
+    """
+    short_strike = trade.get("short_strike") or trade.get("sell_strike")
+    if short_strike is None or current_price is None or current_price == 0:
+        return 0, 0.0
+
+    pct = abs(current_price - short_strike) / current_price * 100
+
+    if pct < 1.0:
+        return -20, pct
+    elif pct < 2.0:
+        return -10, pct
+    return 0, pct
+
+
 # ─── Credit Spread Scorer ─────────────────────────────────────────────────────
 
 def _score_credit_spread_strategy(
@@ -197,9 +230,19 @@ def _score_credit_spread_strategy(
     best_score = composite_scores[best_idx]
     score = min(100, max(0, round(best_score * 100)))
 
+    # Apply cushion penalty (post-scoring adjustment)
+    _cushion_penalty, _cushion_pct = cushion_penalty(best, underlying_price)
+    if _cushion_penalty != 0:
+        score = max(0, score + _cushion_penalty)
+
     best_metrics = {k: round(float(metric_fns[k](best)), 4) for k in weights if k in metric_fns}
     if "iv_rank" in weights:
         best_metrics["iv_rank"] = round(iv_rank_norm, 4)
+
+    # Always include cushion metrics for transparency
+    best_metrics["cushion_pct"] = round(_cushion_pct, 2)
+    if _cushion_penalty != 0:
+        best_metrics["cushion_penalty"] = _cushion_penalty
 
     signal_summary = (
         f"{len(spreads)} credit spreads in range. "

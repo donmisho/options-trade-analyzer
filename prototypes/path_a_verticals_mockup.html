@@ -1,0 +1,270 @@
+
+<style>
+:root{--bg:#0d1117;--bg2:#161b22;--bg3:#21262d;--border:#30363d;--teal:#2dd4bf;--amber:#f59e0b;--red:#f87171;--green:#4ade80;--blue:#60a5fa;--text:#e6edf3;--muted:#8b949e;--purple:#c084fc}
+*{box-sizing:border-box;margin:0;padding:0}
+.app{background:var(--bg);color:var(--text);font-family:var(--font-mono,'Courier New',monospace);font-size:12px;border-radius:12px;overflow:hidden;border:1px solid var(--border)}
+.nav{background:var(--bg2);border-bottom:1px solid var(--border);padding:0 16px;display:flex;align-items:center;gap:0}
+.logo{color:var(--teal);font-size:13px;font-weight:500;margin-right:24px;padding:10px 0}
+.navtab{padding:10px 14px;font-size:12px;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s}
+.navtab.active{color:var(--teal);border-bottom-color:var(--teal)}
+.navtab:hover{color:var(--text)}
+.navright{margin-left:auto;display:flex;align-items:center;gap:12px}
+.conn{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--green)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--green)}
+.body{display:flex}
+.sidebar{width:140px;background:var(--bg2);border-right:1px solid var(--border);padding:10px 0}
+.sitem{padding:8px 14px;font-size:11px;cursor:pointer;border-left:2px solid transparent;color:var(--muted)}
+.sitem.active{color:var(--teal);border-left-color:var(--teal);background:rgba(45,212,191,.06)}
+.sitem:hover{color:var(--text)}
+.sname{font-size:10px;color:var(--muted);padding:8px 14px 4px;text-transform:uppercase;letter-spacing:.5px}
+.main{flex:1;overflow:hidden}
+.quotebar{background:var(--bg2);border-bottom:1px solid var(--border);padding:10px 16px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.qsym{font-size:16px;font-weight:500;color:var(--text)}
+.badge{padding:2px 7px;border-radius:4px;font-size:10px;font-weight:500}
+.bull{background:rgba(74,222,128,.15);color:var(--green)}
+.bear{background:rgba(248,113,113,.15);color:var(--red)}
+.mix{background:rgba(245,158,11,.15);color:var(--amber)}
+.qfield{display:flex;flex-direction:column;gap:1px}
+.qlabel{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
+.qval{font-size:12px;color:var(--text)}
+.qneg{color:var(--red)}
+.qpos{color:var(--green)}
+.earn{background:rgba(245,158,11,.2);color:var(--amber);padding:2px 7px;border-radius:4px;font-size:10px}
+.chart-stub{background:var(--bg);height:120px;border-bottom:1px solid var(--border);position:relative;overflow:hidden;padding:8px 16px}
+.chart-line{position:absolute;bottom:20px;left:0;right:0;height:60px}
+.analyze-bar{background:var(--bg2);border-bottom:1px solid var(--border);padding:8px 16px;display:flex;align-items:center;gap:10px}
+.sym-input{background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:5px 10px;border-radius:6px;font-size:12px;font-family:inherit;width:80px}
+.btn{background:var(--teal);color:#0d1117;padding:5px 12px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;border:none;font-family:inherit}
+.btn-sm{background:transparent;border:1px solid var(--border);color:var(--text);padding:4px 10px;border-radius:5px;font-size:11px;cursor:pointer;font-family:inherit}
+.btn-sm:hover{border-color:var(--teal);color:var(--teal)}
+.btn-eval{background:var(--teal);color:#0d1117;padding:5px 14px;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;border:none;font-family:inherit}
+.table-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse}
+th{background:var(--bg3);padding:7px 12px;text-align:left;font-size:10px;color:var(--muted);font-weight:500;text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:7px 12px;border-bottom:1px solid rgba(48,54,61,.5);font-size:11px;color:var(--text);white-space:nowrap}
+tr.expanded{background:rgba(45,212,191,.04)}
+tr.tradrow{cursor:pointer}
+tr.tradrow:hover td{background:rgba(255,255,255,.03)}
+.score-hi{color:var(--green);font-weight:600}
+.score-md{color:var(--amber);font-weight:600}
+.expand-panel{background:rgba(13,17,23,.8);border-top:1px solid rgba(45,212,191,.2);border-bottom:1px solid rgba(48,54,61,.5);padding:16px}
+.ep-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px}
+.ep-section{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px}
+.ep-title{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px}
+.metric-row{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid rgba(48,54,61,.4);font-size:11px}
+.metric-row:last-child{border-bottom:none}
+.strat-row{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid rgba(48,54,61,.4)}
+.strat-row:last-child{border-bottom:none}
+.strat-name{width:110px;font-size:11px}
+.score-bar-wrap{flex:1;height:8px;background:var(--bg3);border-radius:4px;overflow:hidden}
+.score-bar{height:100%;border-radius:4px;transition:width .4s}
+.score-num{width:32px;text-align:right;font-size:11px;font-weight:600}
+.strat-check{width:14px;height:14px;cursor:pointer;accent-color:var(--teal)}
+.ep-actions{display:flex;align-items:center;gap:10px;margin-top:12px}
+.na-label{font-size:10px;color:var(--muted);font-style:italic}
+.pill{padding:2px 7px;border-radius:4px;font-size:10px;font-weight:500;background:rgba(45,212,191,.15);color:var(--teal)}
+.eval-card{background:var(--bg2);border:1px solid rgba(45,212,191,.3);border-radius:8px;padding:14px;margin-top:12px}
+.ev-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px}
+.verdict{padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600;background:rgba(74,222,128,.15);color:var(--green)}
+.ev-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px}
+.ev-cell{background:var(--bg3);border-radius:6px;padding:8px 10px}
+.ev-label{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px}
+.ev-val{font-size:12px;font-weight:500}
+.ev-warn{color:var(--red)}
+.claude-read{font-size:11px;color:var(--muted);line-height:1.6;margin-bottom:10px;font-style:italic}
+.ev-actions{display:flex;gap:8px}
+.btn-follow{background:transparent;border:1px solid var(--teal);color:var(--teal);padding:5px 14px;border-radius:5px;font-size:11px;cursor:pointer;font-family:inherit;font-weight:500}
+.btn-take{background:var(--teal);color:#0d1117;padding:5px 14px;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;border:none;font-family:inherit}
+</style>
+<div class="app">
+  <!-- Nav -->
+  <div class="nav">
+    <div class="logo">⌥ Options Analyzer</div>
+    <div class="navtab">Dashboard</div>
+    <div class="navtab active">Verticals</div>
+    <div class="navtab">Puts &amp; Calls</div>
+    <div class="navtab">Positions</div>
+    <div class="navright">
+      <div class="conn"><div class="dot"></div>Connected</div>
+    </div>
+  </div>
+  <div class="body">
+    <!-- Sidebar -->
+    <div class="sidebar">
+      <div class="sname">Watchlist</div>
+      <div class="sitem active">AMZN</div>
+      <div class="sitem">MSFT</div>
+      <div class="sitem">NVDA</div>
+      <div class="sitem">SPY</div>
+      <div class="sitem">QQQ</div>
+      <div class="sitem">TSLA</div>
+    </div>
+    <!-- Main -->
+    <div class="main">
+      <!-- QuoteBar - SAME on every page -->
+      <div class="quotebar">
+        <span class="qsym">AMZN</span>
+        <span class="badge bull">BULLISH</span>
+        <div class="qfield"><span class="qlabel">Last analyzed</span><span class="qval">03/13 17:47</span></div>
+        <div class="qfield"><span class="qlabel">Price</span><span class="qval">207.38</span></div>
+        <div class="qfield"><span class="qlabel">CHG</span><span class="qval qneg">-2.15</span></div>
+        <div class="qfield"><span class="qlabel">CHG %</span><span class="qval qneg">-1.03%</span></div>
+        <div class="qfield"><span class="qlabel">Day Range</span><span class="qval">206.22 – 210.56</span></div>
+        <div class="qfield"><span class="qlabel">52W Range</span><span class="qval">161.38 – 258.60</span></div>
+        <div class="qfield"><span class="qlabel">Volume</span><span class="qval">35.6M</span></div>
+        <div class="qfield"><span class="qlabel">Rel Vol</span><span class="qval">0.8x</span></div>
+        <span class="earn">Earnings 04/01</span>
+      </div>
+      <!-- Chart stub -->
+      <div class="chart-stub">
+        <svg width="100%" height="100%" viewBox="0 0 500 90" preserveAspectRatio="none">
+          <polyline points="0,70 40,65 80,55 120,60 160,45 200,50 240,38 280,42 320,30 360,35 400,25 440,28 500,20" fill="none" stroke="#2dd4bf" stroke-width="1.5" opacity="0.7"/>
+          <polyline points="0,70 40,65 80,55 120,60 160,45 200,50 240,38 280,42 320,30 360,35 400,25 440,28 500,20 500,90 0,90" fill="rgba(45,212,191,0.07)" stroke="none"/>
+          <line x1="0" y1="30" x2="500" y2="30" stroke="#f59e0b" stroke-width="0.5" stroke-dasharray="3 3" opacity="0.5"/>
+          <text x="490" y="27" font-size="9" fill="#f59e0b" text-anchor="end" opacity="0.7">SMA 21</text>
+        </svg>
+      </div>
+      <!-- Analyze bar -->
+      <div class="analyze-bar">
+        <input class="sym-input" value="AMZN" readonly/>
+        <button class="btn">Analyze</button>
+        <span style="margin-left:auto;font-size:10px;color:var(--muted)">24 spreads · sorted by score</span>
+      </div>
+      <!-- Trades table -->
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th></th><th>Type</th><th>Expiry</th><th>Strikes</th><th>Credit</th><th>Max Loss</th><th>R:R</th><th>Prob</th><th>Score</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="tradrow expanded" onclick="toggleExpand()" id="row1">
+              <td style="color:var(--teal)">▼</td>
+              <td><span class="pill">Bull Put</span></td>
+              <td>Apr 17</td><td>200 / 195</td>
+              <td class="qpos">3.20</td><td>1.80</td>
+              <td>1.78:1</td><td>71%</td>
+              <td class="score-hi">88</td>
+            </tr>
+            <!-- EXPANSION PANEL -->
+            <tr id="expand1">
+              <td colspan="9" style="padding:0">
+                <div class="expand-panel">
+                  <div class="ep-grid">
+                    <!-- Math matrix -->
+                    <div class="ep-section">
+                      <div class="ep-title">Scoring breakdown</div>
+                      <div class="metric-row"><span style="color:var(--muted)">Expected value</span><span class="qpos">+142</span></div>
+                      <div class="metric-row"><span style="color:var(--muted)">Reward : Risk</span><span>1.78 : 1</span></div>
+                      <div class="metric-row"><span style="color:var(--muted)">Prob of profit</span><span>71%</span></div>
+                      <div class="metric-row"><span style="color:var(--muted)">Liquidity</span><span class="qpos">High</span></div>
+                      <div class="metric-row"><span style="color:var(--muted)">Theta / day</span><span>0.18</span></div>
+                    </div>
+                    <!-- Strategy Scorecard -->
+                    <div class="ep-section">
+                      <div class="ep-title">Strategy fit — this trade</div>
+                      <!-- Steady Paycheck -->
+                      <div class="strat-row">
+                        <input type="checkbox" class="strat-check" id="c1" checked>
+                        <span class="strat-name">Steady Paycheck</span>
+                        <div class="score-bar-wrap"><div class="score-bar" style="width:84%;background:var(--green)"></div></div>
+                        <span class="score-num score-hi">84</span>
+                      </div>
+                      <!-- Weekly Grind -->
+                      <div class="strat-row">
+                        <input type="checkbox" class="strat-check" id="c2">
+                        <span class="strat-name">Weekly Grind</span>
+                        <div class="score-bar-wrap"><div class="score-bar" style="width:31%;background:var(--red)"></div></div>
+                        <span class="score-num" style="color:var(--red)">31</span>
+                      </div>
+                      <!-- Trend Rider -->
+                      <div class="strat-row">
+                        <input type="checkbox" class="strat-check" id="c3">
+                        <span class="strat-name">Trend Rider</span>
+                        <div class="score-bar-wrap"><div class="score-bar" style="width:67%;background:var(--amber)"></div></div>
+                        <span class="score-num score-md">67</span>
+                      </div>
+                      <!-- Lottery Ticket -->
+                      <div class="strat-row">
+                        <input type="checkbox" class="strat-check" id="c4">
+                        <span class="strat-name">Lottery Ticket</span>
+                        <div class="score-bar-wrap"><div class="score-bar" style="width:12%;background:var(--red)"></div></div>
+                        <span class="score-num" style="color:var(--red)">12</span>
+                      </div>
+                      <!-- Actions -->
+                      <div class="ep-actions">
+                        <button class="btn-eval" onclick="showEval()">Evaluate with Claude</button>
+                        <span style="font-size:10px;color:var(--muted)">1 selected</span>
+                      </div>
+                    </div>
+                  </div>
+                  <!-- Claude Evaluation Card (shown after evaluate) -->
+                  <div class="eval-card" id="evalCard" style="display:none">
+                    <div class="ev-header">
+                      <div>
+                        <div style="font-size:12px;font-weight:500;margin-bottom:2px">Steady Paycheck · AMZN Bull Put 200/195 Apr 17</div>
+                        <div style="font-size:10px;color:var(--muted)">Score 84 · 32 DTE</div>
+                      </div>
+                      <span class="verdict">EXECUTE</span>
+                    </div>
+                    <div class="ev-grid">
+                      <div class="ev-cell"><div class="ev-label">Entry credit</div><div class="ev-val qpos">3.20</div></div>
+                      <div class="ev-cell"><div class="ev-label">Max profit</div><div class="ev-val qpos">320</div></div>
+                      <div class="ev-cell"><div class="ev-label">Max loss</div><div class="ev-val ev-warn">180</div></div>
+                      <div class="ev-cell"><div class="ev-label">Exit warning</div><div class="ev-val ev-warn">AMZN &lt; 197.50</div></div>
+                      <div class="ev-cell"><div class="ev-label">Take profit at</div><div class="ev-val">1.60 debit</div></div>
+                      <div class="ev-cell"><div class="ev-label">Stop at</div><div class="ev-val ev-warn">6.40 debit</div></div>
+                    </div>
+                    <div class="claude-read">"AMZN's bullish SMA alignment and IV rank of 54 make this a solid income setup. The 200 strike has held as support twice in the past 30 days. Watch earnings on 04/01 — consider closing before if profit target not reached."</div>
+                    <div class="ev-actions">
+                      <button class="btn-follow" onclick="sendPrompt('I want to follow this AMZN Bull Put 200/195 Apr 17 as a paper trade')">📌 Follow (Paper)</button>
+                      <button class="btn-take" onclick="sendPrompt('I want to take this AMZN Bull Put 200/195 Apr 17 as a live position')">💰 Take Position</button>
+                    </div>
+                  </div>
+                </div>
+              </td>
+            </tr>
+            <tr class="tradrow">
+              <td style="color:var(--muted)">▶</td>
+              <td><span class="pill">Bull Put</span></td>
+              <td>Apr 17</td><td>195 / 190</td>
+              <td class="qpos">2.45</td><td>2.55</td>
+              <td>0.96:1</td><td>76%</td>
+              <td class="score-hi">79</td>
+            </tr>
+            <tr class="tradrow">
+              <td style="color:var(--muted)">▶</td>
+              <td><span class="pill">Bull Put</span></td>
+              <td>May 15</td><td>200 / 195</td>
+              <td class="qpos">4.10</td><td>0.90</td>
+              <td>4.56:1</td><td>68%</td>
+              <td class="score-md">72</td>
+            </tr>
+            <tr class="tradrow">
+              <td style="color:var(--muted)">▶</td>
+              <td style="color:var(--muted)">Bear Call</td>
+              <td>Apr 17</td><td>215 / 220</td>
+              <td class="qpos">1.85</td><td>3.15</td>
+              <td>0.59:1</td><td>63%</td>
+              <td class="score-md">58</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+function toggleExpand(){
+  var p=document.getElementById('expand1');
+  var r=document.getElementById('row1');
+  var showing=p.style.display!=='none';
+  p.style.display=showing?'none':'';
+  r.querySelector('td').textContent=showing?'▶':'▼';
+}
+function showEval(){
+  var c=document.getElementById('evalCard');
+  c.style.display=c.style.display==='none'?'block':'none';
+}
+</script>

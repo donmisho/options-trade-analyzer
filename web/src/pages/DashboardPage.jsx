@@ -13,6 +13,7 @@ import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { getQuote, getHistoricalClose, getInsights, dismissInsight, actOnInsight } from '../api/client';
 import { InsightCard } from '../components/InsightCard';
+import { formatDate } from '../utils/formatDate';
 
 // ─── Index definitions ────────────────────────────────────────────
 
@@ -47,9 +48,7 @@ function getFirstName(fullName) {
 }
 
 function formatToday() {
-  return new Date().toLocaleDateString('en-US', {
-    weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
-  });
+  return formatDate(new Date());
 }
 
 function fmtPrice(val) {
@@ -84,8 +83,7 @@ function strategyLabel(source) {
 function fmtSavedDate(savedDate, savedAt) {
   const raw = savedDate || savedAt;
   if (!raw) return '—';
-  const d = typeof raw === 'number' ? new Date(raw) : new Date(raw);
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return formatDate(raw);
 }
 
 // ─── Component ────────────────────────────────────────────────────

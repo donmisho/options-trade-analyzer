@@ -1,0 +1,270 @@
+
+<style>
+:root{--bg:#0d1117;--bg2:#161b22;--bg3:#21262d;--border:#30363d;--teal:#2dd4bf;--amber:#f59e0b;--red:#f87171;--green:#4ade80;--text:#e6edf3;--muted:#8b949e}
+*{box-sizing:border-box;margin:0;padding:0}
+.app{background:var(--bg);color:var(--text);font-family:var(--font-mono,'Courier New',monospace);font-size:12px;border-radius:12px;overflow:hidden;border:1px solid var(--border)}
+.nav{background:var(--bg2);border-bottom:1px solid var(--border);padding:0 16px;display:flex;align-items:center;gap:0}
+.logo{color:var(--teal);font-size:13px;font-weight:500;margin-right:24px;padding:10px 0}
+.navtab{padding:10px 14px;font-size:12px;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent}
+.navtab.active{color:var(--teal);border-bottom-color:var(--teal)}
+.navright{margin-left:auto;display:flex;align-items:center;gap:12px}
+.conn{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--green)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--green)}
+.body{display:flex}
+.sidebar{width:140px;background:var(--bg2);border-right:1px solid var(--border);padding:10px 0}
+.sitem{padding:8px 14px;font-size:11px;cursor:pointer;border-left:2px solid transparent;color:var(--muted)}
+.sitem.active{color:var(--teal);border-left-color:var(--teal);background:rgba(45,212,191,.06)}
+.sname{font-size:10px;color:var(--muted);padding:8px 14px 4px;text-transform:uppercase;letter-spacing:.5px}
+.main{flex:1;overflow:hidden}
+.quotebar{background:var(--bg2);border-bottom:1px solid var(--border);padding:10px 16px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.qsym{font-size:16px;font-weight:500}
+.badge{padding:2px 7px;border-radius:4px;font-size:10px;font-weight:500}
+.bear{background:rgba(248,113,113,.15);color:var(--red)}
+.bull{background:rgba(74,222,128,.15);color:var(--green)}
+.qfield{display:flex;flex-direction:column;gap:1px}
+.qlabel{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
+.qval{font-size:12px}
+.qneg{color:var(--red)}
+.qpos{color:var(--green)}
+.chart-stub{background:var(--bg);height:100px;border-bottom:1px solid var(--border);overflow:hidden;padding:8px 16px;position:relative}
+.analyze-bar{background:var(--bg2);border-bottom:1px solid var(--border);padding:8px 16px;display:flex;align-items:center;gap:10px}
+.sym-input{background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:5px 10px;border-radius:6px;font-size:12px;font-family:inherit;width:80px}
+.btn{background:var(--teal);color:#0d1117;padding:5px 12px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;border:none;font-family:inherit}
+.table-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse}
+th{background:var(--bg3);padding:7px 12px;text-align:left;font-size:10px;color:var(--muted);font-weight:500;text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:7px 12px;border-bottom:1px solid rgba(48,54,61,.5);font-size:11px;white-space:nowrap}
+tr.tradrow{cursor:pointer}
+tr.tradrow:hover td{background:rgba(255,255,255,.03)}
+tr.expanded td{background:rgba(45,212,191,.03)}
+.pill-c{padding:2px 7px;border-radius:4px;font-size:10px;background:rgba(74,222,128,.15);color:var(--green);font-weight:500}
+.pill-p{padding:2px 7px;border-radius:4px;font-size:10px;background:rgba(248,113,113,.15);color:var(--red);font-weight:500}
+.score-hi{color:var(--green);font-weight:600}
+.score-md{color:var(--amber);font-weight:600}
+.note-box{background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.2);border-radius:6px;padding:8px 12px;font-size:10px;color:var(--amber);margin-bottom:12px}
+.expand-panel{background:rgba(13,17,23,.9);border-top:1px solid rgba(45,212,191,.2);border-bottom:1px solid rgba(48,54,61,.5);padding:16px}
+.ep-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px}
+.ep-section{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px}
+.ep-title{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px}
+.metric-row{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid rgba(48,54,61,.4);font-size:11px}
+.metric-row:last-child{border-bottom:none}
+.strat-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(48,54,61,.4)}
+.strat-row:last-child{border-bottom:none}
+.strat-check{width:14px;height:14px;cursor:pointer;accent-color:var(--teal)}
+.strat-name{width:110px;font-size:11px;font-weight:500}
+.strat-sub{font-size:10px;color:var(--muted)}
+.bar-wrap{flex:1;height:8px;background:var(--bg3);border-radius:4px;overflow:hidden}
+.bar{height:100%;border-radius:4px}
+.score-num{width:32px;text-align:right;font-size:12px;font-weight:600}
+.na-row{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid rgba(48,54,61,.2)}
+.na-row:last-child{border-bottom:none}
+.na-name{width:110px;font-size:11px;color:var(--muted);font-style:italic}
+.na-reason{font-size:10px;color:rgba(139,148,158,.5);font-style:italic}
+.ep-actions{display:flex;align-items:center;gap:10px;margin-top:12px}
+.btn-eval{background:var(--teal);color:#0d1117;padding:5px 14px;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;border:none;font-family:inherit}
+.eval-card{background:var(--bg2);border:1px solid rgba(45,212,191,.3);border-radius:8px;padding:14px;margin-top:12px}
+.ev-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px}
+.ev-title{font-size:12px;font-weight:500;margin-bottom:2px}
+.ev-sub{font-size:10px;color:var(--muted)}
+.verdict-exec{padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600;background:rgba(74,222,128,.15);color:var(--green)}
+.verdict-pass{padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600;background:rgba(248,113,113,.15);color:var(--red)}
+.ev-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;margin-bottom:10px}
+.ev-cell{background:var(--bg3);border-radius:6px;padding:7px 8px}
+.ev-label{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;margin-bottom:2px}
+.ev-val{font-size:11px;font-weight:500}
+.ev-warn{color:var(--red)}
+.ev-pos{color:var(--green)}
+.claude-read{font-size:11px;color:var(--muted);line-height:1.6;font-style:italic;margin-bottom:10px}
+.ev-actions{display:flex;gap:8px}
+.btn-follow{background:transparent;border:1px solid var(--teal);color:var(--teal);padding:5px 14px;border-radius:5px;font-size:11px;cursor:pointer;font-family:inherit;font-weight:500}
+.btn-take{background:var(--teal);color:#0d1117;padding:5px 14px;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;border:none;font-family:inherit}
+.divider-label{font-size:9px;color:rgba(139,148,158,.4);text-transform:uppercase;letter-spacing:.5px;padding:8px 0 4px;text-align:center;border-bottom:1px dashed rgba(48,54,61,.3);margin-bottom:4px}
+</style>
+<div class="app">
+  <div class="nav">
+    <div class="logo">⌥ Options Analyzer</div>
+    <div class="navtab">Dashboard</div>
+    <div class="navtab">Security Strategies</div>
+    <div class="navtab">Verticals</div>
+    <div class="navtab active">Puts &amp; Calls</div>
+    <div class="navtab">Positions</div>
+    <div class="navright"><div class="conn"><div class="dot"></div>Connected</div></div>
+  </div>
+  <div class="body">
+    <div class="sidebar">
+      <div class="sname">Watchlist</div>
+      <div class="sitem">AMZN</div>
+      <div class="sitem">MSFT</div>
+      <div class="sitem active">NVDA</div>
+      <div class="sitem">SPY</div>
+      <div class="sitem">QQQ</div>
+      <div class="sitem">TSLA</div>
+    </div>
+    <div class="main">
+      <!-- QuoteBar - identical to all other pages -->
+      <div class="quotebar">
+        <span class="qsym">NVDA</span>
+        <span class="badge bull">BULLISH</span>
+        <div class="qfield"><span class="qlabel">Last analyzed</span><span class="qval">03/13 18:04</span></div>
+        <div class="qfield"><span class="qlabel">Price</span><span class="qval">875.40</span></div>
+        <div class="qfield"><span class="qlabel">CHG</span><span class="qval qpos">+14.22</span></div>
+        <div class="qfield"><span class="qlabel">CHG %</span><span class="qval qpos">+1.65%</span></div>
+        <div class="qfield"><span class="qlabel">Day Range</span><span class="qval">861.10 – 878.90</span></div>
+        <div class="qfield"><span class="qlabel">52W Range</span><span class="qval">541.20 – 974.00</span></div>
+        <div class="qfield"><span class="qlabel">Volume</span><span class="qval">48.2M</span></div>
+        <div class="qfield"><span class="qlabel">Rel Vol</span><span class="qval">1.4x</span></div>
+      </div>
+      <!-- Chart -->
+      <div class="chart-stub">
+        <svg width="100%" height="100%" viewBox="0 0 500 80" preserveAspectRatio="none">
+          <polyline points="0,65 50,58 100,50 150,44 200,38 250,42 300,30 350,24 400,18 450,12 500,8" fill="none" stroke="#2dd4bf" stroke-width="1.5" opacity="0.8"/>
+          <polyline points="0,65 50,58 100,50 150,44 200,38 250,42 300,30 350,24 400,18 450,12 500,8 500,80 0,80" fill="rgba(45,212,191,0.07)" stroke="none"/>
+          <line x1="0" y1="35" x2="500" y2="35" stroke="#f59e0b" stroke-width="0.5" stroke-dasharray="3 3" opacity="0.5"/>
+          <line x1="0" y1="50" x2="500" y2="50" stroke="#60a5fa" stroke-width="0.5" stroke-dasharray="3 3" opacity="0.4"/>
+        </svg>
+      </div>
+      <!-- Analyze bar -->
+      <div class="analyze-bar">
+        <input class="sym-input" value="NVDA" readonly/>
+        <button class="btn">Analyze</button>
+        <span style="margin-left:auto;font-size:10px;color:var(--muted)">31 contracts · sorted by score</span>
+      </div>
+      <!-- Trades table -->
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th></th><th>Type</th><th>Expiry</th><th>Strike</th><th>Price</th><th>Delta</th><th>Theta/day</th><th>IV</th><th>OI</th><th>Score</th>
+            </tr>
+          </thead>
+          <tbody>
+            <!-- Expanded row -->
+            <tr class="tradrow expanded" onclick="toggleExpand()" id="row1">
+              <td style="color:var(--teal)">▼</td>
+              <td><span class="pill-c">Call</span></td>
+              <td>Apr 17</td>
+              <td>880</td>
+              <td>18.40</td>
+              <td>0.51</td>
+              <td>-0.24</td>
+              <td>42%</td>
+              <td>12,840</td>
+              <td class="score-hi">82</td>
+            </tr>
+            <!-- EXPANSION -->
+            <tr id="expand1">
+              <td colspan="10" style="padding:0">
+                <div class="expand-panel">
+                  <div class="ep-grid">
+                    <!-- Scoring breakdown -->
+                    <div class="ep-section">
+                      <div class="ep-title">Scoring breakdown</div>
+                      <div class="metric-row"><span style="color:var(--muted)">Delta quality</span><span class="qpos">0.51 (ATM)</span></div>
+                      <div class="metric-row"><span style="color:var(--muted)">Theta / day</span><span class="qneg">-0.24</span></div>
+                      <div class="metric-row"><span style="color:var(--muted)">IV percentile</span><span class="score-md">42% (moderate)</span></div>
+                      <div class="metric-row"><span style="color:var(--muted)">Open interest</span><span class="qpos">12,840 (high)</span></div>
+                      <div class="metric-row"><span style="color:var(--muted)">Bid/ask spread</span><span class="qpos">0.18 (tight)</span></div>
+                      <div class="metric-row"><span style="color:var(--muted)">Breakeven</span><span>898.40 (+2.6%)</span></div>
+                    </div>
+                    <!-- Strategy Scorecard - FILTERED to long_option only -->
+                    <div class="ep-section">
+                      <div class="ep-title">Strategy fit — this trade</div>
+                      <!-- Trend Rider -->
+                      <div class="strat-row">
+                        <input type="checkbox" class="strat-check" id="c1" checked>
+                        <div><div class="strat-name">Trend Rider</div><div class="strat-sub">30-60 DTE directional</div></div>
+                        <div class="bar-wrap"><div class="bar" style="width:79%;background:var(--green)"></div></div>
+                        <span class="score-num score-hi">79</span>
+                      </div>
+                      <!-- Lottery Ticket -->
+                      <div class="strat-row">
+                        <input type="checkbox" class="strat-check" id="c2">
+                        <div><div class="strat-name">Lottery Ticket</div><div class="strat-sub">1-7 DTE deep OTM</div></div>
+                        <div class="bar-wrap"><div class="bar" style="width:18%;background:var(--red)"></div></div>
+                        <span class="score-num" style="color:var(--red)">18</span>
+                      </div>
+                      <!-- Divider + hidden strategies -->
+                      <div class="divider-label">not applicable to this trade type</div>
+                      <div class="na-row">
+                        <span class="na-name">Steady Paycheck</span>
+                        <span class="na-reason">requires credit spread structure</span>
+                      </div>
+                      <div class="na-row">
+                        <span class="na-name">Weekly Grind</span>
+                        <span class="na-reason">requires credit spread structure</span>
+                      </div>
+                      <div class="ep-actions">
+                        <button class="btn-eval" onclick="showEval()">Evaluate with Claude</button>
+                        <span style="font-size:10px;color:var(--muted)">1 selected</span>
+                      </div>
+                    </div>
+                  </div>
+                  <!-- Eval card -->
+                  <div class="eval-card" id="evalCard" style="display:none">
+                    <div class="ev-header">
+                      <div>
+                        <div class="ev-title">Trend Rider · NVDA 880C Apr 17</div>
+                        <div class="ev-sub">Score 79 · 35 DTE · Delta 0.51</div>
+                      </div>
+                      <span class="verdict-exec">EXECUTE</span>
+                    </div>
+                    <div class="ev-grid">
+                      <div class="ev-cell"><div class="ev-label">Entry debit</div><div class="ev-val ev-warn">18.40</div></div>
+                      <div class="ev-cell"><div class="ev-label">Max profit</div><div class="ev-val ev-pos">Unlimited</div></div>
+                      <div class="ev-cell"><div class="ev-label">Max loss</div><div class="ev-val ev-warn">1,840</div></div>
+                      <div class="ev-cell"><div class="ev-label">Exit warning</div><div class="ev-val ev-warn">NVDA &lt; 855</div></div>
+                      <div class="ev-cell"><div class="ev-label">Target exit</div><div class="ev-val">&gt; 36.80</div></div>
+                      <div class="ev-cell"><div class="ev-label">Stop loss</div><div class="ev-val ev-warn">9.20 debit</div></div>
+                    </div>
+                    <div class="claude-read">"NVDA's bullish SMA alignment and strong momentum make this a high-conviction directional entry. IV at 42% is moderate — not overpaying for volatility. The 880 strike provides good delta exposure. Stop below 855 respects the prior consolidation zone."</div>
+                    <div class="ev-actions">
+                      <button class="btn-follow" onclick="sendPrompt('Follow NVDA Trend Rider: Buy 880C Apr 17 as a paper trade')">📌 Follow (Paper)</button>
+                      <button class="btn-take" onclick="sendPrompt('Take live position: NVDA Buy 880C Apr 17')">💰 Take Position</button>
+                    </div>
+                  </div>
+                </div>
+              </td>
+            </tr>
+            <tr class="tradrow">
+              <td style="color:var(--muted)">▶</td>
+              <td><span class="pill-c">Call</span></td>
+              <td>Apr 17</td><td>900</td><td>9.80</td><td>0.38</td><td>-0.19</td><td>44%</td><td>9,210</td>
+              <td class="score-hi">74</td>
+            </tr>
+            <tr class="tradrow">
+              <td style="color:var(--muted)">▶</td>
+              <td><span class="pill-c">Call</span></td>
+              <td>May 15</td><td>880</td><td>28.60</td><td>0.54</td><td>-0.18</td><td>41%</td><td>6,440</td>
+              <td class="score-md">68</td>
+            </tr>
+            <tr class="tradrow">
+              <td style="color:var(--muted)">▶</td>
+              <td><span class="pill-p">Put</span></td>
+              <td>Apr 17</td><td>850</td><td>14.20</td><td>-0.42</td><td>-0.21</td><td>45%</td><td>7,830</td>
+              <td class="score-md">61</td>
+            </tr>
+            <tr class="tradrow">
+              <td style="color:var(--muted)">▶</td>
+              <td><span class="pill-c">Call</span></td>
+              <td>Apr 17</td><td>950</td><td>2.15</td><td>0.12</td><td>-0.08</td><td>51%</td><td>18,200</td>
+              <td class="score-md">54</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+function toggleExpand(){
+  var p=document.getElementById('expand1');
+  var r=document.getElementById('row1');
+  var open=p.style.display!=='none';
+  p.style.display=open?'none':'';
+  r.cells[0].textContent=open?'▶':'▼';
+}
+function showEval(){
+  var c=document.getElementById('evalCard');
+  c.style.display=c.style.display==='none'?'block':'none';
+}
+</script>

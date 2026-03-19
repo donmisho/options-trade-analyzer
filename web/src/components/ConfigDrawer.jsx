@@ -399,7 +399,12 @@ export default function ConfigDrawer({ mode = "verticals", open, onClose, config
               <DualRangeSlider label="IV Pip (green / amber)" minVal={sv.pip_iv_green ?? 30} maxVal={sv.pip_iv_amber ?? 50} min={5} max={150} step={5} unit="%" color={C.amber} onChange={(a, b) => sd({ systemVars: { ...sv, pip_iv_green: a, pip_iv_amber: b } })} />
               <p style={{ fontSize: 10, color: C.textMuted, margin: "-8px 0 12px" }}>Green when IV ≤ left value, amber when ≤ right value, red above.</p>
               <DualRangeSlider label="Runway Pip (amber / green)" minVal={sv.pip_runway_amber ?? 15} maxVal={sv.pip_runway_green ?? 30} min={1} max={120} step={1} unit="d" color={C.green} onChange={(a, b) => sd({ systemVars: { ...sv, pip_runway_amber: a, pip_runway_green: b } })} />
-              <p style={{ fontSize: 10, color: C.textMuted, margin: "-8px 0 4px" }}>Green when runway ≥ right value, amber when ≥ left value, red below.</p>
+              <p style={{ fontSize: 10, color: C.textMuted, margin: "-8px 0 12px" }}>Green when runway ≥ right value, amber when ≥ left value, red below.</p>
+              <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 12, marginTop: 4 }}>
+                <p style={{ fontSize: 10.5, color: C.textDim, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", margin: "0 0 8px" }}>Theta Decay Display</p>
+                <NumInput label="Theta % Threshold" value={draft?.thetaThreshold ?? 10} onChange={v => sd({ thetaThreshold: v })} min={1} max={100} step={1} unit="%" />
+                <p style={{ fontSize: 10, color: C.textMuted, margin: "-6px 0 4px" }}>Show theta as "21.60 / 2.45%" when decay ≤ this % of premium. Above threshold shows dollar only.</p>
+              </div>
             </>)}
           </div>
         </Sect>

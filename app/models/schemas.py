@@ -309,17 +309,21 @@ class TradeEvaluationCard(BaseModel):
     exit_warning_pnl: float = 0.0   # P&L at warning (negative = loss)
     exit_target_debit: float = 0.0  # debit to close at ~50% profit (spreads only)
     exit_stop_debit: float = 0.0    # debit to close at 2× credit (spreads only)
-    probability_matrix: dict        # serialized ProbabilityMatrix from B-S
+    probability_matrix: dict = {}   # serialized ProbabilityMatrix from B-S
     score: int                      # 0-100 from strategy scorer (or Claude estimate)
     verdict: str                    # EXECUTE | WAIT | PASS
     claude_read: str                # 2-3 sentences on fit with current conditions
-    key_risks: List[str]            # 2-3 items, each under 15 words
-    thesis_invalidators: List[str]  # 2-3 specific price/event conditions
+    key_risks: List[str] = []       # 2-3 items, each under 15 words
+    thesis_invalidators: List[str] = []  # 2-3 specific price/event conditions
     # Exit levels — underlying stock prices (not option premiums). Populated from
     # Claude's exit_plan response or from top-level fallback fields.
     take_profit: Optional[float] = None    # underlying price at which to close for full profit
     warning_level: Optional[float] = None  # underlying early-warning trigger price
     hard_stop: Optional[float] = None      # underlying price at which to cut the loss
+    auto_pass_reason: Optional[str] = None   # set when DTE/credit gate auto-passes before scoring
+    dte_warning: Optional[str] = None        # set when DTE is 8-13 (below recommended minimum)
+    credit_pct_of_width: Optional[float] = None   # credit spreads only (credit / spread_width)
+    debit_pct_of_width: Optional[float] = None    # debit spreads only (debit / spread_width)
 
     @field_validator("verdict")
     @classmethod
@@ -331,8 +335,8 @@ class TradeEvaluationCard(BaseModel):
     @field_validator("key_risks", "thesis_invalidators")
     @classmethod
     def between_two_and_three_items(cls, v: List[str]) -> List[str]:
-        if not (2 <= len(v) <= 3):
-            raise ValueError(f"must have 2-3 items; got {len(v)}")
+        if v and not (2 <= len(v) <= 3):
+            raise ValueError(f"must have 2-3 items when provided; got {len(v)}")
         return v
 
 

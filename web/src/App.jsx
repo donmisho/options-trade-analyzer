@@ -20,6 +20,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { MsalProvider } from '@azure/msal-react';
 import { msalInstance } from './auth/msalConfig';
 import { AppProvider } from './context/AppContext';
+import { ToastProvider } from './components/Toast';
 import Layout from './components/Layout';
 import OptionsTerminal from './pages/OptionsTerminal';
 // import VerticalsPage from './pages/VerticalsPage';      // DEPRECATED — retained for reference
@@ -61,6 +62,7 @@ export default function App() {
 
   return (
     <MsalProvider instance={msalInstance}>
+      <ToastProvider>
       <BrowserRouter>
         <Routes>
           {/* Public routes — no auth, no AppContext, no Layout chrome */}
@@ -108,6 +110,7 @@ export default function App() {
           </Route>
         </Routes>
       </BrowserRouter>
+      </ToastProvider>
     </MsalProvider>
   );
 }

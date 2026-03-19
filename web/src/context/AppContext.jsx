@@ -15,6 +15,7 @@
 
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { getQuotes, getWatchlist, saveWatchlist as saveWatchlistApi, getFavorites, addFavoriteApi, removeFavoriteApi } from '../api/client';
+import { useToast } from '../components/Toast';
 
 const AppContext = createContext(null);
 
@@ -227,8 +228,8 @@ export function AppProvider({ children }) {
       .catch(() => {});
   }, []);
 
-  // Toast notification
-  const [toast, setToast] = useState(null);
+  // Toast — delegate to ToastProvider (parent in App.jsx)
+  const { showToast } = useToast();
 
   // Persist watchlist to localStorage + backend whenever it changes
   useEffect(() => {
@@ -245,17 +246,6 @@ export function AppProvider({ children }) {
   useEffect(() => {
     saveFavorites(favorites);
   }, [favorites]);
-
-  // Auto-dismiss toast
-  useEffect(() => {
-    if (!toast) return;
-    const timer = setTimeout(() => setToast(null), 2500);
-    return () => clearTimeout(timer);
-  }, [toast]);
-
-  const showToast = useCallback((msgOrObj) => {
-    setToast(typeof msgOrObj === 'string' ? { message: msgOrObj } : msgOrObj);
-  }, []);
 
   /**
    * Add a trade to favorites.
@@ -320,7 +310,6 @@ export function AppProvider({ children }) {
     isFavorited,
 
     // Toast
-    toast,
     showToast,
 
     // Agent panel

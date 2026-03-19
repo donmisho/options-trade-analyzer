@@ -119,6 +119,16 @@ def _try_parse_cards(raw: str) -> Optional[List[TradeEvaluationCard]]:
         return None
 
 
+def _assign_verdict(score: float) -> str:
+    """Enforce strict score band → verdict mapping. This is the ONLY place verdicts are assigned from scores."""
+    if score >= 70:
+        return "EXECUTE"
+    elif score >= 50:
+        return "WAIT"
+    else:
+        return "PASS"
+
+
 def _build_structured_user_message(
     symbol: str,
     current_price: float,
@@ -335,6 +345,109 @@ async def evaluate_structured(
             if computed > 0:
                 dte = computed
 
+    # ─── Pipeline Gate 1: DTE Hard Filter ─────────────────────────────────────
+    # Fires BEFORE any scoring logic. 0-7 DTE has binary gamma exposure.
+    auto_pass_reason = None
+    dte_warning_msg = None
+    credit_pct_of_width = None
+    debit_pct_of_width = None
+
+    if dte <= 7:
+        auto_pass_reason = (
+            f"Insufficient time remaining for active management. "
+            f"This trade expires in {dte} day(s). "
+            "Minimum 8 DTE required to enter any position."
+        )
+    elif dte <= 13:
+        dte_warning_msg = (
+            f"{dte} DTE — Below recommended minimum. "
+            "20-point penalty applied. Exit management time is limited."
+        )
+
+    # ─── Pipeline Gate 2: Credit/Debit Quality ────────────────────────────────
+    # Fires BEFORE scoring. Hard disqualifier if credit < 30% or debit > 40% of width.
+    if auto_pass_reason is None and request.trade:
+        _net_debit = float(request.trade.get("net_debit") or 0)
+        _spread_width = float(request.trade.get("spread_width") or 0)
+
+        if _spread_width > 0:
+            if _net_debit < 0:  # credit spread — net_debit stored negative
+                _net_credit = abs(_net_debit)
+                credit_pct_of_width = round(_net_credit / _spread_width, 4)
+                if credit_pct_of_width < 0.30:
+                    auto_pass_reason = (
+                        f"Credit of ${_net_credit:.2f} represents {credit_pct_of_width * 100:.1f}% of the "
+                        f"${_spread_width:.0f} spread width. "
+                        f"Minimum 30% required (${_spread_width * 0.30:.2f} minimum credit)."
+                    )
+            elif _net_debit > 0:  # debit spread
+                debit_pct_of_width = round(_net_debit / _spread_width, 4)
+                if debit_pct_of_width > 0.40:
+                    auto_pass_reason = (
+                        f"Debit of ${_net_debit:.2f} represents {debit_pct_of_width * 100:.1f}% of the "
+                        f"${_spread_width:.0f} spread width. "
+                        f"Maximum 40% permitted (${_spread_width * 0.40:.2f} maximum debit)."
+                    )
+
+    # ─── Auto-PASS: return immediately, NO Claude API call ────────────────────
+    if auto_pass_reason:
+        logger.info(
+            f"Auto-PASS for {request.symbol} (strategy_keys={request.strategy_keys}): {auto_pass_reason[:80]}"
+        )
+        auto_pass_cards = []
+        for _key in request.strategy_keys:
+            _label = _key.replace("-", " ").title()
+            _trade_structure = (request.trade.get("spread_label") or "") if request.trade else ""
+            auto_pass_cards.append(TradeEvaluationCard(
+                strategy_key=_key,
+                strategy_label=_label,
+                trade_structure=_trade_structure,
+                entry_price=0.0,
+                max_profit=0.0,
+                max_loss=0.0,
+                exit_warning_price=0.0,
+                exit_warning_pnl=0.0,
+                exit_target_debit=0.0,
+                exit_stop_debit=0.0,
+                probability_matrix={},
+                score=0,
+                verdict="PASS",
+                claude_read="",
+                key_risks=[],
+                thesis_invalidators=[],
+                auto_pass_reason=auto_pass_reason,
+                credit_pct_of_width=credit_pct_of_width,
+                debit_pct_of_width=debit_pct_of_width,
+            ))
+
+        db.add(AgentRunLog(
+            run_id=run_id,
+            agent_name="claude-trade-agent",
+            stage="auto_pass",
+            symbol=request.symbol,
+            user_id=user_id,
+            prompt_system="AUTO_PASS",
+            prompt_user="AUTO_PASS",
+            prompt_version=skill.prompt_version,
+            market_snapshot={"symbol": request.symbol, "underlying_price": request.current_price, "iv": request.iv},
+            trade_snapshot={"strategy_keys": request.strategy_keys, "trade": request.trade},
+            model_response_raw=auto_pass_reason,
+            verdict=None,
+            verdict_summary=f"AUTO_PASS: {auto_pass_reason[:120]}",
+            otel_trace_id=None,
+            input_tokens=0,
+            output_tokens=0,
+            model_name="none",
+            created_at=datetime.now(timezone.utc),
+        ))
+        await db.commit()
+
+        return StructuredEvaluationResponse(
+            evaluations=auto_pass_cards,
+            evaluated_at=datetime.now(timezone.utc).isoformat(),
+            agent_run_id=run_id,
+        )
+
     logger.info(f"Evaluation request payload: symbol={request.symbol}, price={request.current_price}, "
                 f"iv={request.iv}, strategies={request.strategy_keys}, dte={dte}, "
                 f"trade_keys={list(request.trade.keys()) if request.trade else None}")
@@ -418,6 +531,28 @@ async def evaluate_structured(
             status_code=502,
             detail="AI returned malformed JSON for structured evaluation after retry.",
         )
+
+    # ─── Fix 3: Verdict Band Enforcement + Inject Pipeline Metrics ────────────
+    for card in evaluations:
+        # Apply DTE penalty for 8-13 DTE
+        if dte_warning_msg and 8 <= dte <= 13:
+            card.score = max(0, card.score - 20)
+            card.dte_warning = dte_warning_msg
+
+        # Enforce strict score band → verdict (ONLY place this happens)
+        correct_verdict = _assign_verdict(card.score)
+        if card.verdict != correct_verdict:
+            logger.info(
+                f"Verdict corrected for {card.strategy_key}: {card.verdict} → {correct_verdict} "
+                f"(score={card.score})"
+            )
+            card.verdict = correct_verdict
+
+        # Inject credit/debit quality metrics
+        if credit_pct_of_width is not None:
+            card.credit_pct_of_width = credit_pct_of_width
+        if debit_pct_of_width is not None:
+            card.debit_pct_of_width = debit_pct_of_width
 
     # Inject the pre-computed probability matrix into every card
     for card in evaluations:

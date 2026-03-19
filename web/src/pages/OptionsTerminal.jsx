@@ -10,6 +10,7 @@
  */
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   ComposedChart, Bar, Line, ReferenceLine, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, Cell,
@@ -17,6 +18,7 @@ import {
 import { STRATEGY_CONFIGS } from '../strategy-configs/index';
 import { apiPost, getQuote, followTrade, takeTrade, getStrategyScorecard } from '../api/client';
 import { useApp } from '../context/AppContext';
+import { useToast } from '../components/Toast';
 import ConfigDrawer from '../components/ConfigDrawer';
 import QuoteBar from '../components/QuoteBar';
 import ResultsTable from '../components/ResultsTable';
@@ -26,6 +28,7 @@ import TradeExpansionPanel from '../components/TradeExpansionPanel';
 import { verticalsColumns } from '../config/verticals-columns';
 import { longOptionsColumns } from '../config/long-options-columns';
 import { C, mono, DEFAULT_PRESETS } from '../styles/tokens';
+import { formatDate } from '../utils/formatDate';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -291,6 +294,8 @@ function countTradingDays(startDateStr) {
 export default function OptionsTerminal({ activeStrategy }) {
   const config = STRATEGY_CONFIGS[activeStrategy] || STRATEGY_CONFIGS.verticals;
   const { activeSymbol } = useApp();
+  const { showToast } = useToast();
+  const navigate = useNavigate();
 
   // ── State ──────────────────────────────────────────────────────────────────
   const [symbol,       setSymbol]       = useState(activeSymbol || 'QQQ');
@@ -302,7 +307,10 @@ export default function OptionsTerminal({ activeStrategy }) {
   const [loading,        setLoading]        = useState(false);
   const [error,          setError]          = useState(null);
   const [lastAnalyzed,   setLastAnalyzed]   = useState(null);
-  const [chartStartDate, setChartStartDate] = useState(() => tradingDaysAgo(90));
+  const [chartStartDate, setChartStartDate] = useState(() => {
+    const saved = sessionStorage.getItem('chartStartDate');
+    return saved || tradingDaysAgo(90);
+  });
   const chartStartDateRef = useRef(chartStartDate);
   const [selectedId,   setSelectedId]   = useState(null);
   const [configOpen,   setConfigOpen]   = useState(false);
@@ -314,7 +322,6 @@ export default function OptionsTerminal({ activeStrategy }) {
   // Follow/Take position modal — { trade, type: 'follow'|'take' }
   const [positionModal, setPositionModal] = useState(null);
   const [positionSubmitting, setPositionSubmitting] = useState(false);
-  const [positionToast, setPositionToast] = useState(null); // { message, error }
 
   // ── Analysis config (weights, DTE, spread types, etc.) ────────────────────
   const [presets,        setPresets]        = useState(DEFAULT_PRESETS);
@@ -330,6 +337,7 @@ export default function OptionsTerminal({ activeStrategy }) {
       spreadTypes: { bull_call: true, bear_put: true, bull_put: false, bear_call: false },
       greeks:  { min_short_delta: 0.15, max_short_delta: 0.45, min_net_delta: 0, max_net_theta: 0 },
       smaPeriods: { short: 8, mid: 21, long: 50 },
+      thetaThreshold: 10,
       systemVars: preset.systemVars
         ? { ...preset.systemVars }
         : { exit_warning_pct: 67, exit_scale_out_pct: 160, exit_underlying_stop_pct: 1.5, exit_time_stop_days: 10 },
@@ -434,7 +442,7 @@ export default function OptionsTerminal({ activeStrategy }) {
     if (isNaN(d)) return null;
     const today = new Date(); today.setHours(0, 0, 0, 0);
     const days = Math.round((d - today) / 86400000);
-    const label = d.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit' });
+    const label = formatDate(dateStr);
     return { label, days };
   }
   const changeColor = (v) => v == null ? DIM : v > 0 ? GREEN : v < 0 ? RED : DIM;
@@ -527,19 +535,18 @@ export default function OptionsTerminal({ activeStrategy }) {
       const fn = type === 'follow' ? followTrade : takeTrade;
       await fn(payload);
 
-      setPositionToast({
-        message: `${type === 'follow' ? 'Paper follow' : 'Live position'} created for ${symbol}`,
-        error: false,
+      showToast({
+        message: type === 'follow' ? 'Position added to Positions page' : 'Live position created',
+        actionText: 'View Positions',
+        onAction: () => navigate('/positions'),
       });
-      setTimeout(() => setPositionToast(null), 4000);
     } catch (err) {
-      setPositionToast({ message: err.message || 'Failed to create position', error: true });
-      setTimeout(() => setPositionToast(null), 5000);
+      showToast({ message: err.message || 'Failed to create position' });
     } finally {
       setPositionSubmitting(false);
       setPositionModal(null);
     }
-  }, [positionModal, symbol, activeStrategy, smaData, underlyingPrice]);
+  }, [positionModal, symbol, activeStrategy, smaData, underlyingPrice, showToast, navigate]);
 
   // ── Config apply ──────────────────────────────────────────────────────────
   const handleConfigApply = useCallback((newConfig) => {
@@ -616,8 +623,9 @@ export default function OptionsTerminal({ activeStrategy }) {
 
   // Context passed to column render functions
   const tableContext = {
-    currentPrice: quoteData?.price ?? underlyingPrice,
-    systemVars:   analysisConfig.systemVars,
+    currentPrice:   quoteData?.price ?? underlyingPrice,
+    systemVars:     analysisConfig.systemVars,
+    thetaThreshold: analysisConfig.thetaThreshold ?? 10,
   };
 
   // ── Scorecard scores filtered by trade_structure ──────────────────────────
@@ -741,7 +749,12 @@ export default function OptionsTerminal({ activeStrategy }) {
                 type="date"
                 value={chartStartDate}
                 max={new Date().toISOString().slice(0, 10)}
-                onChange={e => e.target.value && setChartStartDate(e.target.value)}
+                onChange={e => {
+                  if (e.target.value) {
+                    setChartStartDate(e.target.value);
+                    sessionStorage.setItem('chartStartDate', e.target.value);
+                  }
+                }}
                 style={{
                   width: '100%', boxSizing: 'border-box',
                   backgroundColor: C.bg, border: `1px solid ${BORDER}`,
@@ -884,7 +897,14 @@ export default function OptionsTerminal({ activeStrategy }) {
           />
         )}
 
-        {/* Empty state */}
+        {/* Empty state — no analysis run yet */}
+        {!loading && !error && trades.length === 0 && underlyingPrice === 0 && (
+          <div style={{ paddingTop: 40, textAlign: 'center', color: MUTED, fontSize: 12, fontFamily: mono }}>
+            Enter a symbol to analyze {config.label}
+          </div>
+        )}
+
+        {/* Empty state — analyzed but no results */}
         {!loading && !error && trades.length === 0 && underlyingPrice > 0 && (
           <div style={{ padding: '40px 16px', textAlign: 'center' }}>
             <div style={{ fontSize: 32, marginBottom: 12 }}>📊</div>
@@ -965,19 +985,6 @@ export default function OptionsTerminal({ activeStrategy }) {
               </button>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* Position toast notification */}
-      {positionToast && (
-        <div style={{
-          position: 'fixed', bottom: 24, right: 24, zIndex: 300,
-          background: positionToast.error ? '#ef4444' : C.green,
-          color: '#fff', borderRadius: 6, padding: '10px 18px',
-          fontSize: 13, fontWeight: 600, fontFamily: mono,
-          boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
-        }}>
-          {positionToast.message}
         </div>
       )}
 

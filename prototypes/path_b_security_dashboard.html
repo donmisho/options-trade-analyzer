@@ -1,0 +1,233 @@
+
+<style>
+:root{--bg:#0d1117;--bg2:#161b22;--bg3:#21262d;--border:#30363d;--teal:#2dd4bf;--amber:#f59e0b;--red:#f87171;--green:#4ade80;--blue:#60a5fa;--text:#e6edf3;--muted:#8b949e;--purple:#c084fc}
+*{box-sizing:border-box;margin:0;padding:0}
+.app{background:var(--bg);color:var(--text);font-family:var(--font-mono,'Courier New',monospace);font-size:12px;border-radius:12px;overflow:hidden;border:1px solid var(--border)}
+.nav{background:var(--bg2);border-bottom:1px solid var(--border);padding:0 16px;display:flex;align-items:center;gap:0}
+.logo{color:var(--teal);font-size:13px;font-weight:500;margin-right:24px;padding:10px 0}
+.navtab{padding:10px 14px;font-size:12px;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent}
+.navtab.active{color:var(--teal);border-bottom-color:var(--teal)}
+.navright{margin-left:auto;display:flex;align-items:center;gap:12px}
+.conn{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--green)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--green)}
+.body{display:flex}
+.sidebar{width:140px;background:var(--bg2);border-right:1px solid var(--border);padding:10px 0}
+.sitem{padding:8px 14px;font-size:11px;cursor:pointer;border-left:2px solid transparent;color:var(--muted)}
+.sitem.active{color:var(--teal);border-left-color:var(--teal);background:rgba(45,212,191,.06)}
+.sname{font-size:10px;color:var(--muted);padding:8px 14px 4px;text-transform:uppercase;letter-spacing:.5px}
+.main{flex:1;overflow:hidden}
+.quotebar{background:var(--bg2);border-bottom:1px solid var(--border);padding:10px 16px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.qsym{font-size:16px;font-weight:500;color:var(--text)}
+.badge{padding:2px 7px;border-radius:4px;font-size:10px;font-weight:500}
+.bull{background:rgba(74,222,128,.15);color:var(--green)}
+.qfield{display:flex;flex-direction:column;gap:1px}
+.qlabel{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
+.qval{font-size:12px;color:var(--text)}
+.qneg{color:var(--red)}
+.earn{background:rgba(245,158,11,.2);color:var(--amber);padding:2px 7px;border-radius:4px;font-size:10px}
+.chart-stub{background:var(--bg);height:110px;border-bottom:1px solid var(--border);padding:8px 16px;position:relative;overflow:hidden}
+.content{padding:16px}
+.section-title{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:12px}
+.scorecard{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:16px}
+.sc-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+.strat-row{display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid rgba(48,54,61,.5)}
+.strat-row:last-child{border-bottom:none}
+.strat-check{width:14px;height:14px;cursor:pointer;accent-color:var(--teal)}
+.strat-name{width:130px;font-size:12px;font-weight:500}
+.strat-sub{font-size:10px;color:var(--muted)}
+.bar-wrap{flex:1;height:8px;background:var(--bg3);border-radius:4px;overflow:hidden}
+.bar{height:100%;border-radius:4px}
+.score-num{width:36px;text-align:right;font-size:13px;font-weight:600}
+.signal-wrap{font-size:10px;color:var(--muted);text-align:right;min-width:140px}
+.sc-actions{display:flex;align-items:center;gap:12px;margin-top:14px;padding-top:12px;border-top:1px solid var(--border)}
+.btn-eval{background:var(--teal);color:#0d1117;padding:6px 18px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;border:none;font-family:inherit}
+.sel-count{font-size:11px;color:var(--muted)}
+.cards-area{display:flex;flex-direction:column;gap:12px}
+.eval-card{background:var(--bg2);border:1px solid rgba(45,212,191,.3);border-radius:10px;padding:14px}
+.eval-card.wait{border-color:rgba(245,158,11,.3)}
+.ev-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px}
+.ev-title{font-size:13px;font-weight:500;margin-bottom:3px}
+.ev-sub{font-size:10px;color:var(--muted)}
+.verdict{padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600}
+.v-exec{background:rgba(74,222,128,.15);color:var(--green)}
+.v-wait{background:rgba(245,158,11,.15);color:var(--amber)}
+.ev-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;margin-bottom:10px}
+.ev-cell{background:var(--bg3);border-radius:6px;padding:7px 8px}
+.ev-label{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;margin-bottom:2px}
+.ev-val{font-size:11px;font-weight:500}
+.ev-warn{color:var(--red)}
+.ev-pos{color:var(--green)}
+.prob-table{width:100%;border-collapse:collapse;font-size:10px;margin-bottom:10px}
+.prob-table th{background:var(--bg3);padding:4px 8px;text-align:center;color:var(--muted);font-weight:500;border:1px solid var(--border)}
+.prob-table td{padding:4px 8px;text-align:center;border:1px solid rgba(48,54,61,.4)}
+.prob-table .current-row td{background:rgba(45,212,191,.08);color:var(--teal)}
+.heat-hi{background:rgba(74,222,128,.2);color:var(--green)}
+.heat-md{background:rgba(245,158,11,.1);color:var(--amber)}
+.heat-lo{background:rgba(248,113,113,.1);color:var(--red)}
+.claude-read{font-size:11px;color:var(--muted);line-height:1.6;font-style:italic;margin-bottom:10px}
+.ev-actions{display:flex;gap:8px}
+.btn-follow{background:transparent;border:1px solid var(--teal);color:var(--teal);padding:5px 14px;border-radius:5px;font-size:11px;cursor:pointer;font-family:inherit;font-weight:500}
+.btn-take{background:var(--teal);color:#0d1117;padding:5px 14px;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;border:none;font-family:inherit}
+</style>
+<div class="app">
+  <div class="nav">
+    <div class="logo">⌥ Options Analyzer</div>
+    <div class="navtab">Dashboard</div>
+    <div class="navtab">Verticals</div>
+    <div class="navtab">Puts &amp; Calls</div>
+    <div class="navtab">Positions</div>
+    <div class="navright"><div class="conn"><div class="dot"></div>Connected</div></div>
+  </div>
+  <div class="body">
+    <div class="sidebar">
+      <div class="sname">Watchlist</div>
+      <div class="sitem">AMZN</div>
+      <div class="sitem active">MSFT</div>
+      <div class="sitem">NVDA</div>
+      <div class="sitem">SPY</div>
+      <div class="sitem">QQQ</div>
+    </div>
+    <div class="main">
+      <!-- QuoteBar - IDENTICAL to Path A -->
+      <div class="quotebar">
+        <span class="qsym">MSFT</span>
+        <span class="badge bull">BULLISH</span>
+        <div class="qfield"><span class="qlabel">Last analyzed</span><span class="qval">03/13 17:52</span></div>
+        <div class="qfield"><span class="qlabel">Price</span><span class="qval">415.23</span></div>
+        <div class="qfield"><span class="qlabel">CHG</span><span class="qval" style="color:var(--green)">+2.14</span></div>
+        <div class="qfield"><span class="qlabel">CHG %</span><span class="qval" style="color:var(--green)">+0.52%</span></div>
+        <div class="qfield"><span class="qlabel">Day Range</span><span class="qval">412.80 – 416.40</span></div>
+        <div class="qfield"><span class="qlabel">52W Range</span><span class="qval">362.90 – 468.35</span></div>
+        <div class="qfield"><span class="qlabel">Volume</span><span class="qval">22.1M</span></div>
+        <div class="qfield"><span class="qlabel">Rel Vol</span><span class="qval">1.1x</span></div>
+        <span class="earn">Earnings 04/23</span>
+      </div>
+      <!-- Chart stub -->
+      <div class="chart-stub">
+        <svg width="100%" height="100%" viewBox="0 0 500 80" preserveAspectRatio="none">
+          <polyline points="0,60 50,55 100,48 150,52 200,40 250,35 300,28 350,32 400,22 450,18 500,14" fill="none" stroke="#2dd4bf" stroke-width="1.5" opacity="0.8"/>
+          <polyline points="0,60 50,55 100,48 150,52 200,40 250,35 300,28 350,32 400,22 450,18 500,14 500,80 0,80" fill="rgba(45,212,191,0.07)" stroke="none"/>
+          <line x1="0" y1="38" x2="500" y2="38" stroke="#f59e0b" stroke-width="0.5" stroke-dasharray="3 3" opacity="0.5"/>
+          <line x1="0" y1="52" x2="500" y2="52" stroke="#60a5fa" stroke-width="0.5" stroke-dasharray="3 3" opacity="0.4"/>
+        </svg>
+      </div>
+      <!-- Content -->
+      <div class="content">
+        <!-- Strategy Scorecard -->
+        <div class="scorecard">
+          <div class="sc-header">
+            <span class="section-title">Strategy scorecard — MSFT</span>
+            <span style="font-size:10px;color:var(--muted)">Select strategies to evaluate</span>
+          </div>
+          <!-- Steady Paycheck -->
+          <div class="strat-row">
+            <input type="checkbox" class="strat-check" id="s1" checked onchange="countChecked()">
+            <div style="width:130px"><div class="strat-name">Steady Paycheck</div><div class="strat-sub">30-45 DTE credit spread</div></div>
+            <div class="bar-wrap"><div class="bar" style="width:91%;background:var(--green)"></div></div>
+            <span class="score-num" style="color:var(--green)">91</span>
+            <div class="signal-wrap">IV rank 67 · bullish SMA</div>
+          </div>
+          <!-- Trend Rider -->
+          <div class="strat-row">
+            <input type="checkbox" class="strat-check" id="s2" checked onchange="countChecked()">
+            <div style="width:130px"><div class="strat-name">Trend Rider</div><div class="strat-sub">30-60 DTE long call</div></div>
+            <div class="bar-wrap"><div class="bar" style="width:78%;background:var(--green)"></div></div>
+            <span class="score-num" style="color:var(--green)">78</span>
+            <div class="signal-wrap">8 &gt; 21 &gt; 50 aligned</div>
+          </div>
+          <!-- Weekly Grind -->
+          <div class="strat-row">
+            <input type="checkbox" class="strat-check" id="s3" onchange="countChecked()">
+            <div style="width:130px"><div class="strat-name">Weekly Grind</div><div class="strat-sub">7-14 DTE credit spread</div></div>
+            <div class="bar-wrap"><div class="bar" style="width:52%;background:var(--amber)"></div></div>
+            <span class="score-num" style="color:var(--amber)">52</span>
+            <div class="signal-wrap">Theta/Gamma borderline</div>
+          </div>
+          <!-- Lottery Ticket -->
+          <div class="strat-row">
+            <input type="checkbox" class="strat-check" id="s4" onchange="countChecked()">
+            <div style="width:130px"><div class="strat-name">Lottery Ticket</div><div class="strat-sub">1-7 DTE deep OTM</div></div>
+            <div class="bar-wrap"><div class="bar" style="width:19%;background:var(--red)"></div></div>
+            <span class="score-num" style="color:var(--red)">19</span>
+            <div class="signal-wrap">No catalyst · low payout</div>
+          </div>
+          <div class="sc-actions">
+            <button class="btn-eval" onclick="showCards()">Evaluate Selected</button>
+            <span class="sel-count" id="selCount">2 strategies selected</span>
+          </div>
+        </div>
+        <!-- Evaluation Cards -->
+        <div class="cards-area" id="cardsArea" style="display:none">
+          <div class="section-title">Claude evaluation · MSFT · 03/13 17:53</div>
+          <!-- Card 1: Steady Paycheck -->
+          <div class="eval-card">
+            <div class="ev-header">
+              <div>
+                <div class="ev-title">Steady Paycheck</div>
+                <div class="ev-sub">Sell 415P / Buy 410P · Apr 17 expiry · Score 91</div>
+              </div>
+              <span class="verdict v-exec">EXECUTE</span>
+            </div>
+            <div class="ev-grid">
+              <div class="ev-cell"><div class="ev-label">Entry credit</div><div class="ev-val ev-pos">2.45</div></div>
+              <div class="ev-cell"><div class="ev-label">Max profit</div><div class="ev-val ev-pos">245</div></div>
+              <div class="ev-cell"><div class="ev-label">Max loss</div><div class="ev-val ev-warn">255</div></div>
+              <div class="ev-cell"><div class="ev-label">Exit warning</div><div class="ev-val ev-warn">&lt; 412.50</div></div>
+              <div class="ev-cell"><div class="ev-label">Take profit</div><div class="ev-val">1.23 debit</div></div>
+              <div class="ev-cell"><div class="ev-label">Stop loss</div><div class="ev-val ev-warn">4.90 debit</div></div>
+            </div>
+            <!-- Probability matrix -->
+            <table class="prob-table">
+              <tr><th>Price</th><th>Exp -9</th><th>Exp -6</th><th>Exp -3</th><th>Expiry</th></tr>
+              <tr><td>440</td><td class="heat-lo">4%</td><td class="heat-lo">2%</td><td class="heat-lo">1%</td><td class="heat-lo">0%</td></tr>
+              <tr><td>430</td><td class="heat-md">11%</td><td class="heat-lo">7%</td><td class="heat-lo">3%</td><td class="heat-lo">1%</td></tr>
+              <tr><td>420</td><td class="heat-hi">24%</td><td class="heat-md">18%</td><td class="heat-md">10%</td><td class="heat-lo">5%</td></tr>
+              <tr class="current-row"><td>415 ★</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+              <tr><td>410</td><td class="heat-hi">22%</td><td class="heat-md">17%</td><td class="heat-md">11%</td><td class="heat-lo">6%</td></tr>
+              <tr><td>400</td><td class="heat-md">12%</td><td class="heat-lo">8%</td><td class="heat-lo">4%</td><td class="heat-lo">2%</td></tr>
+              <tr><td>390</td><td class="heat-lo">5%</td><td class="heat-lo">3%</td><td class="heat-lo">1%</td><td class="heat-lo">0%</td></tr>
+            </table>
+            <div class="claude-read">"MSFT's bullish SMA alignment and IV rank of 67 make this an ideal income setup. The 415 strike has established strong support over the past 3 weeks. Note earnings on 04/23 — target 50% profit before that date or close the position."</div>
+            <div class="ev-actions">
+              <button class="btn-follow" onclick="sendPrompt('Follow MSFT Steady Paycheck: Sell 415P / Buy 410P Apr 17 as a paper trade')">📌 Follow (Paper)</button>
+              <button class="btn-take" onclick="sendPrompt('Take live position: MSFT Sell 415P / Buy 410P Apr 17')">💰 Take Position</button>
+            </div>
+          </div>
+          <!-- Card 2: Trend Rider -->
+          <div class="eval-card wait">
+            <div class="ev-header">
+              <div>
+                <div class="ev-title">Trend Rider</div>
+                <div class="ev-sub">Buy 415C · May 15 expiry · Score 78</div>
+              </div>
+              <span class="verdict v-wait">WAIT</span>
+            </div>
+            <div class="ev-grid">
+              <div class="ev-cell"><div class="ev-label">Entry debit</div><div class="ev-val ev-warn">8.40</div></div>
+              <div class="ev-cell"><div class="ev-label">Max profit</div><div class="ev-val ev-pos">Unlimited</div></div>
+              <div class="ev-cell"><div class="ev-label">Max loss</div><div class="ev-val ev-warn">840</div></div>
+              <div class="ev-cell"><div class="ev-label">Exit warning</div><div class="ev-val ev-warn">&lt; 410</div></div>
+              <div class="ev-cell"><div class="ev-label">Target exit</div><div class="ev-val">&gt; 430</div></div>
+              <div class="ev-cell"><div class="ev-label">Stop loss</div><div class="ev-val ev-warn">4.20 debit</div></div>
+            </div>
+            <div class="claude-read">"The bullish thesis is valid but IV rank at 67 is elevated for a long call entry — you're paying a premium for volatility that may compress. Consider waiting for IV to normalize below 50 or for a pullback to the 21-day SMA before entering."</div>
+            <div class="ev-actions">
+              <button class="btn-follow" onclick="sendPrompt('Follow MSFT Trend Rider: Buy 415C May 15 as a paper trade')">📌 Follow (Paper)</button>
+              <button class="btn-take" onclick="sendPrompt('Take live position: MSFT Buy 415C May 15')">💰 Take Position</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+function countChecked(){
+  var n=[1,2,3,4].filter(function(i){return document.getElementById('s'+i).checked}).length;
+  document.getElementById('selCount').textContent=n+' strateg'+(n===1?'y':'ies')+' selected';
+}
+function showCards(){
+  var a=document.getElementById('cardsArea');
+  a.style.display=a.style.display==='none'?'block':'none';
+}
+</script>

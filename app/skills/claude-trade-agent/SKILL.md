@@ -400,6 +400,43 @@ RECALLED (pre-loaded prior context)
 
 ---
 
+## IV Impact by Spread Type — CRITICAL DISTINCTION
+
+When discussing the impact of implied volatility (IV) or IV Rank on a trade:
+
+### Credit Spreads (Steady Paycheck, Weekly Grind)
+- Elevated IV Rank increases the credit (premium) received — this is FAVORABLE for premium sellers
+- Say: "Elevated IV Rank of X% increases premium received, benefiting this credit strategy"
+- NEVER say IV is a headwind or increases cost for a credit spread
+
+### Debit Spreads (Trend Rider, Lottery Ticket, long calls, long puts)
+- Elevated IV Rank increases the premium cost paid — this is a HEADWIND for premium buyers
+- Say: "Elevated IV Rank of X% increases the premium cost, creating a headwind; confirm debit ≤ 40% of spread width"
+- NEVER say IV benefits or helps a debit spread (unless IV is LOW, which reduces entry cost)
+
+### Key Rule
+The words "benefits" and "headwind" must NEVER be reversed between credit and debit contexts.
+If you find yourself writing that IV "benefits" a debit spread buyer, stop — that is incorrect
+unless IV is below historical average.
+
+---
+
+## Earnings Proximity — Post-Expiry Window
+
+When earnings occur within 14 calendar days AFTER the option's expiration date:
+- Flag this explicitly in the analysis
+- Use language: "⚠️ Earnings [DATE] — [X] days post-expiry. Pre-earnings IV buildup
+  may affect premium pricing and spread behavior in the final week before expiration."
+- This applies to ALL strategy types
+- The flag is informational (does not auto-PASS), but should be noted in the
+  Pre-Screen Checks section of the evaluation card
+
+When earnings occur BEFORE expiration:
+- This is already handled by the existing earnings-during-trade logic
+- Do not double-flag
+
+---
+
 ## Foundry Registration (follow ota-agentic-strategy checklist)
 
 When registering this agent in the Foundry portal:

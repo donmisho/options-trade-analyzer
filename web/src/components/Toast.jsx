@@ -1,35 +1,101 @@
 /**
- * Toast — Temporary notification that slides up from the bottom-right.
+ * Toast — Shared notification system.
  *
- * Controlled by AppContext toast state: { message, href?, linkLabel? }
- * showToast('text') and showToast({ message, href, linkLabel }) both work.
+ * Exports:
+ *   ToastProvider  — wraps the app, renders the fixed toast container
+ *   useToast       — hook returning { showToast }
+ *   default Toast  — no-op kept for Layout.jsx backward compat
+ *
+ * API:
+ *   showToast('simple message')
+ *   showToast({ message, actionText, onAction, href, linkLabel, duration })
+ *
+ * Toasts auto-dismiss after 4 seconds (or custom duration).
+ * Multiple toasts stack vertically (gap: 8px), newest at top.
  */
 
-import { useApp } from '../context/AppContext';
+import { createContext, useContext, useState, useCallback } from 'react';
 import './Toast.css';
 
-export default function Toast() {
-  const { toast, showToast } = useApp();
-  const msg = toast?.message ?? '';
-  const href = toast?.href;
-  const linkLabel = toast?.linkLabel;
+// ─── Context ──────────────────────────────────────────────────────────────────
+
+const ToastContext = createContext({ showToast: () => {} });
+
+// ─── Provider ─────────────────────────────────────────────────────────────────
+
+export function ToastProvider({ children }) {
+  const [toasts, setToasts] = useState([]);
+
+  const showToast = useCallback((msgOrObj) => {
+    if (msgOrObj === null) {
+      setToasts([]);
+      return;
+    }
+    const id = Date.now() + Math.random();
+    const t = typeof msgOrObj === 'string'
+      ? { id, message: msgOrObj }
+      : { id, ...msgOrObj };
+    setToasts(prev => [...prev, t]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(item => item.id !== id));
+    }, t.duration ?? 4000);
+  }, []);
+
+  const dismiss = useCallback((id) => {
+    setToasts(prev => prev.filter(item => item.id !== id));
+  }, []);
 
   return (
-    <div
-      className={`toast ${toast ? 'show' : ''}`}
-      onClick={() => showToast(null)}
-    >
-      <span className="toast-star">★</span>
-      <span>{msg}</span>
-      {href && linkLabel && (
+    <ToastContext.Provider value={{ showToast }}>
+      {children}
+      <div className="toast-container">
+        {toasts.map(t => (
+          <ToastItem key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
+        ))}
+      </div>
+    </ToastContext.Provider>
+  );
+}
+
+// ─── Hook ─────────────────────────────────────────────────────────────────────
+
+export function useToast() {
+  return useContext(ToastContext);
+}
+
+// ─── Toast item ───────────────────────────────────────────────────────────────
+
+function ToastItem({ toast, onDismiss }) {
+  const handleAction = (e) => {
+    e.stopPropagation();
+    toast.onAction?.();
+    onDismiss();
+  };
+
+  return (
+    <div className="toast show" onClick={onDismiss}>
+      <span className="toast-msg">{toast.message}</span>
+      {toast.actionText && toast.onAction && (
+        <button className="toast-action" onClick={handleAction}>
+          {toast.actionText}
+        </button>
+      )}
+      {!toast.onAction && toast.href && toast.linkLabel && (
         <a
-          href={href}
-          style={{ color: '#2dd4bf', fontSize: 10, marginLeft: 6, textDecoration: 'underline' }}
+          href={toast.href}
+          className="toast-action"
           onClick={e => e.stopPropagation()}
         >
-          {linkLabel}
+          {toast.linkLabel}
         </a>
       )}
     </div>
   );
+}
+
+// ─── Default export (no-op for backward compat) ───────────────────────────────
+// Layout.jsx imports this; rendering is now handled by ToastProvider.
+
+export default function Toast() {
+  return null;
 }
