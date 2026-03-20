@@ -362,6 +362,48 @@ async def get_position(
     return _to_response(pos)
 
 
+@router.post("/{position_id}/health", response_model=PositionResponse)
+async def refresh_health(
+    position_id: str,
+    current_price: Optional[float] = None,
+    user: dict = Depends(require_read),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Recompute health grade for an open position.
+    Optionally accepts current_price to update mark-to-market first.
+    Called on-demand from UI or by the Position Monitor Agent.
+    """
+    result = await db.execute(
+        select(Position).where(
+            Position.position_id == position_id,
+            Position.user_id == user["sub"],
+        )
+    )
+    pos = result.scalar_one_or_none()
+    if not pos:
+        raise HTTPException(status_code=404, detail="Position not found")
+
+    if current_price is not None:
+        entry = float(pos.entry_price) if pos.entry_price is not None else 0.0
+        pos.current_price = current_price
+        pos.current_pnl = current_price - entry
+        pos.last_monitored_at = datetime.now(timezone.utc)
+
+    grade = compute_health_grade(
+        entry_price=float(pos.entry_price) if pos.entry_price is not None else 0.0,
+        current_price=float(pos.current_price) if pos.current_price is not None else None,
+        claude_exit_levels_json=pos.claude_exit_levels,
+    )
+    pos.health_grade = grade
+    pos.updated_at = datetime.now(timezone.utc)
+
+    await db.commit()
+    await db.refresh(pos)
+    log.info(f"refresh_health: {pos.symbol} grade={grade} user={user['sub']}")
+    return _to_response(pos)
+
+
 @router.patch("/{position_id}/close", response_model=PositionResponse)
 async def close_position(
     position_id: str,

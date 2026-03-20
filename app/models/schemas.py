@@ -341,8 +341,40 @@ class TradeEvaluationCard(BaseModel):
 
 
 # ============================================================
-# Position Tracking Schemas (Phase 2.10)
+# Position Tracking Schemas (Phase 2.10 / 2.2)
 # ============================================================
+
+class LegIn(BaseModel):
+    """A single option leg within a multi-leg trade structure."""
+    side: str           # "long" or "short"
+    option_type: str    # "call" or "put"
+    strike: float
+    expiration: str     # "MM-DD-YYYY"
+    contracts: int = 1
+
+
+class PositionCreate(BaseModel):
+    """
+    Simplified position create schema (Phase 2.2 spec).
+    Uses structured legs list rather than free-form trade_structure dict.
+    """
+    symbol: str
+    strategy: str
+    trade_structure: str    # e.g. "bull_put_spread"
+    position_type: str      # "paper" or "live"
+    legs: list[LegIn]
+    entry_price: float
+    entry_score: Optional[float] = None
+    entry_verdict: Optional[str] = None
+    claude_verdict: Optional[str] = None
+    claude_score: Optional[float] = None
+    claude_summary: Optional[str] = None
+
+
+class PositionClose(BaseModel):
+    """Simplified close schema (Phase 2.2 spec)."""
+    close_price: float
+    close_reason: Optional[str] = "manual"
 
 class FollowPositionRequest(BaseModel):
     """Follow an existing position (paper or live) for monitoring."""
