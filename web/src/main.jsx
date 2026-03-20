@@ -13,6 +13,8 @@ import App from './App';
 import { msalInstance, loginRequest } from './auth/msalConfig';
 import { entraLogin, getSchwabStatus } from './api/client';
 import './styles/global.css';
+import 'react-grid-layout/css/styles.css';
+import 'react-resizable/css/styles.css';
 
 // MSAL v5 requires initialize() before the app renders.
 // After initialize(), call handleRedirectPromise() to process the auth code

@@ -725,3 +725,46 @@ class Position(Base):
         Index("ix_positions_user_status", "user_id", "status"),
         Index("ix_positions_user_symbol", "user_id", "symbol"),
     )
+
+
+# ─── Dashboard ────────────────────────────────────────────────────────────────
+
+
+class DashboardLayout(Base):
+    """
+    Per-user dashboard layout: grid positions and widget configs.
+
+    layout_json — react-grid-layout position array (JSON)
+    widgets_json — widget config array (JSON, includes type/title/settings)
+
+    One row per user (unique=True on user_id). Upserted on save.
+    """
+    __tablename__ = "dashboard_layouts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String(36), nullable=False, unique=True, index=True)
+    layout_json = Column(Text, nullable=False)
+    widgets_json = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class DashboardMedia(Base):
+    """
+    Image metadata for media widgets. One row per image per widget.
+
+    blob_name references a blob in the Azure Blob Storage dashboard-media container.
+    SAS URLs are generated at read time (never stored) so they are always fresh.
+    """
+    __tablename__ = "dashboard_media"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    widget_id = Column(String(100), nullable=False, index=True)
+    blob_name = Column(String(500), nullable=False)
+    caption = Column(String(200), nullable=True)
+    sort_order = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_dashboard_media_widget", "widget_id", "sort_order"),
+    )

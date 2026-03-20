@@ -566,3 +566,23 @@ export async function actOnInsight(insightId) {
     method: 'PATCH',
   });
 }
+
+
+// ═══════════════════════════════════════════════════════════════════
+// DASHBOARD (Phase 2.3)
+// ═══════════════════════════════════════════════════════════════════
+
+export async function getDashboardLayout() {
+  return apiFetch('/dashboard');
+}
+
+export async function saveDashboardLayout(payload) {
+  return apiFetch('/dashboard', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getDashboardMedia(widgetId) {
+  return apiFetch(`/dashboard/media/${encodeURIComponent(widgetId)}`);
+}

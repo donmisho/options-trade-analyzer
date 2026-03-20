@@ -7,6 +7,7 @@ anthropic==0.84.0
 anyio==4.12.1
 azure-core==1.38.2
 azure-identity==1.19.0
+azure-storage-blob>=12.19.0
 azure-keyvault-secrets==4.9.0
 bcrypt==4.0.1
 certifi==2026.1.4

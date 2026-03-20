@@ -88,6 +88,11 @@ class Settings(BaseSettings):
     foundry_endpoint: Optional[str] = None
     foundry_model: str = "claude-sonnet-4-6"
 
+    # --- Azure Blob Storage (dashboard media) ---
+    azure_storage_account_name: str = "otaunstructured"
+    azure_storage_dashboard_container: str = "dashboard-media"
+    azure_storage_sas_expiry_minutes: int = 15
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",
