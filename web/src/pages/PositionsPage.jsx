@@ -10,6 +10,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PositionHealthBadge } from '../components/PositionHealthBadge';
+import { PositionDetailPanel } from '../components/PositionDetailPanel';
 import { getPositions, closePosition } from '../api/client';
 import './PageShared.css';
 import './PositionsPage.css';
@@ -100,12 +101,16 @@ function ExitReasonBadge({ reason }) {
 }
 
 function ActiveTable({ positions, onClose, onView }) {
+  const [expandedId, setExpandedId] = useState(null);
   if (!positions.length) return null;
+  const toggleExpand = (id) => setExpandedId(prev => prev === id ? null : id);
+  const COL_COUNT = 10;
   return (
     <div className="table-wrap" style={{ marginBottom: 12 }}>
       <table>
         <thead>
           <tr>
+            <th style={{ width: 20 }}></th>
             <th>Symbol</th>
             <th>Type</th>
             <th>Grade</th>
@@ -121,29 +126,48 @@ function ActiveTable({ positions, onClose, onView }) {
           {positions.map(pos => {
             const dte = calcDte(pos.trade_structure?.expiration);
             const dteColor = dte == null ? '' : dte <= 5 ? '#ef4444' : dte <= 10 ? '#f97316' : '';
+            const isExpanded = expandedId === pos.position_id;
             return (
-              <tr key={pos.position_id}>
-                <td>
-                  <button className="pos-symbol-btn" onClick={() => onView(pos.symbol)}>
-                    {pos.symbol}
-                  </button>
-                </td>
-                <td><SourceBadge source={pos.source} /></td>
-                <td><PositionHealthBadge grade={pos.health_grade} /></td>
-                <td className="mono text-muted">{fmtPrice(pos.entry_underlying_price)}</td>
-                <td className="mono">{fmtPrice(pos.current_price)}</td>
-                <td className={`mono ${pnlClass(pos.current_pnl)}`}>{fmtPnl(pos.current_pnl)}</td>
-                <td className="mono" style={{ color: dteColor || undefined }}>
-                  {dte != null ? `${dte}d` : '—'}
-                </td>
-                <td className="mono text-muted">{pos.claude_score ?? '—'}</td>
-                <td>
-                  <div className="pos-actions">
-                    <button className="pos-btn-close" onClick={() => onClose(pos)}>Close</button>
-                    <button className="pos-btn-view" onClick={() => onView(pos.symbol)}>View</button>
-                  </div>
-                </td>
-              </tr>
+              <>
+                <tr key={pos.position_id}>
+                  <td>
+                    <button
+                      className="pos-expand-btn"
+                      onClick={() => toggleExpand(pos.position_id)}
+                      title={isExpanded ? 'Collapse' : 'Expand'}
+                    >
+                      {isExpanded ? '▾' : '▸'}
+                    </button>
+                  </td>
+                  <td>
+                    <button className="pos-symbol-btn" onClick={() => onView(pos.symbol)}>
+                      {pos.symbol}
+                    </button>
+                  </td>
+                  <td><SourceBadge source={pos.source} /></td>
+                  <td><PositionHealthBadge grade={pos.health_grade} /></td>
+                  <td className="mono text-muted">{fmtPrice(pos.entry_underlying_price)}</td>
+                  <td className="mono">{fmtPrice(pos.current_price)}</td>
+                  <td className={`mono ${pnlClass(pos.current_pnl)}`}>{fmtPnl(pos.current_pnl)}</td>
+                  <td className="mono" style={{ color: dteColor || undefined }}>
+                    {dte != null ? `${dte}d` : '—'}
+                  </td>
+                  <td className="mono text-muted">{pos.claude_score ?? '—'}</td>
+                  <td>
+                    <div className="pos-actions">
+                      <button className="pos-btn-close" onClick={() => onClose(pos)}>Close</button>
+                      <button className="pos-btn-view" onClick={() => onView(pos.symbol)}>View</button>
+                    </div>
+                  </td>
+                </tr>
+                {isExpanded && (
+                  <PositionDetailPanel
+                    key={`detail-${pos.position_id}`}
+                    position={pos}
+                    colSpan={COL_COUNT}
+                  />
+                )}
+              </>
             );
           })}
         </tbody>
@@ -153,12 +177,16 @@ function ActiveTable({ positions, onClose, onView }) {
 }
 
 function ClosedTable({ positions }) {
+  const [expandedId, setExpandedId] = useState(null);
   if (!positions.length) return null;
+  const toggleExpand = (id) => setExpandedId(prev => prev === id ? null : id);
+  const COL_COUNT = 9;
   return (
     <div className="table-wrap">
       <table>
         <thead>
           <tr>
+            <th style={{ width: 20 }}></th>
             <th>Symbol</th>
             <th>Type</th>
             <th>Grade</th>
@@ -170,18 +198,39 @@ function ClosedTable({ positions }) {
           </tr>
         </thead>
         <tbody>
-          {positions.map(pos => (
-            <tr key={pos.position_id}>
-              <td className="mono text-cyan">{pos.symbol}</td>
-              <td><SourceBadge source={pos.source} /></td>
-              <td><PositionHealthBadge grade={pos.health_grade} /></td>
-              <td className="mono text-muted">{fmtPrice(pos.entry_underlying_price)}</td>
-              <td className="mono">{fmtPrice(pos.exit_price)}</td>
-              <td className={`mono ${pnlClass(pos.outcome_pnl)}`}>{fmtPnl(pos.outcome_pnl)}</td>
-              <td className="mono text-muted">{pos.days_held != null ? `${pos.days_held}d` : '—'}</td>
-              <td><ExitReasonBadge reason={pos.exit_reason} /></td>
-            </tr>
-          ))}
+          {positions.map(pos => {
+            const isExpanded = expandedId === pos.position_id;
+            return (
+              <>
+                <tr key={pos.position_id}>
+                  <td>
+                    <button
+                      className="pos-expand-btn"
+                      onClick={() => toggleExpand(pos.position_id)}
+                      title={isExpanded ? 'Collapse' : 'Expand'}
+                    >
+                      {isExpanded ? '▾' : '▸'}
+                    </button>
+                  </td>
+                  <td className="mono text-cyan">{pos.symbol}</td>
+                  <td><SourceBadge source={pos.source} /></td>
+                  <td><PositionHealthBadge grade={pos.health_grade} /></td>
+                  <td className="mono text-muted">{fmtPrice(pos.entry_underlying_price)}</td>
+                  <td className="mono">{fmtPrice(pos.exit_price)}</td>
+                  <td className={`mono ${pnlClass(pos.outcome_pnl)}`}>{fmtPnl(pos.outcome_pnl)}</td>
+                  <td className="mono text-muted">{pos.days_held != null ? `${pos.days_held}d` : '—'}</td>
+                  <td><ExitReasonBadge reason={pos.exit_reason} /></td>
+                </tr>
+                {isExpanded && (
+                  <PositionDetailPanel
+                    key={`detail-${pos.position_id}`}
+                    position={pos}
+                    colSpan={COL_COUNT}
+                  />
+                )}
+              </>
+            );
+          })}
         </tbody>
       </table>
     </div>
