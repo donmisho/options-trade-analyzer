@@ -21,6 +21,14 @@ import { C, mono } from '../styles/tokens';
 
 const DATE_LABELS = ['Exp-9', 'Exp-6', 'Exp-3', 'Expiration'];
 
+/** Convert yyyy-mm-dd → mm-dd-yyyy (house rule: never show ISO order to users). */
+function formatDateMMDDYYYY(iso) {
+  if (!iso) return '';
+  const [y, m, d] = iso.split('-');
+  if (!y || !m || !d) return iso;
+  return `${m}-${d}-${y}`;
+}
+
 // ─── Profitable zone logic ────────────────────────────────────────────────────
 
 /**
@@ -310,7 +318,7 @@ export default function ProbabilityMatrix({ matrix, tradeStructure = null, curre
                   {rowLabels[ri]}
                   {dates?.[ri] && (
                     <div style={{ fontSize: 9, color: C.textMuted, marginTop: 1 }}>
-                      {dates[ri]}
+                      {formatDateMMDDYYYY(dates[ri])}
                     </div>
                   )}
                 </td>

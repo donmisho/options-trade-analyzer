@@ -25,6 +25,16 @@ import { C, mono } from '../styles/tokens';
 import ProbabilityMatrix from './ProbabilityMatrix';
 import { useToast } from './Toast';
 
+// ─── Currency formatter — ##,###.00 (no $ prefix, caller adds it) ────────────
+
+const formatCurrency = (val) => {
+  if (val == null || isNaN(val)) return '—';
+  return Number(val).toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+};
+
 // ─── Verdict config ───────────────────────────────────────────────────────────
 
 const VERDICT_CONFIG = {
@@ -239,9 +249,9 @@ function TradeSection({ card, symbol }) {
         flexWrap: 'wrap',
         marginBottom: 12,
       }}>
-        <MetricPill label="Entry" value={`${card.entry_price.toFixed(2)} credit`} />
-        <MetricPill label="Max Profit" value={`${maxProfitDollars}`} color={C.green} />
-        <MetricPill label="Max Loss"   value={`${maxLossDollars}`}   color={C.red}   />
+        <MetricPill label="Entry" value={`${formatCurrency(card.entry_price)} credit`} />
+        <MetricPill label="Max Profit" value={`$${formatCurrency(maxProfitDollars)}`} color={C.green} />
+        <MetricPill label="Max Loss"   value={`$${formatCurrency(maxLossDollars)}`}   color={C.red}   />
       </div>
 
       {/* Exit levels */}
@@ -250,17 +260,17 @@ function TradeSection({ card, symbol }) {
           label="Exit Warning"
           value={
             card.exit_warning_price != null
-              ? `${symbol} below ${card.exit_warning_price.toFixed(2)}`
+              ? `${symbol} below ${formatCurrency(card.exit_warning_price)}`
               : '—'
           }
-          note={warnPnlDollars !== 0 ? `P&L: ${warnPnlDollars < 0 ? '-' : '+'}${Math.abs(warnPnlDollars)}` : null}
+          note={warnPnlDollars !== 0 ? `P&L: ${warnPnlDollars < 0 ? '-' : '+'}$${formatCurrency(Math.abs(warnPnlDollars))}` : null}
           color={C.amber}
         />
         <ExitRow
           label="Exit Target"
           value={
             card.exit_target_debit != null
-              ? `Buy back at ${card.exit_target_debit.toFixed(2)} debit (50% profit)`
+              ? `Buy back at ${formatCurrency(card.exit_target_debit)} debit (50% profit)`
               : '—'
           }
           color={C.green}
@@ -269,7 +279,7 @@ function TradeSection({ card, symbol }) {
           label="Exit Stop"
           value={
             card.exit_stop_debit != null
-              ? `Buy back at ${card.exit_stop_debit.toFixed(2)} debit (2x credit)`
+              ? `Buy back at ${formatCurrency(card.exit_stop_debit)} debit (2x credit)`
               : '—'
           }
           color={C.red}
