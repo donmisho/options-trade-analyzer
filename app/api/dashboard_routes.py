@@ -72,13 +72,13 @@ DEFAULT_WIDGETS = [
 
 # ── Layout endpoints ───────────────────────────────────────────────────────
 
-@router.get("", response_model=DashboardLayoutResponse)
+@router.get("/", response_model=DashboardLayoutResponse)
 async def get_layout(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     result = await db.execute(
-        select(DashboardLayout).where(DashboardLayout.user_id == current_user.id)
+        select(DashboardLayout).where(DashboardLayout.user_id == current_user["sub"])
     )
     record = result.scalar_one_or_none()
 
@@ -96,14 +96,14 @@ async def get_layout(
     )
 
 
-@router.put("", response_model=DashboardLayoutResponse)
+@router.put("/", response_model=DashboardLayoutResponse)
 async def save_layout(
     payload: DashboardLayoutSave,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     result = await db.execute(
-        select(DashboardLayout).where(DashboardLayout.user_id == current_user.id)
+        select(DashboardLayout).where(DashboardLayout.user_id == current_user["sub"])
     )
     record = result.scalar_one_or_none()
 
@@ -116,7 +116,7 @@ async def save_layout(
         record.updated_at = datetime.utcnow()
     else:
         record = DashboardLayout(
-            user_id=current_user.id,
+            user_id=current_user["sub"],
             layout_json=layout_json,
             widgets_json=widgets_json,
         )
