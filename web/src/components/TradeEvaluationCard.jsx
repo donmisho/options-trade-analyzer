@@ -25,6 +25,17 @@ import { C, mono } from '../styles/tokens';
 import ProbabilityMatrix from './ProbabilityMatrix';
 import { useToast } from './Toast';
 
+// ─── Date formatter — mm-dd-yyyy (house rule: never locale strings) ──────────
+
+const formatDate = (dateStr) => {
+  if (!dateStr) return '—';
+  const d = new Date(dateStr);
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const yyyy = d.getFullYear();
+  return `${mm}-${dd}-${yyyy}`;
+};
+
 // ─── Currency formatter — ##,###.00 (no $ prefix, caller adds it) ────────────
 
 const formatCurrency = (val) => {
