@@ -250,8 +250,8 @@ function TradeSection({ card, symbol }) {
         marginBottom: 12,
       }}>
         <MetricPill label="Entry" value={`${formatCurrency(card.entry_price)} credit`} />
-        <MetricPill label="Max Profit" value={`$${formatCurrency(maxProfitDollars)}`} color={C.green} />
-        <MetricPill label="Max Loss"   value={`$${formatCurrency(maxLossDollars)}`}   color={C.red}   />
+        <MetricPill label="Max Profit" value={formatCurrency(maxProfitDollars)} color={C.green} />
+        <MetricPill label="Max Loss"   value={formatCurrency(maxLossDollars)}   color={C.red}   />
       </div>
 
       {/* Exit levels */}
