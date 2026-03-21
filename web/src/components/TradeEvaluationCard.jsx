@@ -236,9 +236,9 @@ function CardHeader({ card }) {
 // ─── Section 2: Trade structure + exit levels ─────────────────────────────────
 
 function TradeSection({ card, symbol }) {
-  const maxProfitDollars = Math.round(card.max_profit * 100);
-  const maxLossDollars   = Math.round(card.max_loss   * 100);
-  const warnPnlDollars   = Math.round((card.exit_warning_pnl ?? 0) * 100);
+  const maxProfitDollars = card.max_profit;
+  const maxLossDollars   = card.max_loss;
+  const warnPnlDollars   = card.exit_warning_pnl ?? 0;
 
   return (
     <Section>
