@@ -13,6 +13,68 @@ Options Analyzer is a FastAPI-based options analysis, portfolio tracking, and tr
 - Generic Insight Engine for anomaly detection and AI-generated alerts
 - Future support for MCP integration, live trading, and additional signal sources
 
+## Session Start Protocol
+
+At the start of every new Claude Code chat for this project, ask the following
+before doing anything else:
+
+> "Should I review the current Jira plan for the OTA project before we start?
+> (Project: tmtctech-team.atlassian.net, OTA project)"
+
+Wait for a yes/no response. If yes, use the Atlassian MCP to pull open issues
+from the OTA project before proceeding with any work. Filter for status != Done,
+ordered by status ascending (so 1-To Do appears before 2-In Review, etc.).
+
+**Note:** The OTA project does not use sprints. Always use the List view, not
+the Board view. The board is sprint-based and will appear empty.
+List view URL: https://tmtctech-team.atlassian.net/jira/software/projects/OTA/list
+
+## Jira Workflow — Status Definitions
+
+The OTA project uses a 5-stage workflow. When reading or updating Jira status,
+always map to these definitions:
+
+| # | Jira Status | Who Acts | Meaning |
+|---|-------------|----------|---------|
+| 0 | Idea | Don | Raw backlog item, not yet committed to |
+| 1 | To Do | Don | Promoted — confirmed candidate for next work set |
+| 2 | In Review | Claude (Web) | Being grouped, sequenced, dependencies mapped, prompts being planned |
+| 3 | In Progress | Claude (Code) | Prompt written and actively executing in Claude Code |
+| 4 | Done | Automation | Commit pushed to main → Jira auto-closes via commit trigger |
+
+**Workflow rules:**
+- Don selects items from Idea → promotes to To Do
+- Claude Web groups To Do items into logical prompt sequences → moves to In Review
+- Claude Web writes the Claude Code prompt → status moves to In Progress
+- Claude Code executes the prompt, pushes to GitHub with OTA ticket numbers in commit message
+- Jira automation moves In Progress → Done automatically on commit
+
+## Jira Automation
+
+A Jira automation rule fires on every commit to main:
+- **Trigger:** Commit created
+- **Condition:** Status does not equal Done
+- **Action:** Transition work item to Done
+
+**Commit message format required:** Always prefix with OTA ticket numbers.
+Example: `OTA-152 OTA-153 feat: implement StrategyScorecard and SecurityDashboard`
+
+This automation only works if ticket numbers appear in the commit message.
+Always include ALL ticket numbers addressed in a session in the commit prefix.
+
+## Chrome Extension Notes
+
+The **"Allow CORS: Access-Control-Allow-Origin"** Chrome extension is **disabled
+by default**. It may be needed for local development when testing cross-origin
+API calls from the browser.
+
+- **Default state:** Disabled
+- **When to enable:** Only if you encounter CORS errors during browser-based
+  local dev testing. Ask Don to enable it before proceeding.
+- **After testing:** Ask Don to disable it again.
+- **Why this matters:** When enabled, it blocks the Claude in Chrome extension
+  from connecting, which breaks Claude Web's browser automation tools.
+
 ## Development Commands
 
 ### Backend (FastAPI)
