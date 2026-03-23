@@ -293,6 +293,7 @@ app = FastAPI(
     version=settings.app_version,
     description="Options analysis, portfolio tracking, and trading tools",
     lifespan=lifespan,
+    redirect_slashes=False,
 )
 
 # --- CORS ---
