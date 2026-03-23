@@ -906,9 +906,19 @@ export default function OptionsTerminal({ activeStrategy }) {
             <div style={{ fontSize: 15, color: TEXT, fontWeight: 600, marginBottom: 6 }}>
               No results found for {symbol}
             </div>
-            <div style={{ fontSize: 13, color: DIM }}>
+            <div style={{ fontSize: 13, color: DIM, marginBottom: 16 }}>
               No trades passed the current filters. Try a different symbol or adjust settings.
             </div>
+            <button
+              onClick={() => setConfigOpen(true)}
+              style={{
+                padding: '5px 14px', borderRadius: 5, fontSize: 12,
+                border: `1px solid ${BORDER}`, background: 'none',
+                color: DIM, cursor: 'pointer',
+              }}
+            >
+              ⚙ Config
+            </button>
           </div>
         )}
       </div>
