@@ -48,20 +48,27 @@ Options Analyzer/                          ← VS Code workspace root
 │       │   ├── __init__.py                ← Package exports
 │       │   ├── vertical_engine.py         ← Vertical spread scorer
 │       │   ├── long_call_engine.py        ← Long call scorer
-│       │   └── directional_engine.py      ← Strategy comparator
+│       │   ├── directional_engine.py      ← Strategy comparator
+│       │   ├── strategy_scorer.py         ← Phase 2.9 multi-strategy scoring engine
+│       │   ├── strategy_definitions.py    ← Strategy parameter definitions (thresholds, weights)
+│       │   └── black_scholes.py           ← Probability matrix math (Phase 2.11)
 │       │
 │       └── api/                           ← API routes
 │           ├── auth_routes.py             ← Login, register, MFA
 │           ├── market_routes.py           ← Quotes, option chains
 │           ├── config_routes.py           ← User config (GET/PUT)
 │           ├── analysis_routes.py         ← Vertical, long call, directional analysis
-│           └── evaluation_routes.py       ← 🆕 Trade evaluation via Claude (POST /evaluate/trade)
+│           ├── evaluation_routes.py       ← Trade evaluation via Claude (POST /evaluate/trade)
+│           ├── dashboard_routes.py        ← Phase 2.3 dashboard layout GET/PUT + media SAS URLs
+│           └── position_routes.py         ← Phase 2.10 positions CRUD (5 endpoints)
 │
 │
 └── web/                                   ← React frontend (Vite, port 5173)
     ├── node_modules/
     ├── package.json
     ├── vite.config.js                     ← Proxy /api to backend with secure: false
+    ├── .env.production                    ← Production API base URL (HTTPS)
+    ├── staticwebapp.config.json           ← Azure Static Web Apps routing fallback
     ├── public/
     │   └── index.html
     │
@@ -72,14 +79,20 @@ Options Analyzer/                          ← VS Code workspace root
         ├── api/
         │   └── client.js                 ← API bridge (needs evaluateTrade, followUp functions)
         │
-        ├── components/                    ← 🔲 TODO: Move prototypes here
+        ├── components/                    ← Shared UI components
         │   ├── Layout.jsx                 ← Sidebar nav + top bar
         │   ├── Chart.jsx                  ← (placeholder)
-        │   └── shared.jsx                 ← (placeholder)
+        │   ├── shared.jsx                 ← (placeholder)
+        │   ├── StrategyScorecard.jsx      ← Phase 2.9 4-strategy score rows with selection
+        │   ├── TradeEvaluationCard.jsx    ← Phase 2.11 structured evaluation result card
+        │   ├── ProbabilityMatrix.jsx      ← Phase 2.11 Black-Scholes heatmap visualization
+        │   └── PositionHealthBadge.jsx    ← Phase 2.10 A-F health grade badge
         │
         └── pages/
             ├── VerticalsPage.jsx          ← Vertical spread analysis screen
             ├── LongCallsPage.jsx          ← Long call analysis screen
+            ├── SecurityDashboard.jsx      ← Phase 2.9 per-symbol strategy scorecard + evaluation
+            ├── PositionsPage.jsx          ← Phase 2.10 positions list with health grades
             └── (other pages planned)
 ```
 

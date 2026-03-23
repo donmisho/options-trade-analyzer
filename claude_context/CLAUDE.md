@@ -58,6 +58,16 @@ pytest --cov=app                # With coverage
 
 Note: Test infrastructure is minimal. Most validation happens via Swagger UI at /docs.
 
+### Zombie Process Warning (Windows)
+
+Before restarting the backend, always kill existing processes first:
+```powershell
+Get-Process python,uvicorn -ErrorAction SilentlyContinue | Stop-Process -Force
+netstat -ano | findstr ":8000"
+```
+Windows does not always release port 8000 cleanly. A zombie uvicorn process will answer
+requests silently, making new route registrations invisible and causing confusing 404s.
+
 ---
 
 ## Architecture
@@ -109,7 +119,8 @@ app/
 │   ├── long_call_engine.py         # Naked calls/puts scoring
 │   ├── directional_engine.py       # SMA momentum + directional scoring
 │   ├── black_scholes.py            # [NEW 2.11] Probability matrix computation
-│   └── strategy_scorer.py          # [NEW 2.9] Multi-strategy scorecard engine
+│   ├── strategy_scorer.py          # [NEW 2.9] Multi-strategy scorecard engine
+│   └── strategy_definitions.py     # Strategy parameter definitions (thresholds, weights)
 ├── agents/
 │   ├── position_monitor.py         # [NEW 3.5] Daily position health agent
 │   ├── insight_engine.py           # [NEW 3.6] Generic insight detection + generation
@@ -131,6 +142,7 @@ app/
     ├── analysis_routes.py
     ├── schwab_auth_routes.py
     ├── evaluation_routes.py        # [UPDATED 2.11] Structured output, replaces AskClaude
+    ├── dashboard_routes.py         # [NEW 2.3] Dashboard layout GET/PUT + media SAS URLs
     ├── position_routes.py          # [NEW 2.10] Position CRUD, follow, take-position
     └── insight_routes.py           # [NEW 3.6] Insight feed, dismiss
 ```
@@ -138,6 +150,10 @@ app/
 ### Frontend Structure
 
 ```
+web/
+├── .env.production                      # Production API base URL (HTTPS)
+├── staticwebapp.config.json             # Azure Static Web Apps routing fallback
+
 web/src/
 ├── App.jsx                              # Routes + activeStrategy state
 ├── main.jsx                             # React root
