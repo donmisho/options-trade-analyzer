@@ -72,7 +72,7 @@ DEFAULT_WIDGETS = [
 
 # ── Layout endpoints ───────────────────────────────────────────────────────
 
-@router.get("/", response_model=DashboardLayoutResponse)
+@router.get("", response_model=DashboardLayoutResponse)
 async def get_layout(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -96,7 +96,7 @@ async def get_layout(
     )
 
 
-@router.put("/", response_model=DashboardLayoutResponse)
+@router.put("", response_model=DashboardLayoutResponse)
 async def save_layout(
     payload: DashboardLayoutSave,
     db: AsyncSession = Depends(get_db),

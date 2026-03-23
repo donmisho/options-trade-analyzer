@@ -17,7 +17,7 @@ from app.auth.dependencies import require_read, require_write
 router = APIRouter(prefix="/config", tags=["Configuration"])
 
 
-@router.get("/", response_model=UserConfigResponse)
+@router.get("", response_model=UserConfigResponse)
 async def get_config(
     user: dict = Depends(require_read),
     db: AsyncSession = Depends(get_db),
@@ -56,7 +56,7 @@ async def get_config(
     )
 
 
-@router.put("/", response_model=UserConfigResponse)
+@router.put("", response_model=UserConfigResponse)
 async def update_config(
     payload: UserConfigUpdate,
     user: dict = Depends(require_write),
