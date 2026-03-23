@@ -283,13 +283,19 @@ export async function updateUserConfig(configData) {
 // ═══════════════════════════════════════════════════════════════════
 
 export async function getWatchlist() {
-  return apiFetch("/user/watchlist");
+  return apiFetch("/watchlist");
 }
 
-export async function saveWatchlist(symbols) {
-  return apiFetch("/user/watchlist", {
-    method: "PUT",
-    body: JSON.stringify({ symbols }),
+export async function addWatchlistSymbol(symbol) {
+  return apiFetch("/watchlist", {
+    method: "POST",
+    body: JSON.stringify({ symbol }),
+  });
+}
+
+export async function removeWatchlistSymbol(symbol) {
+  return apiFetch(`/watchlist/${encodeURIComponent(symbol)}`, {
+    method: "DELETE",
   });
 }
 

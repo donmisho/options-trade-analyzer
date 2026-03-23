@@ -99,14 +99,17 @@ function ScoreRow({ item, selected, onToggle }) {
           {item.label}
         </div>
         {subtitle && (
-          <div style={{
-            color: '#8b949e',
-            fontSize: 9,
-            marginTop: 2,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}>
+          <div
+            title={subtitle}
+            style={{
+              color: '#8b949e',
+              fontSize: 10,
+              marginTop: 2,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
             {subtitle}
           </div>
         )}

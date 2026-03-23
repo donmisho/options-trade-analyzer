@@ -14,7 +14,7 @@
  */
 
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import { getQuotes, getWatchlist, saveWatchlist as saveWatchlistApi, getFavorites, addFavoriteApi, removeFavoriteApi } from '../api/client';
+import { getQuotes, getWatchlist, addWatchlistSymbol, removeWatchlistSymbol, getFavorites, addFavoriteApi, removeFavoriteApi } from '../api/client';
 import { useToast } from '../components/Toast';
 
 const AppContext = createContext(null);
@@ -72,24 +72,6 @@ const SYMBOL_NAMES = {
   XLF: 'Financial ETF', XLE: 'Energy ETF', SLV: 'Silver ETF',
 };
 
-const WL_KEY = 'optionsAnalyzer_watchlist';
-
-function loadWatchlist() {
-  try {
-    const raw = localStorage.getItem(WL_KEY);
-    if (!raw) return STARTER_WATCHLIST;
-    const saved = JSON.parse(raw);
-    if (!Array.isArray(saved) || saved.length === 0) return STARTER_WATCHLIST;
-    return saved;
-  } catch {
-    return STARTER_WATCHLIST;
-  }
-}
-
-function saveWatchlist(list) {
-  localStorage.setItem(WL_KEY, JSON.stringify(list));
-}
-
 // ─── Provider ───────────────────────────────────────────────
 
 export function AppProvider({ children }) {
@@ -98,8 +80,8 @@ export function AppProvider({ children }) {
     return localStorage.getItem('optionsAnalyzer_symbol') || 'SPY';
   });
 
-  // Dynamic watchlist — persisted in localStorage + backend
-  const [watchlist, setWatchlist] = useState(loadWatchlist);
+  // Dynamic watchlist — persisted in Azure SQL via /api/v1/watchlist
+  const [watchlist, setWatchlist] = useState([]);
 
   // Config drawer — shared so Header gear icon can open it from any page
   const [configOpen, setConfigOpen] = useState(false);
@@ -119,17 +101,21 @@ export function AppProvider({ children }) {
     // Don't clear trades/context on close — allow re-open to same state
   }
 
-  // Load watchlist from backend on mount; fall back to localStorage if API fails
+  // Load watchlist from DB on mount; fall back to STARTER_WATCHLIST if empty or API fails
   useEffect(() => {
     getWatchlist()
       .then(data => {
-        if (Array.isArray(data) && data.length > 0) {
-          setWatchlist(data);
-          saveWatchlist(data); // keep localStorage in sync
+        const symbols = data?.symbols ?? (Array.isArray(data) ? data : []);
+        if (symbols.length > 0) {
+          setWatchlist(symbols.map(s => ({ symbol: s, name: SYMBOL_NAMES[s] || '' })));
+        } else {
+          setWatchlist(STARTER_WATCHLIST);
         }
       })
-      .catch(() => {}); // silently use localStorage fallback
-  }, []);
+      .catch(() => {
+        setWatchlist(STARTER_WATCHLIST);
+      });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Live prices keyed by symbol: { SPY: { price: 598.12, change: -2.31, change_pct: -0.38 }, ... }
   const [prices, setPrices] = useState({});
@@ -182,13 +168,13 @@ export function AppProvider({ children }) {
    */
   const addToWatchlist = useCallback((symbol) => {
     const sym = symbol.toUpperCase();
+    // Optimistic update
     setWatchlist(prev => {
       const filtered = prev.filter(w => w.symbol !== sym);
-      const entry = { symbol: sym, name: SYMBOL_NAMES[sym] || '' };
-      const updated = [entry, ...filtered];
-      saveWatchlist(updated);
-      return updated;
+      return [{ symbol: sym, name: SYMBOL_NAMES[sym] || '' }, ...filtered];
     });
+    // Persist to DB (best-effort)
+    addWatchlistSymbol(sym).catch(() => {});
     // Fetch price for the new symbol if we don't have it yet
     if (!prices[sym]) {
       getQuotes([sym]).then(quotes => {
@@ -202,6 +188,12 @@ export function AppProvider({ children }) {
       });
     }
   }, [prices]);
+
+  const removeFromWatchlist = useCallback((symbol) => {
+    const sym = symbol.toUpperCase();
+    setWatchlist(prev => prev.filter(w => w.symbol !== sym));
+    removeWatchlistSymbol(sym).catch(() => {});
+  }, []);
 
   // Fetch prices on initial load
   useEffect(() => {
@@ -230,12 +222,6 @@ export function AppProvider({ children }) {
 
   // Toast — delegate to ToastProvider (parent in App.jsx)
   const { showToast } = useToast();
-
-  // Persist watchlist to localStorage + backend whenever it changes
-  useEffect(() => {
-    saveWatchlist(watchlist);
-    saveWatchlistApi(watchlist).catch(() => {}); // best-effort API sync
-  }, [watchlist]);
 
   // Persist active symbol
   useEffect(() => {
@@ -293,6 +279,8 @@ export function AppProvider({ children }) {
     activeSymbol,
     setActiveSymbol: handleSetActiveSymbol,
     watchlist,
+    addToWatchlist,
+    removeFromWatchlist,
 
     // Config drawer
     configOpen,

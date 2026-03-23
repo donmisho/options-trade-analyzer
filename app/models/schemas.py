@@ -546,3 +546,15 @@ class MediaItem(BaseModel):
 class DashboardMediaResponse(BaseModel):
     widget_id: str
     items: list[MediaItem]
+
+
+# ============================================================
+# Watchlist Schemas (OTA-258)
+# ============================================================
+
+class WatchlistSymbol(BaseModel):
+    symbol: str
+
+
+class WatchlistResponse(BaseModel):
+    symbols: list[str]

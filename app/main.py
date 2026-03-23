@@ -40,6 +40,7 @@ from app.api.schwab_auth_routes import router as schwab_auth_router, init_schwab
 from app.providers.schwab_token_manager import SchwabTokenManager
 from app.api.evaluation_routes import router as evaluation_router, init_evaluation_routes
 from app.api.user_routes import router as user_router
+from app.api.watchlist_routes import router as watchlist_router
 from app.api.entra_auth_routes import router as entra_auth_router
 from app.api.agent_routes import router as agent_router, init_agent_routes
 from app.api.admin_routes import router as admin_router
@@ -323,6 +324,7 @@ app.include_router(analysis_router, prefix="/api/v1")
 app.include_router(schwab_auth_router, prefix="/api/v1")
 app.include_router(evaluation_router, prefix="/api/v1")
 app.include_router(user_router, prefix="/api/v1")
+app.include_router(watchlist_router, prefix="/api/v1")
 app.include_router(entra_auth_router, prefix="/api/v1")
 app.include_router(agent_router, prefix="/api/v1")
 app.include_router(admin_router, prefix="/api/v1")

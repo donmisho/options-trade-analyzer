@@ -64,11 +64,9 @@ function getPriceZone(price, tradeStructure) {
 // ─── OTA-157: Color gradient (red → amber → green) ───────────────────────────
 
 function getProbabilityColor(prob) {
-  if (prob >= 0.70) return 'rgba(74, 222, 128, 0.75)';   // green — high probability
-  if (prob >= 0.50) return 'rgba(74, 222, 128, 0.40)';   // light green
-  if (prob >= 0.35) return 'rgba(245, 158, 11, 0.50)';   // amber — moderate
-  if (prob >= 0.20) return 'rgba(248, 113, 113, 0.40)';  // light red
-  return 'rgba(248, 113, 113, 0.70)';                    // red — low probability
+  if (prob >= 0.60) return 'rgba(0, 200, 150, 0.25)';    // emerald teal — high probability
+  if (prob >= 0.30) return 'rgba(245, 166, 35, 0.15)';   // apricot amber — medium probability
+  return 'transparent';                                   // low probability — no background
 }
 
 // ─── Zone overlay borders ─────────────────────────────────────────────────────
@@ -101,12 +99,10 @@ function DateHeaderCell({ label, date }) {
         minWidth: 70,
       }}
     >
-      {label}
-      {date && (
-        <div style={{ fontSize: 8, color: '#555b6e', marginTop: 1 }}>
-          {formatDate(date)}
-        </div>
-      )}
+      {date ? formatDate(date) : label}
+      <div style={{ fontSize: 8, color: '#555b6e', marginTop: 1 }}>
+        {label}
+      </div>
     </th>
   );
 }
@@ -155,7 +151,7 @@ function ProbCell({ prob }) {
         fontFamily: mono,
         fontSize: 10,
         fontWeight: 700,
-        color: '#ffffff',
+        color: '#c9d1d9',
         backgroundColor: bg,
         border: '1px solid rgba(255,255,255,0.06)',
         whiteSpace: 'nowrap',
@@ -171,9 +167,9 @@ function ProbCell({ prob }) {
 function Legend({ hasZones }) {
   return (
     <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>
-      <LegendItem color={C.green} label="≥70% probability" />
-      <LegendItem color={C.amber} label="35–50% probability" />
-      <LegendItem color={C.red}   label="<20% probability" />
+      <LegendItem color='rgba(0,200,150,1)' label="≥60% probability" />
+      <LegendItem color='rgba(245,166,35,1)' label="30–59% probability" />
+      <LegendItem color={C.textDim} label="<30% probability" dim />
       {hasZones && (
         <>
           <LegendItem color={C.green} label="Profit zone" border />

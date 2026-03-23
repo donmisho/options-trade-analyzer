@@ -743,9 +743,20 @@ function VerdictCard({ verdictData, trade, symbol, strategyKey, onFollow, onTake
           <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.6px', color: MUTED, marginBottom: 8 }}>
             Claude's Read
           </div>
-          <div style={{ fontSize: 10, color: '#c9d1d9', lineHeight: 1.65 }}>
-            {verdictData.claude_read || 'No evaluation text available.'}
-          </div>
+          {verdictData.auto_pass_reason ? (
+            <div style={{ fontSize: 10, color: AMBER, lineHeight: 1.65, padding: '8px 10px', background: 'rgba(245,158,11,0.08)', borderRadius: 4, border: '1px solid rgba(245,158,11,0.2)' }}>
+              {verdictData.auto_pass_reason}
+            </div>
+          ) : (
+            <div style={{ fontSize: 10, color: '#c9d1d9', lineHeight: 1.65 }}>
+              {verdictData.claude_read || 'No evaluation text available.'}
+            </div>
+          )}
+          {verdictData.dte_warning && !verdictData.auto_pass_reason && (
+            <div style={{ marginTop: 6, fontSize: 9, color: AMBER, padding: '4px 8px', background: 'rgba(245,158,11,0.06)', borderRadius: 3 }}>
+              ⚠ {verdictData.dte_warning}
+            </div>
+          )}
           {verdictData.key_risks?.length > 0 && (
             <div style={{ marginTop: 8 }}>
               {verdictData.key_risks.map((r, i) => (
