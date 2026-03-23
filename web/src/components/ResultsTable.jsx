@@ -74,10 +74,18 @@ export default function ResultsTable({
 
   const rowId = (trade, idx) => (getRowId ? getRowId(trade, idx) : String(idx));
 
+  // OTA-160: Show chevron column when expansion rows are present
+  const hasExpansion = !!renderExpansionRow;
+  const totalCols    = columns.length + (hasExpansion ? 1 : 0);
+
   return (
     <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: mono, fontSize: 12 }}>
       <thead>
         <tr style={{ backgroundColor: C.surfaceAlt, borderBottom: `1px solid ${BORDER}` }}>
+          {/* OTA-160: Chevron header — narrow, non-sortable */}
+          {hasExpansion && (
+            <th style={{ width: 24, padding: '6px 4px' }} />
+          )}
           {columns.map(col => {
             const isSortable = col.sortable !== false;
             const sk         = getSortKey(col);
@@ -124,14 +132,28 @@ export default function ResultsTable({
               onClick={() => onRowClick?.(isExpanded ? null : id)}
               style={{
                 cursor: 'pointer',
-                borderLeft: `3px solid ${isExpanded ? ACCENT : 'transparent'}`,
-                backgroundColor: isExpanded ? ACCENT + '08' : 'transparent',
+                // OTA-160: teal left border + teal background tint
+                borderLeft: `3px solid ${isExpanded ? TEAL : 'transparent'}`,
+                backgroundColor: isExpanded ? 'rgba(45,212,191,0.03)' : 'transparent',
                 borderBottom: `1px solid ${BORDER}`,
                 transition: 'background 0.1s',
               }}
               onMouseEnter={e => { if (!isExpanded) e.currentTarget.style.backgroundColor = SURFACE; }}
               onMouseLeave={e => { if (!isExpanded) e.currentTarget.style.backgroundColor = 'transparent'; }}
             >
+              {/* OTA-160: Chevron indicator cell */}
+              {hasExpansion && (
+                <td style={{
+                  width: 24,
+                  padding: '6px 4px 6px 6px',
+                  textAlign: 'center',
+                  color: isExpanded ? TEAL : MUTED,
+                  fontSize: 9,
+                  userSelect: 'none',
+                }}>
+                  {isExpanded ? '▼' : '▶'}
+                </td>
+              )}
               {columns.map((col, ci) => {
                 const content = col.render
                   ? col.render(trade, ctx)
@@ -155,7 +177,7 @@ export default function ResultsTable({
 
             isExpanded && renderExpansionRow && (
               <tr key={`exp-${id}`}>
-                <td colSpan={columns.length} style={{ padding: 0 }}>
+                <td colSpan={totalCols} style={{ padding: 0 }}>
                   {renderExpansionRow(trade)}
                 </td>
               </tr>

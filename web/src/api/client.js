@@ -230,6 +230,20 @@ export async function getProbabilityMatrix({ symbol, current_price, iv, dte }) {
 export const computeProbabilityMatrix = getProbabilityMatrix;
 
 /**
+ * Evaluate selected strategies for a symbol (OTA-153 spec).
+ * Thin convenience wrapper around evaluateStructured for SecurityDashboard use.
+ *
+ * @param {string} symbol
+ * @param {string[]} strategyKeys
+ */
+export async function evaluateStrategies(symbol, strategyKeys) {
+  return apiFetch('/evaluate/structured', {
+    method: 'POST',
+    body: JSON.stringify({ symbol: symbol.toUpperCase(), strategy_keys: strategyKeys }),
+  });
+}
+
+/**
  * Run structured Claude evaluation for one or more strategies.
  *
  * @param {Object} data

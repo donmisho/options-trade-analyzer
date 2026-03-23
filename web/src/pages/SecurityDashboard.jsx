@@ -1,22 +1,21 @@
 /**
  * SecurityDashboard — Per-symbol strategy scorecard page.
  *
- * Primary entry point for trade discovery. Shows all four strategies scored
- * simultaneously for the active symbol. User selects strategies, then clicks
- * Evaluate to trigger structured Claude analysis (Phase 2.11).
+ * OTA-152/153: Shows all four strategies scored simultaneously for the active
+ * symbol. User selects strategies → Evaluate → structured Claude analysis.
  *
- * URL: /security/:symbol
+ * Routes: /security-strategies  and  /security-strategies/:symbol
  *
  * Data flow:
  *   URL param :symbol → setActiveSymbol → QuoteBar fetches quote
- *   POST /api/v1/analysis/scorecard → StrategyScorecard receives real scores
- *   ConfigDrawer (strategy-aware) reads/writes localStorage overrides
+ *   POST /api/v1/analyze/scorecard → StrategyScorecard receives real scores
+ *   POST /api/v1/evaluate/structured → TradeEvaluationCard(s) per strategy
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
-import { getStrategyScorecard, evaluateStructured } from '../api/client';
+import { getStrategyScorecard, evaluateStrategies } from '../api/client';
 import { STRATEGY_CONFIGS } from '../strategy-configs/index';
 import QuoteBar from '../components/QuoteBar';
 import StrategyScorecard from '../components/StrategyScorecard';
@@ -33,43 +32,30 @@ function EvalSkeleton({ label }) {
       backgroundColor: C.card,
       overflow: 'hidden',
     }}>
-      {/* Verdict banner placeholder */}
       <div style={{ height: 36, backgroundColor: C.border, opacity: 0.4 }} />
-
-      {/* Strategy label + score bar placeholder */}
       <div style={{ padding: '10px 16px', borderBottom: `1px solid ${C.border}` }}>
         <div style={{ fontSize: 13, fontWeight: 600, color: C.textDim, marginBottom: 6 }}>
           {label}
         </div>
         <div style={{ height: 3, borderRadius: 2, backgroundColor: C.border }} />
       </div>
-
-      {/* Trade row placeholders */}
       <div style={{ padding: '14px 16px', borderBottom: `1px solid ${C.border}`, display: 'flex', flexDirection: 'column', gap: 8 }}>
         <div style={{ height: 14, width: '55%', borderRadius: 3, backgroundColor: C.border }} />
         <div style={{ height: 12, width: '80%', borderRadius: 3, backgroundColor: C.border, opacity: 0.6 }} />
         <div style={{ height: 12, width: '70%', borderRadius: 3, backgroundColor: C.border, opacity: 0.6 }} />
-        <div style={{ height: 12, width: '65%', borderRadius: 3, backgroundColor: C.border, opacity: 0.6 }} />
       </div>
-
-      {/* Matrix placeholder */}
       <div style={{ padding: '14px 16px', borderBottom: `1px solid ${C.border}` }}>
         <div style={{ height: 10, width: 120, borderRadius: 3, backgroundColor: C.border, marginBottom: 10 }} />
         <div style={{ height: 80, borderRadius: 4, backgroundColor: C.border, opacity: 0.35 }} />
       </div>
-
-      {/* Claude read placeholder */}
       <div style={{ padding: '14px 16px', borderBottom: `1px solid ${C.border}`, display: 'flex', flexDirection: 'column', gap: 7 }}>
         <div style={{ height: 10, width: 90, borderRadius: 3, backgroundColor: C.border, marginBottom: 4 }} />
         <div style={{ height: 11, borderRadius: 3, backgroundColor: C.border, opacity: 0.5 }} />
         <div style={{ height: 11, width: '85%', borderRadius: 3, backgroundColor: C.border, opacity: 0.5 }} />
-        <div style={{ height: 11, width: '60%', borderRadius: 3, backgroundColor: C.border, opacity: 0.5 }} />
       </div>
-
-      {/* Action buttons placeholder */}
       <div style={{ padding: '14px 16px', display: 'flex', gap: 10 }}>
-        <div style={{ flex: 1, height: 36, borderRadius: 6, backgroundColor: C.border, opacity: 0.4 }} />
-        <div style={{ flex: 1, height: 36, borderRadius: 6, backgroundColor: C.border, opacity: 0.4 }} />
+        <div style={{ width: 110, height: 32, borderRadius: 4, backgroundColor: C.border, opacity: 0.4 }} />
+        <div style={{ width: 130, height: 32, borderRadius: 4, backgroundColor: C.border, opacity: 0.4 }} />
       </div>
     </div>
   );
@@ -79,18 +65,17 @@ export default function SecurityDashboard() {
   const { symbol } = useParams();
   const { activeSymbol, setActiveSymbol, configOpen, setConfigOpen, prices } = useApp();
 
-  const [scores, setScores]           = useState(null);   // null = not yet loaded
-  const [smaSignal, setSmaSignal]     = useState(null);
-  const [loading, setLoading]         = useState(false);
-  const [error, setError]             = useState(null);
+  const [scores, setScores]             = useState([]);
+  const [smaSignal, setSmaSignal]       = useState(null);
+  const [loadingScores, setLoadingScores] = useState(false);
+  const [error, setError]               = useState(null);
   const [selectedKeys, setSelectedKeys] = useState([]);
 
-  // Evaluation state (Phase 2.11)
-  const [evalLoading, setEvalLoading]   = useState(false);
+  const [evaluating, setEvaluating]     = useState(false);
   const [evalError, setEvalError]       = useState(null);
-  const [evaluations, setEvaluations]   = useState([]);   // TradeEvaluationCard[]
+  const [verdicts, setVerdicts]         = useState([]);
 
-  const symbolUpper = symbol?.toUpperCase();
+  const symbolUpper = (symbol || activeSymbol || '').toUpperCase();
 
   // Keep AppContext activeSymbol in sync with URL param
   useEffect(() => {
@@ -99,98 +84,65 @@ export default function SecurityDashboard() {
     }
   }, [symbolUpper]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Reset scorecard and evaluations when symbol changes
+  // Reset when symbol changes
   useEffect(() => {
-    setScores(null);
+    setScores([]);
     setSmaSignal(null);
     setError(null);
     setSelectedKeys([]);
-    setEvaluations([]);
+    setVerdicts([]);
     setEvalError(null);
   }, [symbolUpper]);
 
-  const fetchScorecard = useCallback(async (userConfig = null) => {
+  // Fetch scorecard when symbol available
+  useEffect(() => {
     if (!symbolUpper) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await getStrategyScorecard(symbolUpper, userConfig);
-      setScores(data.strategies || []);
-      setSmaSignal(data.sma_signal || null);
-    } catch (err) {
-      setError(err.message || 'Failed to load scorecard');
-      setScores(null);
-    } finally {
-      setLoading(false);
-    }
+    setLoadingScores(true);
+    getStrategyScorecard(symbolUpper)
+      .then(data => {
+        setScores(data.strategies || []);
+        setSmaSignal(data.sma_signal || null);
+      })
+      .catch(err => setError(err.message || 'Failed to load scorecard'))
+      .finally(() => setLoadingScores(false));
   }, [symbolUpper]);
 
-  // Fetch scorecard on mount and when symbol changes
-  useEffect(() => {
-    fetchScorecard();
-  }, [fetchScorecard]);
-
-  // ConfigDrawer: show the first selected strategy's config, or first in the list
+  // ConfigDrawer active strategy
   const activeStrategyKey = selectedKeys[0] || scores?.[0]?.key || 'steady-paycheck';
   const activeStrategyCfg = STRATEGY_CONFIGS[activeStrategyKey];
   const hasConfigSchema = !!(activeStrategyCfg?.configSchema?.length);
 
-  const handleEvaluate = useCallback(async (keys) => {
-    if (!keys.length || !symbolUpper) return;
-
-    setEvalLoading(true);
+  async function handleEvaluate(selectedKeys) {
+    if (!selectedKeys.length || !symbolUpper) return;
+    setEvaluating(true);
+    setVerdicts([]);
     setEvalError(null);
-    setEvaluations([]);
-
-    // Derive IV from the best available best_trade across selected strategies.
-    // Fall back to 0.25 (25%) if no IV is present in the scorecard data.
-    const currentScores = scores || [];
-    const ivSource = keys
-      .map(k => currentScores.find(s => (s.strategy_key ?? s.key) === k))
-      .find(s => s?.best_trade?.iv != null);
-    const iv = ivSource?.best_trade?.iv ?? 0.25;
-
-    const currentPrice = prices[symbolUpper]?.price ?? 0;
-
     try {
-      const data = await evaluateStructured({
-        symbol:        symbolUpper,
-        current_price: currentPrice,
-        iv,
-        sma_alignment: smaSignal ?? {},
-        strategy_keys: keys,
-        trade:         null,
-      });
-      // Sort highest score first
-      const sorted = [...(data.evaluations ?? [])].sort((a, b) => b.score - a.score);
-      setEvaluations(sorted);
+      const data = await evaluateStrategies(symbolUpper, selectedKeys);
+      // Sort by score descending
+      const sorted = (data.evaluations || []).sort((a, b) => b.score - a.score);
+      setVerdicts(sorted);
     } catch (err) {
       setEvalError(err.message || 'Evaluation failed');
     } finally {
-      setEvalLoading(false);
+      setEvaluating(false);
     }
-  }, [symbolUpper, scores, smaSignal, prices]);
+  }
 
-  const handleConfigApply = useCallback((overrides) => {
-    // Re-run scorecard with updated config overrides for the active strategy
-    fetchScorecard(overrides);
-  }, [fetchScorecard]);
-
-  const displayScores = scores || [];
-
-  // SMA signal for QuoteBar
   const smaAlignment = smaSignal?.alignment;
+  const smaForCards = smaSignal
+    ? { smaShort: smaSignal.sma_8, smaMid: smaSignal.sma_21, smaLong: smaSignal.sma_50 }
+    : null;
 
   return (
     <div style={{ backgroundColor: C.bg, minHeight: '100%', paddingBottom: 24 }}>
 
-      {/* Quote bar — unified symbol header */}
-      <QuoteBar symbol={symbolUpper} smaSignal={smaAlignment || undefined} />
+      {/* Quote bar */}
+      <QuoteBar symbol={symbolUpper || undefined} smaSignal={smaAlignment || undefined} />
 
-      {/* Main content */}
       <div style={{ padding: '20px 20px 0' }}>
 
-        {/* Section header row */}
+        {/* Section header */}
         <div style={{
           display: 'flex',
           alignItems: 'center',
@@ -199,11 +151,11 @@ export default function SecurityDashboard() {
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{
-              fontSize: 10.5,
-              color: C.textMuted,
+              fontSize: 10,
+              color: '#8b949e',
               fontWeight: 600,
               textTransform: 'uppercase',
-              letterSpacing: '0.07em',
+              letterSpacing: '0.06em',
             }}>
               Strategy Scorecard
             </span>
@@ -222,26 +174,31 @@ export default function SecurityDashboard() {
           </div>
 
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-            {/* Refresh button */}
             <button
-              onClick={() => fetchScorecard()}
-              disabled={loading}
+              onClick={() => {
+                if (!symbolUpper) return;
+                setLoadingScores(true);
+                setError(null);
+                getStrategyScorecard(symbolUpper)
+                  .then(data => { setScores(data.strategies || []); setSmaSignal(data.sma_signal || null); })
+                  .catch(err => setError(err.message || 'Failed'))
+                  .finally(() => setLoadingScores(false));
+              }}
+              disabled={loadingScores}
               title="Refresh scorecard"
               style={{
                 background: 'none',
                 border: `1px solid ${C.border}`,
-                color: loading ? C.textMuted : C.textDim,
+                color: loadingScores ? '#8b949e' : C.textDim,
                 fontSize: 14,
-                cursor: loading ? 'default' : 'pointer',
+                cursor: loadingScores ? 'default' : 'pointer',
                 padding: '3px 8px',
                 borderRadius: 5,
-                transition: 'color 0.15s',
               }}
             >
-              {loading ? '...' : '\u27f3'}
+              {loadingScores ? '...' : '\u27f3'}
             </button>
 
-            {/* Config gear — only shown when active strategy has configSchema */}
             {hasConfigSchema && (
               <button
                 onClick={() => setConfigOpen(true)}
@@ -254,7 +211,6 @@ export default function SecurityDashboard() {
                   cursor: 'pointer',
                   padding: '3px 8px',
                   borderRadius: 5,
-                  transition: 'color 0.15s, border-color 0.15s',
                 }}
               >
                 &#9881;
@@ -264,14 +220,14 @@ export default function SecurityDashboard() {
         </div>
 
         {/* Error banner */}
-        {error && !loading && (
+        {error && !loadingScores && (
           <div style={{
             marginBottom: 12,
             padding: '8px 12px',
             borderRadius: 6,
-            border: `1px solid ${C.red}40`,
-            backgroundColor: C.redDim,
-            color: C.red,
+            border: `1px solid rgba(248,113,113,0.4)`,
+            backgroundColor: 'rgba(248,113,113,0.08)',
+            color: '#f87171',
             fontSize: 12,
             display: 'flex',
             justifyContent: 'space-between',
@@ -279,37 +235,28 @@ export default function SecurityDashboard() {
           }}>
             <span>{error}</span>
             <button
-              onClick={() => fetchScorecard()}
-              style={{
-                background: 'none',
-                border: 'none',
-                color: C.red,
-                fontSize: 11,
-                cursor: 'pointer',
-                textDecoration: 'underline',
-                padding: 0,
-              }}
+              onClick={() => { setError(null); }}
+              style={{ background: 'none', border: 'none', color: '#f87171', fontSize: 11, cursor: 'pointer', padding: 0 }}
             >
-              Retry
+              ✕
             </button>
           </div>
         )}
 
-        {/* Strategy Scorecard component */}
+        {/* Strategy Scorecard */}
         <StrategyScorecard
-          scores={loading ? [] : displayScores}
+          scores={loadingScores ? [] : scores}
           selectedKeys={selectedKeys}
           onSelectionChange={setSelectedKeys}
           onEvaluate={handleEvaluate}
-          loading={loading}
+          loading={loadingScores}
         />
       </div>
 
-      {/* ── Evaluation results ───────────────────────────────────────── */}
-      {(evalLoading || evalError || evaluations.length > 0) && (
+      {/* Evaluation results */}
+      {(evaluating || evalError || verdicts.length > 0) && (
         <div style={{ padding: '20px 20px 0' }}>
 
-          {/* Section label */}
           <div style={{
             display: 'flex',
             alignItems: 'center',
@@ -317,41 +264,32 @@ export default function SecurityDashboard() {
             marginBottom: 14,
           }}>
             <span style={{
-              fontSize: 10.5,
-              color: C.textMuted,
+              fontSize: 10,
+              color: '#8b949e',
               fontWeight: 600,
               textTransform: 'uppercase',
-              letterSpacing: '0.07em',
+              letterSpacing: '0.06em',
             }}>
               Evaluation Results
             </span>
-            {evaluations.length > 0 && !evalLoading && (
+            {verdicts.length > 0 && !evaluating && (
               <button
-                onClick={() => { setEvaluations([]); setEvalError(null); }}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: C.textMuted,
-                  fontSize: 11,
-                  cursor: 'pointer',
-                  padding: 0,
-                  textDecoration: 'underline',
-                }}
+                onClick={() => { setVerdicts([]); setEvalError(null); }}
+                style={{ background: 'none', border: 'none', color: '#8b949e', fontSize: 11, cursor: 'pointer', padding: 0, textDecoration: 'underline' }}
               >
                 Clear
               </button>
             )}
           </div>
 
-          {/* Error banner */}
-          {evalError && !evalLoading && (
+          {evalError && !evaluating && (
             <div style={{
               marginBottom: 16,
               padding: '8px 12px',
               borderRadius: 6,
-              border: `1px solid ${C.red}40`,
-              backgroundColor: C.redDim,
-              color: C.red,
+              border: `1px solid rgba(248,113,113,0.4)`,
+              backgroundColor: 'rgba(248,113,113,0.08)',
+              color: '#f87171',
               fontSize: 12,
               display: 'flex',
               justifyContent: 'space-between',
@@ -360,50 +298,32 @@ export default function SecurityDashboard() {
               <span>{evalError}</span>
               <button
                 onClick={() => handleEvaluate(selectedKeys)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: C.red,
-                  fontSize: 11,
-                  cursor: 'pointer',
-                  textDecoration: 'underline',
-                  padding: 0,
-                }}
+                style={{ background: 'none', border: 'none', color: '#f87171', fontSize: 11, cursor: 'pointer', textDecoration: 'underline', padding: 0 }}
               >
                 Retry
               </button>
             </div>
           )}
 
-          {/* Skeleton cards while loading */}
-          {evalLoading && (
+          {evaluating && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               {selectedKeys.map(k => (
-                <EvalSkeleton key={k} label={
-                  scores?.find(s => (s.strategy_key ?? s.key) === k)?.label ?? k
-                } />
+                <EvalSkeleton key={k} label={scores.find(s => (s.strategy_key ?? s.key) === k)?.label ?? k} />
               ))}
             </div>
           )}
 
-          {/* Real evaluation cards */}
-          {!evalLoading && evaluations.length > 0 && (
+          {!evaluating && verdicts.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              {evaluations.map(card => {
-                const matchingScore = scores?.find(
-                  s => (s.strategy_key ?? s.key) === card.strategy_key
-                );
-                const smaForCard = smaSignal
-                  ? { smaShort: smaSignal.sma_8, smaMid: smaSignal.sma_21, smaLong: smaSignal.sma_50 }
-                  : null;
-
+              {verdicts.map(card => {
+                const matchingScore = scores.find(s => (s.strategy_key ?? s.key) === card.strategy_key);
                 return (
                   <TradeEvaluationCard
                     key={card.strategy_key}
                     card={card}
                     symbol={symbolUpper}
                     currentPrice={prices[symbolUpper]?.price ?? 0}
-                    smaData={smaForCard}
+                    smaData={smaForCards}
                     tradeData={matchingScore?.best_trade ?? null}
                     activeStrategy={card.strategy_key}
                   />
@@ -414,14 +334,12 @@ export default function SecurityDashboard() {
         </div>
       )}
 
-      {/* Strategy-aware ConfigDrawer — opened via Header gear or inline gear button.
-          Uses AppContext configOpen so the Header gear icon works on this page. */}
       <ConfigDrawer
         mode="strategy"
         open={configOpen}
         onClose={() => setConfigOpen(false)}
         config={{}}
-        onApply={handleConfigApply}
+        onApply={() => setConfigOpen(false)}
         activeStrategy={activeStrategyKey}
         presets={[]}
         activePresetId={null}

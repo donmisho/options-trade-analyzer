@@ -495,7 +495,7 @@ function StrategyFitCol({ strategies, notApplicable, selectedKey, onSelect, onEv
 // ─── Column 4: Strategy Explanation ──────────────────────────────────────────
 function StrategyExplainCol({ strategyKey, trade, smaData }) {
   if (!strategyKey) {
-    return <div style={{ padding: 16, color: MUTED, fontSize: 10 }}>Select a strategy to see details.</div>;
+    return <div style={{ padding: 16, color: MUTED, fontSize: 10 }}>Loading strategy details…</div>;
   }
   const cfg = STRATEGY_CONFIGS[strategyKey];
   if (!cfg) return <div style={{ padding: 16 }} />;
@@ -521,40 +521,52 @@ function StrategyExplainCol({ strategyKey, trade, smaData }) {
       <div style={{ fontSize: 12, fontWeight: 700, color: TEAL, marginBottom: 3 }}>{cfg.label}</div>
       <div style={{ fontSize: 9, color: MUTED, marginBottom: 10, lineHeight: 1.5 }}>{subtitle}</div>
 
-      {/* Parameter grid — 2 columns */}
-      {paramRows.length > 0 && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 10px', marginBottom: 10 }}>
-          {paramRows.map(p => (
-            <div key={p.label}>
-              <div style={{ fontSize: 9, textTransform: 'uppercase', color: MUTED, marginBottom: 1 }}>
-                {p.label}
+      {/* OTA-158: Parameter grid — 2 columns inside dark inset box */}
+      {paramRows.length > 0 ? (
+        <div style={{ background: BG, borderRadius: 4, padding: '8px 10px', marginBottom: 8 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 10px' }}>
+            {paramRows.map(p => (
+              <div key={p.label}>
+                <div style={{ fontSize: 9, textTransform: 'uppercase', color: MUTED, marginBottom: 1 }}>
+                  {p.label}
+                </div>
+                <div style={{
+                  fontSize: 11,
+                  color: p.status === 'pass' ? GREEN : p.status === 'fail' ? RED : TEXT,
+                }}>
+                  {p.status === 'pass' ? '✓ ' : p.status === 'fail' ? '✗ ' : ''}{p.value}
+                </div>
               </div>
-              <div style={{
-                fontSize: 11,
-                color: p.status === 'pass' ? GREEN : p.status === 'fail' ? RED : TEXT,
-              }}>
-                {p.status === 'pass' ? '✓ ' : p.status === 'fail' ? '✗ ' : ''}{p.value}
-              </div>
-            </div>
-          ))}
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div style={{ background: BG, borderRadius: 4, padding: '8px 10px', marginBottom: 8 }}>
+          <div style={{ fontSize: 9, color: MUTED, fontStyle: 'italic' }}>
+            Strategy parameters not yet configured
+          </div>
         </div>
       )}
 
-      {/* Signal check box */}
+      {/* OTA-159: Signal check box with section label */}
       {signals.length > 0 && (
-        <div style={{ background: BG2, borderRadius: 4, padding: '8px 10px' }}>
+        <div style={{ background: BG, borderRadius: 4, padding: '8px 10px', marginTop: 8 }}>
+          <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.5px', color: MUTED, marginBottom: 6 }}>
+            Signal Checks
+          </div>
           {signals.map((sig, i) => (
             <div key={i} style={{
               display: 'flex', alignItems: 'flex-start', gap: 6,
               marginBottom: i < signals.length - 1 ? 5 : 0,
+              lineHeight: 1.6,
             }}>
               <div style={{
                 width: 6, height: 6, borderRadius: '50%', flexShrink: 0, marginTop: 2,
-                background: sig.status === 'green' ? GREEN
-                          : sig.status === 'amber' ? AMBER
-                          : RED,
+                background: sig.status === 'green' ? '#4ade80'
+                          : sig.status === 'amber' ? '#f59e0b'
+                          : '#f87171',
               }} />
-              <span style={{ fontSize: 9, color: MUTED, lineHeight: 1.4 }}>{sig.label}</span>
+              <span style={{ fontSize: 9, color: MUTED, lineHeight: 1.6 }}>{sig.label}</span>
             </div>
           ))}
         </div>

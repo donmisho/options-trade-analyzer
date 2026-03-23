@@ -2,7 +2,7 @@
  * StrategyScorecard — Displays all strategy scores for a symbol simultaneously.
  *
  * Used in two contexts:
- * 1. SecurityDashboard — symbol-level scorecard showing all 4 strategies
+ * 1. SecurityStrategiesPage — symbol-level scorecard showing all 4 strategies
  * 2. OptionsTerminal Stage 2 expansion — trade-level strategy fit display
  *
  * Props:
@@ -13,12 +13,14 @@
  *   loading         — boolean, shows skeleton state when true
  */
 
+import { STRATEGY_CONFIGS } from '../strategy-configs/index';
 import { C, mono } from '../styles/tokens';
 
+// Score color per UI-DECISIONS: green ≥70, amber 40–69, red <40
 function scoreColor(score) {
-  if (score >= 65) return C.green;   // #26a69a
-  if (score >= 35) return C.amber;   // #f59e0b
-  return C.red;                      // #ef5350
+  if (score >= 70) return '#4ade80';  // var(--green)
+  if (score >= 40) return '#f59e0b';  // var(--amber)
+  return '#f87171';                   // var(--red)
 }
 
 /**
@@ -49,9 +51,15 @@ function formatBestTrade(best_trade) {
 }
 
 function ScoreRow({ item, selected, onToggle }) {
-  const color = scoreColor(item.score);
-  // Support both API shape (strategy_key) and mock shape (key)
   const itemKey = item.key ?? item.strategy_key;
+  const score = Number(item.score ?? 0);
+  const color = scoreColor(score);
+
+  // Subtitle from strategy config description, or fall back to signal_summary for backwards compat
+  const strategyCfg = STRATEGY_CONFIGS[itemKey];
+  const subtitle = strategyCfg?.description ?? null;
+  // Signal summary: dynamic signal info (IV rank, SMA alignment)
+  const signalSummary = item.signal_summary ?? (item.best_trade ? formatBestTrade(item.best_trade) : null);
 
   return (
     <div
@@ -68,7 +76,6 @@ function ScoreRow({ item, selected, onToggle }) {
         marginBottom: 6,
       }}
       onClick={() => onToggle(itemKey)}
-      title={item.signal_summary || ''}
     >
       {/* Checkbox */}
       <input
@@ -79,64 +86,77 @@ function ScoreRow({ item, selected, onToggle }) {
         style={{ width: 15, height: 15, cursor: 'pointer', accentColor: color, flexShrink: 0 }}
       />
 
-      {/* Strategy name */}
-      <span style={{
-        color: C.text,
-        fontSize: 13,
-        fontWeight: 500,
-        width: 130,
-        flexShrink: 0,
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-        whiteSpace: 'nowrap',
-      }}>
-        {item.label}
-      </span>
+      {/* Strategy name + subtitle (stacked) */}
+      <div style={{ width: 140, flexShrink: 0 }}>
+        <div style={{
+          color: C.text,
+          fontSize: 12,
+          fontWeight: 700,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}>
+          {item.label}
+        </div>
+        {subtitle && (
+          <div style={{
+            color: '#8b949e',
+            fontSize: 9,
+            marginTop: 2,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}>
+            {subtitle}
+          </div>
+        )}
+      </div>
 
-      {/* Score number */}
-      <span style={{
-        color,
-        fontSize: 15,
-        fontWeight: 700,
-        fontFamily: mono,
-        width: 34,
-        textAlign: 'right',
-        flexShrink: 0,
-      }}>
-        {item.score}
-      </span>
-
-      {/* Score bar */}
+      {/* Score bar (full width) */}
       <div style={{
         flex: 1,
-        height: 8,
-        borderRadius: 4,
+        height: 6,
+        borderRadius: 3,
         backgroundColor: C.border,
         overflow: 'hidden',
-        minWidth: 60,
+        minWidth: 50,
       }}>
         <div style={{
           height: '100%',
-          width: `${item.score}%`,
+          width: `${Math.min(score, 100)}%`,
           backgroundColor: color,
-          borderRadius: 4,
+          borderRadius: 3,
           transition: 'width 0.4s ease',
         }} />
       </div>
 
-      {/* Best trade summary (truncated) */}
-      {item.best_trade && (
+      {/* Score number — ##.00 format */}
+      <span style={{
+        color,
+        fontSize: 13,
+        fontWeight: 700,
+        fontFamily: mono,
+        width: 40,
+        textAlign: 'right',
+        flexShrink: 0,
+      }}>
+        {score.toFixed(2)}
+      </span>
+
+      {/* Signal summary — right-aligned muted */}
+      {signalSummary && (
         <span style={{
-          color: C.textDim,
-          fontSize: 10.5,
+          color: '#8b949e',
+          fontSize: 9,
           fontFamily: mono,
-          maxWidth: 180,
+          maxWidth: 170,
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
           flexShrink: 0,
+          textAlign: 'right',
         }}>
-          {formatBestTrade(item.best_trade)}
+          {signalSummary}
         </span>
       )}
     </div>
@@ -156,10 +176,13 @@ function SkeletonRow() {
       marginBottom: 6,
     }}>
       <div style={{ width: 15, height: 15, borderRadius: 3, backgroundColor: C.border }} />
-      <div style={{ width: 120, height: 13, borderRadius: 4, backgroundColor: C.border }} />
-      <div style={{ width: 32, height: 15, borderRadius: 4, backgroundColor: C.border, marginLeft: 4 }} />
-      <div style={{ flex: 1, height: 8, borderRadius: 4, backgroundColor: C.border }} />
-      <div style={{ width: 120, height: 11, borderRadius: 4, backgroundColor: C.border }} />
+      <div style={{ width: 140, flexShrink: 0 }}>
+        <div style={{ height: 12, borderRadius: 4, backgroundColor: C.border, marginBottom: 4 }} />
+        <div style={{ height: 9, width: '80%', borderRadius: 3, backgroundColor: C.border }} />
+      </div>
+      <div style={{ flex: 1, height: 6, borderRadius: 3, backgroundColor: C.border }} />
+      <div style={{ width: 38, height: 13, borderRadius: 4, backgroundColor: C.border }} />
+      <div style={{ width: 100, height: 9, borderRadius: 3, backgroundColor: C.border }} />
     </div>
   );
 }
@@ -197,7 +220,7 @@ export default function StrategyScorecard({
           <div style={{
             padding: '20px',
             textAlign: 'center',
-            color: C.textMuted,
+            color: '#8b949e',
             fontSize: 12,
             borderRadius: 6,
             border: `1px dashed ${C.border}`,
@@ -216,11 +239,10 @@ export default function StrategyScorecard({
               />
             );
           })
-        )
-        }
+        )}
       </div>
 
-      {/* Evaluate button — teal outlined per UI-DECISIONS Button Standards */}
+      {/* Evaluate button + selected count */}
       {!loading && scores.length > 0 && (
         <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 10 }}>
           <button
@@ -234,19 +256,17 @@ export default function StrategyScorecard({
               borderRadius: 4,
               fontSize: 11,
               fontFamily: mono,
-              cursor: 'pointer',
+              cursor: hasSelection ? 'pointer' : 'default',
               width: 'auto',
               opacity: hasSelection ? 1 : 0.35,
               pointerEvents: hasSelection ? 'auto' : 'none',
             }}
           >
-            {hasSelection
-              ? `\u2726 Evaluate Selected (${selectedKeys.length})`
-              : '\u2726 Evaluate Selected'}
+            Evaluate Selected
           </button>
-          {!hasSelection && (
-            <span style={{ fontSize: 10, color: '#8b949e', fontFamily: mono }}>
-              Select strategies above
+          {hasSelection && (
+            <span style={{ fontSize: 9, color: '#8b949e', fontFamily: mono }}>
+              {selectedKeys.length} {selectedKeys.length === 1 ? 'strategy' : 'strategies'} selected
             </span>
           )}
         </div>

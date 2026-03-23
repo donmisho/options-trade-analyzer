@@ -1,13 +1,14 @@
 /**
  * ProbabilityMatrix — Renders a Black-Scholes probability grid.
  *
- * Columns: price levels (left = lowest, right = highest; current price column highlighted)
- * Rows:    snapshot dates (Exp-9, Exp-6, Exp-3, Expiration)
- * Cells:   probability as %, colored by intensity (higher = deeper green)
+ * OTA-156 / OTA-157: Transposed layout — strikes as rows, dates as columns.
+ *
+ * Columns: date snapshots (Exp-9, Exp-6, Exp-3, Expiration)
+ * Rows:    price/strike levels (leftmost column = STRIKE)
+ * Cells:   probability as %, red/amber/green gradient, white bold text
  *
  * For credit spreads the profitable zone (price outside the spread) gets a
- * subtle green background overlay; the max-loss zone (price inside/past long
- * strike) gets a subtle red background overlay.
+ * subtle green border; the max-loss zone gets a subtle red border.
  *
  * Props:
  *   matrix         — { price_levels: number[], dates: string[], matrix: number[][] }
@@ -17,11 +18,11 @@
 
 import { C, mono } from '../styles/tokens';
 
-// ─── Date label helpers ───────────────────────────────────────────────────────
+// ─── Date snapshot labels ─────────────────────────────────────────────────────
 
 const DATE_LABELS = ['Exp-9', 'Exp-6', 'Exp-3', 'Expiration'];
 
-/** mm-dd-yyyy (house rule: never locale strings like "Apr 4"). */
+/** mm-dd-yyyy (house rule). */
 const formatDate = (dateStr) => {
   if (!dateStr) return '—';
   const d = new Date(dateStr);
@@ -31,15 +32,8 @@ const formatDate = (dateStr) => {
   return `${mm}-${dd}-${yyyy}`;
 };
 
-// ─── Profitable zone logic ────────────────────────────────────────────────────
+// ─── Zone classification (price-based, same as before) ────────────────────────
 
-/**
- * Returns a zone classification for a given price column.
- *  'profit'  — full max profit (outside the spread)
- *  'loss'    — full max loss   (inside spread, past long strike)
- *  'partial' — between short and long strike (partial loss)
- *  null      — no trade structure provided
- */
 function getPriceZone(price, tradeStructure) {
   if (!tradeStructure) return null;
   const { spread_type, short_strike, long_strike } = tradeStructure;
@@ -48,10 +42,6 @@ function getPriceZone(price, tradeStructure) {
   switch (spread_type) {
     case 'bull_put':
     case 'bear_put': {
-      // Sold higher put, bought lower put.
-      // Max profit:  price >= short_strike
-      // Partial loss: long_strike < price < short_strike
-      // Max loss:    price <= long_strike
       const hi = Math.max(short_strike, long_strike);
       const lo = Math.min(short_strike, long_strike);
       if (price >= hi) return 'profit';
@@ -60,10 +50,6 @@ function getPriceZone(price, tradeStructure) {
     }
     case 'bear_call':
     case 'bull_call': {
-      // Sold lower call, bought higher call.
-      // Max profit:  price <= short_strike
-      // Partial loss: short_strike < price < long_strike
-      // Max loss:    price >= long_strike
       const lo = Math.min(short_strike, long_strike);
       const hi = Math.max(short_strike, long_strike);
       if (price <= lo) return 'profit';
@@ -75,100 +61,107 @@ function getPriceZone(price, tradeStructure) {
   }
 }
 
-// ─── Cell color ───────────────────────────────────────────────────────────────
+// ─── OTA-157: Color gradient (red → amber → green) ───────────────────────────
 
-/**
- * Maps a probability (0–1) to an RGBA green with opacity scaled by intensity.
- * The scale is non-linear so low probs aren't invisible.
- */
-function probToGreen(prob) {
-  if (prob <= 0) return 'transparent';
-  // sqrt scale so small probabilities are still somewhat visible
-  const intensity = Math.sqrt(prob);
-  const alpha = Math.min(0.85, intensity * 0.9);
-  return `rgba(38, 166, 154, ${alpha.toFixed(3)})`; // C.green = #26a69a
+function getProbabilityColor(prob) {
+  if (prob >= 0.70) return 'rgba(74, 222, 128, 0.75)';   // green — high probability
+  if (prob >= 0.50) return 'rgba(74, 222, 128, 0.40)';   // light green
+  if (prob >= 0.35) return 'rgba(245, 158, 11, 0.50)';   // amber — moderate
+  if (prob >= 0.20) return 'rgba(248, 113, 113, 0.40)';  // light red
+  return 'rgba(248, 113, 113, 0.70)';                    // red — low probability
 }
 
-/**
- * Text color — white when cell is dark (high prob), dimmed when light.
- */
-function probToTextColor(prob) {
-  return prob > 0.12 ? '#fff' : C.textMuted;
-}
+// ─── Zone overlay borders ─────────────────────────────────────────────────────
 
-// ─── Zone overlay color ───────────────────────────────────────────────────────
-
-const ZONE_STYLE = {
-  profit:  { borderTop: `2px solid ${C.green}44`,  borderBottom: `2px solid ${C.green}44` },
-  loss:    { borderTop: `2px solid ${C.red}44`,    borderBottom: `2px solid ${C.red}44` },
-  partial: { borderTop: `2px solid ${C.amber}33`,  borderBottom: `2px solid ${C.amber}33` },
-};
-
-const ZONE_BG = {
-  profit:  `${C.green}08`,
-  loss:    `${C.red}08`,
-  partial: `${C.amber}06`,
+const ZONE_ROW_STYLE = {
+  profit:  { outline: `1px solid ${C.green}44` },
+  loss:    { outline: `1px solid ${C.red}44` },
+  partial: { outline: `1px solid ${C.amber}33` },
 };
 
 // ─── Subcomponents ────────────────────────────────────────────────────────────
 
-function HeaderCell({ price, isCurrent, zone }) {
+/** Date column header (Exp-9, Exp-6, Exp-3, Expiration) */
+function DateHeaderCell({ label, date }) {
   return (
     <th
       style={{
-        padding: '5px 6px',
+        padding: '5px 8px',
         fontFamily: mono,
-        fontSize: 10.5,
-        fontWeight: isCurrent ? 700 : 400,
-        color: isCurrent ? C.accent : C.textDim,
+        fontSize: 9,
+        fontWeight: 400,
+        color: '#8b949e',
         textAlign: 'center',
+        textTransform: 'uppercase',
+        letterSpacing: '0.04em',
         whiteSpace: 'nowrap',
-        backgroundColor: isCurrent ? `${C.accent}18` : (zone ? ZONE_BG[zone] : 'transparent'),
-        borderBottom: `1px solid ${C.border}`,
-        borderLeft: isCurrent ? `1px solid ${C.accent}40` : `1px solid transparent`,
-        borderRight: isCurrent ? `1px solid ${C.accent}40` : `1px solid transparent`,
-        position: 'sticky',
-        top: 0,
-        zIndex: 1,
-        minWidth: 52,
-        ...(zone ? ZONE_STYLE[zone] : {}),
+        backgroundColor: '#21262d',
+        borderBottom: '1px solid #30363d',
+        borderLeft: '1px solid rgba(255,255,255,0.06)',
+        minWidth: 70,
       }}
     >
-      {price % 1 === 0 ? price.toFixed(0) : price.toFixed(1)}
-      {isCurrent && (
-        <div style={{ fontSize: 8, color: C.accent, letterSpacing: '0.03em', marginTop: 1 }}>
-          NOW
+      {label}
+      {date && (
+        <div style={{ fontSize: 8, color: '#555b6e', marginTop: 1 }}>
+          {formatDate(date)}
         </div>
       )}
     </th>
   );
 }
 
-function ProbCell({ prob, isCurrent, zone }) {
-  const pct = (prob * 100).toFixed(1);
-  const bg = probToGreen(prob);
-  const textColor = probToTextColor(prob);
+/** Leftmost strike price cell (row label). */
+function StrikeCell({ price, isCurrent }) {
+  return (
+    <td
+      style={{
+        padding: '4px 8px',
+        fontFamily: mono,
+        fontSize: 10,
+        fontWeight: isCurrent ? 700 : 400,
+        color: isCurrent ? '#2dd4bf' : '#c9d1d9',
+        backgroundColor: '#161b22',
+        borderRight: '1px solid #30363d',
+        borderBottom: '1px solid rgba(255,255,255,0.06)',
+        whiteSpace: 'nowrap',
+        textAlign: 'right',
+        position: 'sticky',
+        left: 0,
+        zIndex: 1,
+        minWidth: 60,
+      }}
+    >
+      {price % 1 === 0 ? price.toFixed(0) : price.toFixed(1)}
+      {isCurrent && (
+        <div style={{ fontSize: 7, color: '#2dd4bf', letterSpacing: '0.03em', marginTop: 1 }}>
+          NOW
+        </div>
+      )}
+    </td>
+  );
+}
+
+/** Probability cell — red/amber/green gradient, white bold text. */
+function ProbCell({ prob }) {
+  const pct = (prob * 100).toFixed(1) + '%';
+  const bg  = getProbabilityColor(prob);
 
   return (
     <td
       style={{
-        padding: '6px 4px',
+        padding: '4px 6px',
         textAlign: 'center',
         fontFamily: mono,
-        fontSize: 11,
-        fontWeight: prob > 0.15 ? 600 : 400,
-        color: textColor,
-        backgroundColor: isCurrent ? `${C.accent}12` : (zone ? ZONE_BG[zone] : 'transparent'),
-        backgroundImage: bg !== 'transparent' ? `linear-gradient(${bg}, ${bg})` : 'none',
-        backgroundBlendMode: 'overlay',
-        borderLeft: isCurrent ? `1px solid ${C.accent}30` : `1px solid transparent`,
-        borderRight: isCurrent ? `1px solid ${C.accent}30` : `1px solid transparent`,
-        borderBottom: `1px solid ${C.borderSubtle}`,
+        fontSize: 10,
+        fontWeight: 700,
+        color: '#ffffff',
+        backgroundColor: bg,
+        border: '1px solid rgba(255,255,255,0.06)',
         whiteSpace: 'nowrap',
-        ...(zone ? ZONE_STYLE[zone] : {}),
       }}
     >
-      {pct}%
+      {pct}
     </td>
   );
 }
@@ -178,16 +171,17 @@ function ProbCell({ prob, isCurrent, zone }) {
 function Legend({ hasZones }) {
   return (
     <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>
-      <LegendItem color={C.green} label="Higher probability" />
-      <LegendItem color={C.textMuted} label="Lower probability" dim />
+      <LegendItem color={C.green} label="≥70% probability" />
+      <LegendItem color={C.amber} label="35–50% probability" />
+      <LegendItem color={C.red}   label="<20% probability" />
       {hasZones && (
         <>
           <LegendItem color={C.green} label="Profit zone" border />
           <LegendItem color={C.amber} label="Partial loss" border />
-          <LegendItem color={C.red} label="Max loss zone" border />
+          <LegendItem color={C.red}   label="Max loss zone" border />
         </>
       )}
-      <LegendItem color={C.accent} label="Current price" accent />
+      <LegendItem color='#2dd4bf' label="Current price" accent />
     </div>
   );
 }
@@ -208,7 +202,7 @@ function LegendItem({ color, label, dim, border, accent }) {
   );
 }
 
-// ─── Empty / loading states ───────────────────────────────────────────────────
+// ─── Empty / loading state ────────────────────────────────────────────────────
 
 function Placeholder({ message }) {
   return (
@@ -239,101 +233,91 @@ export default function ProbabilityMatrix({ matrix, tradeStructure = null, curre
     return <Placeholder message="Probability matrix is empty" />;
   }
 
-  // Find the column index closest to currentPrice
+  // Compute date snapshot labels (align to end so last = Expiration)
+  const numDates = rows.length;
+  const dateLabels = rows.map((_, i) => {
+    const labelIdx = i + (4 - numDates);
+    return DATE_LABELS[Math.max(0, labelIdx)] ?? `T${i}`;
+  });
+
+  // Find the price level index closest to currentPrice
   const currentIdx = price_levels.reduce(
     (best, p, i) =>
       Math.abs(p - currentPrice) < Math.abs(price_levels[best] - currentPrice) ? i : best,
     0
   );
 
-  // Pre-compute zones for each price column (same for every row — zone is price-based)
-  const zones = price_levels.map(p => getPriceZone(p, tradeStructure));
+  // Pre-compute zones and check if any zones are active
+  const zones    = price_levels.map(p => getPriceZone(p, tradeStructure));
   const hasZones = zones.some(z => z !== null);
-
-  // Row labels: use DATE_LABELS by position (Exp-9, Exp-6, Exp-3, Expiration)
-  // Clamp to available rows if fewer than 4
-  const rowLabels = rows.map((_, i) => {
-    const labelIdx = i + (4 - rows.length); // align to end
-    return DATE_LABELS[Math.max(0, labelIdx)] ?? `T${i}`;
-  });
 
   return (
     <div>
-      {/* Scrollable grid */}
+      {/* Scrollable grid — OTA-157: border, border-radius, overflow hidden */}
       <div style={{
         overflowX: 'auto',
-        borderRadius: 6,
-        border: `1px solid ${C.border}`,
-        backgroundColor: C.card,
+        border: '1px solid #30363d',
+        borderRadius: 4,
+        overflow: 'hidden',
       }}>
         <table style={{
           borderCollapse: 'collapse',
           width: '100%',
-          minWidth: `${52 * price_levels.length + 72}px`,
+          minWidth: `${70 * numDates + 68}px`,
         }}>
           <thead>
             <tr>
-              {/* Row label header (top-left corner) */}
-              <th style={{
-                padding: '5px 10px',
-                textAlign: 'left',
-                fontSize: 10,
-                color: C.textMuted,
-                fontFamily: mono,
-                borderBottom: `1px solid ${C.border}`,
-                backgroundColor: C.surface,
-                position: 'sticky',
-                left: 0,
-                zIndex: 2,
-                minWidth: 72,
-              }}>
-                Date / Price
+              {/* Top-left corner — OTA-157: label "STRIKE" */}
+              <th
+                style={{
+                  padding: '5px 8px',
+                  textAlign: 'right',
+                  fontSize: 9,
+                  fontWeight: 400,
+                  color: '#8b949e',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.04em',
+                  fontFamily: mono,
+                  borderBottom: '1px solid #30363d',
+                  borderRight: '1px solid #30363d',
+                  backgroundColor: '#21262d',
+                  position: 'sticky',
+                  left: 0,
+                  zIndex: 2,
+                  minWidth: 60,
+                }}
+              >
+                Strike
               </th>
-              {price_levels.map((price, ci) => (
-                <HeaderCell
-                  key={ci}
-                  price={price}
-                  isCurrent={ci === currentIdx}
-                  zone={zones[ci]}
+              {dateLabels.map((label, di) => (
+                <DateHeaderCell
+                  key={di}
+                  label={label}
+                  date={dates?.[di]}
                 />
               ))}
             </tr>
           </thead>
           <tbody>
-            {rows.map((rowProbs, ri) => (
-              <tr key={ri}>
-                {/* Date label (sticky left) */}
-                <td style={{
-                  padding: '6px 10px',
-                  fontFamily: mono,
-                  fontSize: 11,
-                  fontWeight: ri === rows.length - 1 ? 700 : 400,
-                  color: ri === rows.length - 1 ? C.text : C.textDim,
-                  backgroundColor: C.surface,
-                  borderRight: `1px solid ${C.border}`,
-                  borderBottom: `1px solid ${C.borderSubtle}`,
-                  position: 'sticky',
-                  left: 0,
-                  zIndex: 1,
-                  whiteSpace: 'nowrap',
-                }}>
-                  {rowLabels[ri]}
-                  {dates?.[ri] && (
-                    <div style={{ fontSize: 9, color: C.textMuted, marginTop: 1 }}>
-                      {formatDate(dates[ri])}
-                    </div>
-                  )}
-                </td>
-                {rowProbs.map((prob, ci) => (
-                  <ProbCell
-                    key={ci}
-                    prob={prob}
-                    isCurrent={ci === currentIdx}
-                    zone={zones[ci]}
-                  />
-                ))}
-              </tr>
-            ))}
+            {/* OTA-157 transposed: each ROW = a price level (strike) */}
+            {price_levels.map((price, pi) => {
+              const isCurrent = pi === currentIdx;
+              const zone      = zones[pi];
+              return (
+                <tr
+                  key={pi}
+                  style={zone ? ZONE_ROW_STYLE[zone] : undefined}
+                >
+                  <StrikeCell price={price} isCurrent={isCurrent} />
+                  {rows.map((dateRow, di) => (
+                    <ProbCell
+                      key={di}
+                      prob={dateRow[pi] ?? 0}
+                    />
+                  ))}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
