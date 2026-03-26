@@ -1,21 +1,82 @@
 /**
- * PositionsPage — Unified position tracking view.
+ * PositionsPage — Redesigned position tracking view.
  *
- * Replaces FavoritesPage. Shows all paper and live positions grouped by strategy,
- * with per-group aggregate stats and a composable filter bar.
+ * Session 1: Column config, filter bar, group-by, page shell.
+ * Session 2: Expansion panel (assessment version stack) + Refresh/Archive actions.
+ * Session 3: Wired to real backend API — no mock data.
  *
- * Phase 2.10 B2: wired to real API.
+ * Jira: OTA-268, OTA-269, OTA-270, OTA-271
  */
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { PositionHealthBadge } from '../components/PositionHealthBadge';
-import { PositionDetailPanel } from '../components/PositionDetailPanel';
-import { getPositions, closePosition } from '../api/client';
+import { useState, useMemo, useEffect } from 'react';
+import { positionsColumns, POSITIONS_DEFAULT_SORT } from '../config/positions-columns';
+import { formatDate } from '../utils/formatDate';
+import {
+  getPositions,
+  getPositionAssessments,
+  refreshPosition,
+  archivePosition,
+  getPositionCurrentPrices,
+} from '../api/client';
 import './PageShared.css';
 import './PositionsPage.css';
 
-// ─── Strategy display labels ─────────────────────────────────────────────────
+// ─── API → UI normalisation ───────────────────────────────────────────────────
+
+/**
+ * Map a PositionResponse from the API to the flat shape expected by the
+ * column config and group helpers.
+ */
+function normalizePosition(apiPos) {
+  const ts   = apiPos.trade_structure || {};
+  const legs = Array.isArray(ts.legs) ? ts.legs : [];
+
+  const expiration =
+    ts.expiration ||
+    (legs.length > 0 ? legs[0].expiration : null) ||
+    null;
+
+  // Current DTE computed from expiration (live, not at-entry)
+  let dte = null;
+  if (expiration) {
+    const diff = new Date(expiration) - new Date();
+    dte = Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
+  }
+
+  const shortLeg   = legs.find(l => l.side === 'short');
+  const longLeg    = legs.find(l => l.side === 'long');
+  const shortStrike = ts.short_strike ?? shortLeg?.strike ?? null;
+  const longStrike  = ts.long_strike  ?? longLeg?.strike  ?? null;
+
+  const entryPrice = apiPos.entry_price ?? 0;
+  const rawPnl     = apiPos.current_pnl;                           // premium diff
+  const pnlAmount  = rawPnl != null ? rawPnl * 100 : null;         // per-contract dollars
+  const pnlPct     = (rawPnl != null && entryPrice)
+    ? (rawPnl / entryPrice) * 100
+    : null;
+
+  return {
+    id:             apiPos.position_id,
+    symbol:         apiPos.symbol,
+    source:         apiPos.source,
+    strategy_key:   apiPos.strategy_key,
+    structure:      ts.structure || ts.spread_structure || 'Vertical',
+    trade_type:     ts.trade_type || null,
+    analysis_date:  apiPos.entry_date,
+    short_strike:   shortStrike,
+    long_strike:    longStrike,
+    expiration,
+    entry_price:    entryPrice,
+    current_premium: apiPos.current_price ?? null,
+    pnl_amount:     pnlAmount,
+    pnl_pct:        pnlPct,
+    dte,
+    perf_status:    'unknown',   // updated by getPositionCurrentPrices
+    status:         apiPos.status,
+  };
+}
+
+// ─── Strategy/Group metadata ──────────────────────────────────────────────────
 
 const STRATEGY_LABELS = {
   'steady-paycheck': 'Steady Paycheck',
@@ -27,206 +88,323 @@ const STRATEGY_LABELS = {
 };
 
 const STRATEGY_ORDER = [
-  'steady-paycheck', 'weekly-grind', 'trend-rider', 'lottery-ticket',
+  'lottery-ticket', 'steady-paycheck', 'weekly-grind', 'trend-rider',
   'verticals', 'long-calls',
 ];
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Group-by helpers ─────────────────────────────────────────────────────────
 
-function isActive(pos) {
-  return pos.status === 'FOLLOWING' || pos.status === 'LIVE';
-}
-
-function calcDte(expiration) {
-  if (!expiration) return null;
-  try {
-    const diff = Math.ceil((new Date(expiration) - new Date()) / 86400000);
-    return Math.max(0, diff);
-  } catch {
-    return null;
+function getGroupValue(pos, groupBy) {
+  switch (groupBy) {
+    case 'Strategy':      return pos.strategy_key;
+    case 'Symbol':        return pos.symbol;
+    case 'Position Type': return pos.source === 'LIVE' ? 'Live' : 'Paper';
+    case 'Structure':     return pos.structure ?? 'Unknown';
+    case 'Type':          return pos.trade_type ?? 'Unknown';
+    case 'DTE': {
+      const d = pos.dte ?? 0;
+      if (d <= 7)  return '0-7 DTE';
+      if (d <= 14) return '8-14 DTE';
+      if (d <= 30) return '15-30 DTE';
+      return '30+ DTE';
+    }
+    case 'Performance':   return pos.perf_status ?? 'red';
+    default:              return pos.strategy_key;
   }
 }
 
-function fmtPrice(val) {
-  if (val == null) return '—';
-  return Number(val).toFixed(2);
+function groupLabel(groupBy, key) {
+  if (groupBy === 'Strategy')    return STRATEGY_LABELS[key] ?? key;
+  if (groupBy === 'Performance') return key === 'green' ? 'On Track' : key === 'amber' ? 'Watch' : 'At Risk';
+  return key;
 }
 
-function fmtPnl(val) {
-  if (val == null) return '—';
-  const n = Number(val);
-  return (n >= 0 ? '+' : '') + n.toFixed(0);
+function groupSortKey(groupBy, key) {
+  if (groupBy === 'Strategy') {
+    const idx = STRATEGY_ORDER.indexOf(key);
+    return idx >= 0 ? idx : 99;
+  }
+  if (groupBy === 'Performance') return key === 'green' ? 0 : key === 'amber' ? 1 : 2;
+  return key;
 }
 
-function pnlClass(val) {
-  if (val == null) return '';
-  return Number(val) >= 0 ? 'pos-pnl-up' : 'pos-pnl-down';
+// ─── Sorting ──────────────────────────────────────────────────────────────────
+
+function sortPositions(positions, sortKey, sortDir) {
+  const col = positionsColumns.find(c => c.key === sortKey);
+  return [...positions].sort((a, b) => {
+    let av, bv;
+    if (col?.sortValue) {
+      av = col.sortValue(a);
+      bv = col.sortValue(b);
+    } else {
+      av = a[sortKey] ?? a[col?.sortKey ?? sortKey];
+      bv = b[sortKey] ?? b[col?.sortKey ?? sortKey];
+    }
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    const cmp = typeof av === 'string' ? av.localeCompare(bv) : av - bv;
+    return sortDir === 'asc' ? cmp : -cmp;
+  });
 }
 
-function aggregateStats(positions) {
-  const active = positions.filter(isActive);
-  const closed = positions.filter(p => p.status === 'CLOSED');
-  const winners = closed.filter(p => (p.outcome_pnl ?? 0) > 0);
-  const winRate = closed.length > 0 ? Math.round((winners.length / closed.length) * 100) : null;
-  const avgPnl = closed.length > 0
-    ? Math.round(closed.reduce((s, p) => s + (p.outcome_pnl ?? 0), 0) / closed.length)
-    : null;
-  const avgHold = closed.length > 0
-    ? Math.round(closed.reduce((s, p) => s + (p.days_held ?? 0), 0) / closed.length)
-    : null;
-  return { active: active.length, closed: closed.length, winRate, avgPnl, avgHold };
+// ─── Assessment Version Stack ─────────────────────────────────────────────────
+
+function scoreColor(score) {
+  if (score >= 70) return '#4ade80';
+  if (score >= 40) return '#f59e0b';
+  return '#f87171';
 }
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
+const VERDICT_STYLES = {
+  EXECUTE: { color: '#4ade80', bg: 'rgba(74,222,128,0.15)' },
+  WAIT:    { color: '#f59e0b', bg: 'rgba(245,158,11,0.15)' },
+  PASS:    { color: '#f87171', bg: 'rgba(248,113,113,0.15)' },
+};
 
-function SourceBadge({ source }) {
-  const isLive = source === 'LIVE';
+function VerdictBadge({ verdict }) {
+  const s = VERDICT_STYLES[verdict] ?? VERDICT_STYLES.PASS;
   return (
-    <span className={`pos-source-badge ${isLive ? 'pos-source-live' : 'pos-source-paper'}`}>
-      {isLive ? 'Live' : 'Paper'}
+    <span style={{
+      display: 'inline-block', padding: '2px 7px', borderRadius: 3,
+      fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.3px',
+      color: s.color, background: s.bg,
+    }}>
+      {verdict}
     </span>
   );
 }
 
-function ExitReasonBadge({ reason }) {
-  const cls = {
-    TARGET:  'pos-exit-target',
-    WARNING: 'pos-exit-warning',
-    STOP:    'pos-exit-stop',
-    EXPIRED: 'pos-exit-expired',
-    MANUAL:  'pos-exit-manual',
-  }[reason] ?? '';
-  const label = reason ? reason.charAt(0) + reason.slice(1).toLowerCase() : '—';
-  return <span className={`pos-exit-badge ${cls}`}>{label}</span>;
-}
-
-function ActiveTable({ positions, onClose, onView }) {
-  const [expandedId, setExpandedId] = useState(null);
-  if (!positions.length) return null;
-  const toggleExpand = (id) => setExpandedId(prev => prev === id ? null : id);
-  const COL_COUNT = 10;
+function ExitPlanRow({ label, sublabel, price, color, isDate }) {
   return (
-    <div className="table-wrap" style={{ marginBottom: 12 }}>
-      <table>
-        <thead>
-          <tr>
-            <th style={{ width: 20 }}></th>
-            <th>Symbol</th>
-            <th>Type</th>
-            <th>Grade</th>
-            <th>Entry</th>
-            <th>Current</th>
-            <th>P&amp;L</th>
-            <th>DTE</th>
-            <th>Score</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {positions.map(pos => {
-            const dte = calcDte(pos.trade_structure?.expiration);
-            const dteColor = dte == null ? '' : dte <= 5 ? '#ef4444' : dte <= 10 ? '#f97316' : '';
-            const isExpanded = expandedId === pos.position_id;
-            return (
-              <>
-                <tr key={pos.position_id}>
-                  <td>
-                    <button
-                      className="pos-expand-btn"
-                      onClick={() => toggleExpand(pos.position_id)}
-                      title={isExpanded ? 'Collapse' : 'Expand'}
-                    >
-                      {isExpanded ? '▾' : '▸'}
-                    </button>
-                  </td>
-                  <td>
-                    <button className="pos-symbol-btn" onClick={() => onView(pos.symbol)}>
-                      {pos.symbol}
-                    </button>
-                  </td>
-                  <td><SourceBadge source={pos.source} /></td>
-                  <td><PositionHealthBadge grade={pos.health_grade} /></td>
-                  <td className="mono text-muted">{fmtPrice(pos.entry_underlying_price)}</td>
-                  <td className="mono">{fmtPrice(pos.current_price)}</td>
-                  <td className={`mono ${pnlClass(pos.current_pnl)}`}>{fmtPnl(pos.current_pnl)}</td>
-                  <td className="mono" style={{ color: dteColor || undefined }}>
-                    {dte != null ? `${dte}d` : '—'}
-                  </td>
-                  <td className="mono text-muted">{pos.claude_score ?? '—'}</td>
-                  <td>
-                    <div className="pos-actions">
-                      <button className="pos-btn-close" onClick={() => onClose(pos)}>Close</button>
-                      <button className="pos-btn-view" onClick={() => onView(pos.symbol)}>View</button>
-                    </div>
-                  </td>
-                </tr>
-                {isExpanded && (
-                  <PositionDetailPanel
-                    key={`detail-${pos.position_id}`}
-                    position={pos}
-                    colSpan={COL_COUNT}
-                  />
-                )}
-              </>
-            );
-          })}
-        </tbody>
-      </table>
+    <div className="av-exit-row">
+      <div>
+        <div className="av-exit-label">{label}</div>
+        {sublabel && <div className="av-exit-sublabel">{sublabel}</div>}
+      </div>
+      <span className="av-exit-price" style={{ color }}>
+        {isDate ? formatDate(price) : Number(price).toFixed(2)}
+      </span>
     </div>
   );
 }
 
-function ClosedTable({ positions }) {
-  const [expandedId, setExpandedId] = useState(null);
-  if (!positions.length) return null;
-  const toggleExpand = (id) => setExpandedId(prev => prev === id ? null : id);
-  const COL_COUNT = 9;
+function AssessmentVersion({ version, defaultExpanded }) {
+  const [open, setOpen] = useState(defaultExpanded);
+  const labelType = version.assessment_type === 'ORIGINAL' ? 'Original' : 'Update';
+  const dateStr   = version.created_at ? formatDate(version.created_at, true) : '—';
+  const sc        = scoreColor(version.score);
+  const exits     = version.exit_levels ?? {};
+
+  return (
+    <div className="av-version">
+      {/* Version header */}
+      <div className="av-header" onClick={() => setOpen(o => !o)}>
+        <span className="av-chevron">{open ? '▼' : '▶'}</span>
+        <VerdictBadge verdict={version.verdict} />
+        <span style={{ fontSize: 13, fontWeight: 700, color: sc, marginLeft: 6 }}>
+          {Number(version.score).toFixed(2)}
+        </span>
+        <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 10 }}>
+          {labelType}: {dateStr}
+        </span>
+        {version.synopsis && (
+          <span style={{ fontSize: 10, color: 'var(--text-muted)', fontStyle: 'italic', marginLeft: 10 }}>
+            Synopsis: {version.synopsis}
+          </span>
+        )}
+      </div>
+
+      {/* Expanded body */}
+      {open && (
+        <div className="av-body">
+          <div className="av-content">
+            {/* 2/3 — Claude's Read */}
+            <div className="av-col-read">
+              <div className="av-section-label">Claude's Read</div>
+              {(version.claude_read ?? '').split('\n\n').map((para, i) => (
+                <p key={i} className="av-read-text">{para}</p>
+              ))}
+            </div>
+
+            {/* 1/3 — Exit Plan */}
+            <div className="av-col-exit">
+              <div className="av-section-label">Exit Plan</div>
+              {exits.take_profit != null && (
+                <ExitPlanRow
+                  label="Take Profit"
+                  sublabel="underlying price — full profit exit"
+                  price={exits.take_profit}
+                  color="#4ade80"
+                />
+              )}
+              {exits.warning != null && (
+                <ExitPlanRow
+                  label="Warning Level"
+                  sublabel="underlying price — early warning"
+                  price={exits.warning}
+                  color="#f59e0b"
+                />
+              )}
+              {exits.hard_stop != null && (
+                <ExitPlanRow
+                  label="Hard Stop"
+                  sublabel="underlying price — cut the loss"
+                  price={exits.hard_stop}
+                  color="#f87171"
+                />
+              )}
+              {exits.calendar_exit != null && (
+                <ExitPlanRow
+                  label="Calendar Exit"
+                  sublabel="date — exit regardless of price"
+                  price={exits.calendar_exit}
+                  color="#c084fc"
+                  isDate
+                />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AssessmentVersionStack({ positionId, assessmentsCache, isLoading }) {
+  if (isLoading) {
+    return (
+      <div className="av-stack av-empty" style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>
+        Loading assessments…
+      </div>
+    );
+  }
+
+  const assessments = assessmentsCache?.[positionId] ?? [];
+
+  if (!assessments.length) {
+    return (
+      <div className="av-stack av-empty">
+        No assessments recorded for this position.
+      </div>
+    );
+  }
+
+  return (
+    <div className="av-stack">
+      {assessments.map((v, idx) => (
+        <AssessmentVersion
+          key={v.assessment_id}
+          version={v}
+          defaultExpanded={idx === 0}
+        />
+      ))}
+    </div>
+  );
+}
+
+// ─── PositionsTable ───────────────────────────────────────────────────────────
+
+function PositionsTable({
+  positions,
+  expandedRowIds,
+  onRowClick,
+  onRefresh,
+  onArchive,
+  refreshingId,
+  assessmentsCache,
+  loadingAssessmentIds,
+}) {
+  const [sort, setSort] = useState(POSITIONS_DEFAULT_SORT);
+
+  const sorted = useMemo(
+    () => sortPositions(positions, sort.key, sort.dir),
+    [positions, sort]
+  );
+
+  function handleHeaderClick(col) {
+    if (!col.sortable) return;
+    setSort(prev => ({
+      key: col.key,
+      dir: prev.key === col.key && prev.dir === 'desc' ? 'asc' : 'desc',
+    }));
+  }
+
+  const colCount = positionsColumns.length;
+
   return (
     <div className="table-wrap">
       <table>
         <thead>
           <tr>
-            <th style={{ width: 20 }}></th>
-            <th>Symbol</th>
-            <th>Type</th>
-            <th>Grade</th>
-            <th>Entry</th>
-            <th>Exit</th>
-            <th>P&amp;L</th>
-            <th>Hold</th>
-            <th>Reason</th>
+            {positionsColumns.map(col => {
+              const isActive = sort.key === col.key;
+              return (
+                <th
+                  key={col.key}
+                  style={{
+                    textAlign: col.align === 'right' ? 'right' : col.align === 'left' ? 'left' : 'center',
+                    width: col.width,
+                    cursor: col.sortable ? 'pointer' : 'default',
+                    color: isActive ? '#2dd4bf' : undefined,
+                    userSelect: 'none',
+                    fontSize: 10,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.4px',
+                    fontWeight: 400,
+                  }}
+                  onClick={() => handleHeaderClick(col)}
+                >
+                  {col.label}
+                  {isActive && (
+                    <span style={{ marginLeft: 3, fontSize: 9, color: '#2dd4bf' }}>
+                      {sort.dir === 'desc' ? '▼' : '▲'}
+                    </span>
+                  )}
+                </th>
+              );
+            })}
           </tr>
         </thead>
         <tbody>
-          {positions.map(pos => {
-            const isExpanded = expandedId === pos.position_id;
+          {sorted.map(pos => {
+            const isExpanded   = expandedRowIds.has(pos.id);
+            const isRefreshing = refreshingId === pos.id;
+            const ctx = { isExpanded, onRefresh, onArchive, isRefreshing };
             return (
               <>
-                <tr key={pos.position_id}>
-                  <td>
-                    <button
-                      className="pos-expand-btn"
-                      onClick={() => toggleExpand(pos.position_id)}
-                      title={isExpanded ? 'Collapse' : 'Expand'}
+                <tr
+                  key={pos.id}
+                  style={{ background: isExpanded ? 'rgba(45,212,191,0.03)' : undefined, cursor: 'pointer' }}
+                  onClick={() => onRowClick(pos.id)}
+                >
+                  {positionsColumns.map(col => (
+                    <td
+                      key={col.key}
+                      style={{
+                        textAlign: col.align === 'right' ? 'right' : col.align === 'left' ? 'left' : 'center',
+                      }}
                     >
-                      {isExpanded ? '▾' : '▸'}
-                    </button>
-                  </td>
-                  <td className="mono text-cyan">{pos.symbol}</td>
-                  <td><SourceBadge source={pos.source} /></td>
-                  <td><PositionHealthBadge grade={pos.health_grade} /></td>
-                  <td className="mono text-muted">{fmtPrice(pos.entry_underlying_price)}</td>
-                  <td className="mono">{fmtPrice(pos.exit_price)}</td>
-                  <td className={`mono ${pnlClass(pos.outcome_pnl)}`}>{fmtPnl(pos.outcome_pnl)}</td>
-                  <td className="mono text-muted">{pos.days_held != null ? `${pos.days_held}d` : '—'}</td>
-                  <td><ExitReasonBadge reason={pos.exit_reason} /></td>
+                      {col.render ? col.render(pos, ctx) : (pos[col.key] ?? '—')}
+                    </td>
+                  ))}
                 </tr>
                 {isExpanded && (
-                  <PositionDetailPanel
-                    key={`detail-${pos.position_id}`}
-                    position={pos}
-                    colSpan={COL_COUNT}
-                  />
+                  <tr key={`exp-${pos.id}`}>
+                    <td
+                      colSpan={colCount}
+                      style={{ padding: 0, borderBottom: '1px solid var(--border)' }}
+                    >
+                      <div className="av-expansion-panel">
+                        <AssessmentVersionStack
+                          positionId={pos.id}
+                          assessmentsCache={assessmentsCache}
+                          isLoading={loadingAssessmentIds?.has(pos.id)}
+                        />
+                      </div>
+                    </td>
+                  </tr>
                 )}
               </>
             );
@@ -237,319 +415,415 @@ function ClosedTable({ positions }) {
   );
 }
 
-function StrategyGroup({ strategyKey, positions, onClose, onView }) {
-  const label = STRATEGY_LABELS[strategyKey] ?? strategyKey;
-  const active = positions.filter(isActive);
-  const closed = positions.filter(p => p.status === 'CLOSED');
-  const stats = aggregateStats(positions);
+// ─── PositionGroup ────────────────────────────────────────────────────────────
 
+function PositionGroup({ name, count, collapsed, onToggle, children }) {
   return (
     <div className="pos-strategy-group">
-      <div className="pos-group-header">
-        <span className="pos-group-title">{label}</span>
-        <span className="pos-group-stats">
-          {stats.active > 0 && <span>{stats.active} active</span>}
-          {stats.active > 0 && stats.closed > 0 && <span className="pos-stats-sep">·</span>}
-          {stats.closed > 0 && <span>{stats.closed} closed</span>}
-          {stats.winRate != null && (
-            <>
-              <span className="pos-stats-sep">·</span>
-              <span>Win rate {stats.winRate}%</span>
-            </>
-          )}
-          {stats.avgPnl != null && (
-            <>
-              <span className="pos-stats-sep">·</span>
-              <span className={stats.avgPnl >= 0 ? 'pos-pnl-up' : 'pos-pnl-down'}>
-                Avg P&L {fmtPnl(stats.avgPnl)}
-              </span>
-            </>
-          )}
-          {stats.avgHold != null && (
-            <>
-              <span className="pos-stats-sep">·</span>
-              <span>Avg hold {stats.avgHold}d</span>
-            </>
-          )}
+      <div
+        className="pos-group-header pos-group-header--clickable"
+        onClick={onToggle}
+        style={{ cursor: 'pointer' }}
+      >
+        <span style={{ color: 'var(--text-muted)', fontSize: 9, marginRight: 4 }}>
+          {collapsed ? '▶' : '▼'}
         </span>
+        <span className="pos-group-title">{name}</span>
+        <span className="pos-group-count">{count}</span>
       </div>
-
-      {active.length > 0 && (
-        <ActiveTable positions={active} onClose={onClose} onView={onView} />
-      )}
-      {closed.length > 0 && (
-        <>
-          {active.length > 0 && (
-            <div className="pos-closed-divider">Closed</div>
-          )}
-          <ClosedTable positions={closed} />
-        </>
-      )}
+      {!collapsed && children}
     </div>
   );
 }
 
-// ─── Close Modal ──────────────────────────────────────────────────────────────
+// ─── FilterBar ────────────────────────────────────────────────────────────────
 
-function CloseModal({ pos, onCancel, onConfirm, closing }) {
-  const [exitPrice, setExitPrice] = useState(
-    pos.current_price != null ? String(pos.current_price) : ''
+const GROUP_BY_OPTIONS = [
+  'Strategy', 'Symbol', 'Position Type', 'Structure', 'Type', 'DTE', 'Performance',
+];
+
+const STRATEGY_FILTER_OPTIONS = [
+  { value: 'steady-paycheck', label: 'Steady Paycheck' },
+  { value: 'weekly-grind',    label: 'Weekly Grind' },
+  { value: 'trend-rider',     label: 'Trend Rider' },
+  { value: 'lottery-ticket',  label: 'Lottery Ticket' },
+];
+
+function FilterBar({ filters, onChange }) {
+  return (
+    <div className="pos-filter-bar">
+      <div className="pos-filter-group">
+        <label className="pos-filter-label">Status</label>
+        <select
+          className="pos-filter-select"
+          value={filters.status}
+          onChange={e => onChange('status', e.target.value)}
+        >
+          <option value="Active">Active</option>
+          <option value="Archived">Archived</option>
+        </select>
+      </div>
+
+      <div className="pos-filter-group">
+        <label className="pos-filter-label">Type</label>
+        <select
+          className="pos-filter-select"
+          value={filters.source}
+          onChange={e => onChange('source', e.target.value)}
+        >
+          <option value="all">All</option>
+          <option value="PAPER">Paper</option>
+          <option value="LIVE">Live</option>
+        </select>
+      </div>
+
+      <div className="pos-filter-group">
+        <label className="pos-filter-label">Strategy</label>
+        <select
+          className="pos-filter-select"
+          value={filters.strategy}
+          onChange={e => onChange('strategy', e.target.value)}
+        >
+          <option value="all">All</option>
+          {STRATEGY_FILTER_OPTIONS.map(o => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
+      </div>
+
+      <div className="pos-filter-group">
+        <label className="pos-filter-label">Symbol</label>
+        <input
+          type="text"
+          className="pos-filter-input"
+          placeholder="e.g. META"
+          value={filters.symbol}
+          onChange={e => onChange('symbol', e.target.value)}
+          style={{ minWidth: 160 }}
+        />
+      </div>
+
+      <div className="pos-filter-group" style={{ marginLeft: 'auto' }}>
+        <label className="pos-filter-label">Group By</label>
+        <select
+          className="pos-filter-select"
+          value={filters.groupBy}
+          onChange={e => onChange('groupBy', e.target.value)}
+          style={{ minWidth: 110 }}
+        >
+          {GROUP_BY_OPTIONS.map(o => (
+            <option key={o} value={o}>{o}</option>
+          ))}
+        </select>
+      </div>
+    </div>
   );
-  const [exitReason, setExitReason] = useState('MANUAL');
-  const [err, setErr] = useState(null);
+}
 
-  const handleConfirm = () => {
-    const price = parseFloat(exitPrice);
-    if (isNaN(price) || price <= 0) {
-      setErr('Enter a valid exit price');
-      return;
-    }
-    setErr(null);
-    onConfirm({ exit_price: price, exit_reason: exitReason });
-  };
+// ─── Toast ────────────────────────────────────────────────────────────────────
+
+function Toast({ message, onDismiss }) {
+  useEffect(() => {
+    const t = setTimeout(onDismiss, 5000);
+    return () => clearTimeout(t);
+  }, [onDismiss]);
 
   return (
-    <div className="pos-modal-overlay" onClick={onCancel}>
-      <div className="pos-modal" onClick={e => e.stopPropagation()}>
-        <h3 className="pos-modal-title">Close Position</h3>
-        <p className="pos-modal-body">
-          Close <strong>{pos.symbol}</strong> ({pos.source === 'LIVE' ? 'Live' : 'Paper'})?
-        </p>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            <label style={{ fontSize: 12, color: 'var(--text-muted)', width: 90 }}>Exit price</label>
-            <input
-              type="number"
-              step="0.01"
-              value={exitPrice}
-              onChange={e => setExitPrice(e.target.value)}
-              className="pos-filter-input"
-              style={{ flex: 1 }}
-              placeholder="0.00"
-            />
-          </div>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            <label style={{ fontSize: 12, color: 'var(--text-muted)', width: 90 }}>Reason</label>
-            <select
-              value={exitReason}
-              onChange={e => setExitReason(e.target.value)}
-              className="pos-filter-select"
-              style={{ flex: 1 }}
-            >
-              <option value="TARGET">Target</option>
-              <option value="WARNING">Warning</option>
-              <option value="STOP">Stop</option>
-              <option value="EXPIRED">Expired</option>
-              <option value="MANUAL">Manual</option>
-            </select>
-          </div>
-          {err && <p style={{ fontSize: 12, color: '#ef4444', margin: 0 }}>{err}</p>}
-        </div>
-
-        <div className="pos-modal-actions">
-          <button className="pos-btn-view" onClick={onCancel} disabled={closing}>Cancel</button>
-          <button className="pos-btn-close" onClick={handleConfirm} disabled={closing}>
-            {closing ? 'Closing...' : 'Confirm Close'}
-          </button>
-        </div>
-      </div>
+    <div className="pos-toast" onClick={onDismiss}>
+      {message}
     </div>
   );
 }
 
-// ─── Main Component ───────────────────────────────────────────────────────────
+// ─── Main Page ────────────────────────────────────────────────────────────────
+
+const _inactive = (s) => s === 'CLOSED' || s === 'ARCHIVED';
 
 export default function PositionsPage() {
-  const navigate = useNavigate();
-
-  const [positions, setPositions] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-
-  const [filters, setFilters] = useState({
-    status: 'all',       // all | active | closed
-    source: 'all',       // all | PAPER | LIVE
-    symbol: '',
+  const [positions, setPositions]                   = useState([]);
+  const [loading, setLoading]                       = useState(true);
+  const [error, setError]                           = useState(null);
+  const [assessmentsCache, setAssessmentsCache]     = useState({});
+  const [loadingAssessmentIds, setLoadingAsmIds]    = useState(new Set());
+  const [refreshingId, setRefreshingId]             = useState(null);
+  const [expandedRowIds, setExpandedRowIds]         = useState(new Set());
+  const [toast, setToast]                           = useState(null);
+  const [collapsedGroups, setCollapsedGroups]       = useState({});
+  const [filters, setFilters]                       = useState({
+    status:   'Active',
+    source:   'all',
     strategy: 'all',
+    symbol:   '',
+    groupBy:  'Strategy',
   });
 
-  const [closeModal, setCloseModal] = useState(null);
-  const [closing, setClosing] = useState(false);
-
-  const setFilter = (key, val) => setFilters(f => ({ ...f, [key]: val }));
-
-  const fetchPositions = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const apiFilters = {
-        status: filters.status,
-        source: filters.source,
-        symbol: filters.symbol,
-        strategy_key: filters.strategy,
-      };
-      const data = await getPositions(apiFilters);
-      setPositions(data.positions || []);
-    } catch (err) {
-      setError(err.message || 'Failed to load positions');
-      setPositions([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [filters]);
-
+  // ── Load positions on mount ────────────────────────────────────────────────
   useEffect(() => {
-    fetchPositions();
-  }, [fetchPositions]);
+    async function load() {
+      try {
+        setLoading(true);
+        setError(null);
+        const data = await getPositions({ include_archived: true });
+        const normalized = (data.positions || []).map(normalizePosition);
+        setPositions(normalized);
 
-  // Group by strategy in canonical order
-  const grouped = useMemo(() => {
-    const map = {};
-    for (const pos of positions) {
-      if (!map[pos.strategy_key]) map[pos.strategy_key] = [];
-      map[pos.strategy_key].push(pos);
+        // Fetch current prices for active positions (background, non-blocking)
+        const activeIds = normalized
+          .filter(p => !_inactive(p.status))
+          .map(p => p.id);
+        if (activeIds.length > 0) {
+          _fetchCurrentPrices(activeIds);
+        }
+
+        // Auto-archive expired positions
+        const now = new Date();
+        const expired = normalized.filter(
+          p => p.expiration && new Date(p.expiration) < now && !_inactive(p.status)
+        );
+        if (expired.length > 0) {
+          _archiveExpiredBatch(expired);
+        }
+      } catch (err) {
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
     }
-    // Render known strategy order first, then any unknown keys
-    const knownKeys = STRATEGY_ORDER.filter(k => map[k]);
-    const otherKeys = Object.keys(map).filter(k => !STRATEGY_ORDER.includes(k));
-    return [...knownKeys, ...otherKeys].map(k => ({ key: k, positions: map[k] }));
-  }, [positions]);
+    load();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const handleView = (symbol) => navigate(`/security/${symbol}`);
-  const handleClose = (pos) => setCloseModal(pos);
-
-  const handleCloseConfirm = async ({ exit_price, exit_reason }) => {
-    if (!closeModal) return;
-    setClosing(true);
+  async function _fetchCurrentPrices(ids) {
     try {
-      const updated = await closePosition(closeModal.position_id, { exit_price, exit_reason });
-      setPositions(prev => prev.map(p => p.position_id === updated.position_id ? updated : p));
-      setCloseModal(null);
+      const prices = await getPositionCurrentPrices(ids);
+      setPositions(prev => {
+        const priceMap = {};
+        for (const cp of prices) priceMap[cp.position_id] = cp;
+        return prev.map(p => {
+          const cp = priceMap[p.id];
+          if (!cp || cp.error) return p;
+          const pnlAmount = cp.current_pnl != null ? cp.current_pnl * 100 : p.pnl_amount;
+          const pnlPct    = cp.pnl_pct    != null ? cp.pnl_pct    * 100 : p.pnl_pct;
+          return {
+            ...p,
+            current_premium: cp.current_premium ?? p.current_premium,
+            pnl_amount:      pnlAmount,
+            pnl_pct:         pnlPct,
+            perf_status:     cp.perf_status ?? p.perf_status,
+          };
+        });
+      });
     } catch (err) {
-      alert(err.message || 'Failed to close position');
-    } finally {
-      setClosing(false);
+      console.warn('PositionsPage: current prices fetch failed:', err.message);
     }
-  };
+  }
 
-  const totalActive = positions.filter(isActive).length;
-  const totalClosed = positions.filter(p => p.status === 'CLOSED').length;
+  async function _archiveExpiredBatch(expired) {
+    let count = 0;
+    for (const pos of expired) {
+      try {
+        await archivePosition(pos.id);
+        setPositions(prev => prev.map(p => p.id === pos.id ? { ...p, status: 'ARCHIVED' } : p));
+        count++;
+      } catch {
+        // non-fatal
+      }
+    }
+    if (count > 0) {
+      setToast(`${count} position${count > 1 ? 's' : ''} archived (expired)`);
+    }
+  }
 
+  function setFilter(key, val) {
+    setFilters(f => ({ ...f, [key]: val }));
+  }
+
+  function toggleGroup(groupKey) {
+    setCollapsedGroups(prev => ({ ...prev, [groupKey]: !prev[groupKey] }));
+  }
+
+  async function handleRowClick(id) {
+    setExpandedRowIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+    // Load assessments if not yet cached and not already in-flight
+    if (!assessmentsCache[id] && !loadingAssessmentIds.has(id)) {
+      setLoadingAsmIds(prev => new Set([...prev, id]));
+      try {
+        const data = await getPositionAssessments(id);
+        setAssessmentsCache(prev => ({ ...prev, [id]: data }));
+      } catch {
+        // silently fail → empty state shown
+      } finally {
+        setLoadingAsmIds(prev => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+      }
+    }
+  }
+
+  async function handleRefresh(pos) {
+    setRefreshingId(pos.id);
+    setExpandedRowIds(prev => { const next = new Set(prev); next.add(pos.id); return next; });
+    try {
+      const result = await refreshPosition(pos.id);
+      // Prepend new assessment to cache
+      setAssessmentsCache(prev => ({
+        ...prev,
+        [pos.id]: [result.assessment, ...(prev[pos.id] ?? [])],
+      }));
+      // Update position row with latest premium / P&L
+      setPositions(prev => prev.map(p => {
+        if (p.id !== pos.id) return p;
+        return {
+          ...p,
+          current_premium: result.current_premium,
+          pnl_amount:      result.current_pnl * 100,
+          pnl_pct:         result.pnl_pct     * 100,
+          perf_status:     result.perf_status,
+        };
+      }));
+    } catch (err) {
+      setToast(`Refresh failed: ${err.message}`);
+    } finally {
+      setRefreshingId(null);
+    }
+  }
+
+  function handleArchive(pos) {
+    if (!window.confirm(`Archive this position? (${pos.symbol} · ${pos.source === 'LIVE' ? 'Live' : 'Paper'})`)) return;
+    archivePosition(pos.id)
+      .then(() => {
+        setPositions(prev => prev.map(p => p.id === pos.id ? { ...p, status: 'ARCHIVED' } : p));
+        setExpandedRowIds(prev => { const next = new Set(prev); next.delete(pos.id); return next; });
+        setToast('Position archived');
+      })
+      .catch(err => setToast(`Archive failed: ${err.message}`));
+  }
+
+  // ── Filter positions ───────────────────────────────────────────────────────
+  const filtered = useMemo(() => {
+    return positions.filter(pos => {
+      if (filters.status === 'Archived') {
+        if (!_inactive(pos.status)) return false;
+      } else {
+        if (_inactive(pos.status)) return false;
+      }
+      if (filters.source !== 'all' && pos.source !== filters.source) return false;
+      if (filters.strategy !== 'all' && pos.strategy_key !== filters.strategy) return false;
+      if (filters.symbol.trim()) {
+        const q = filters.symbol.trim().toUpperCase();
+        if (!pos.symbol.toUpperCase().includes(q)) return false;
+      }
+      return true;
+    });
+  }, [positions, filters]);
+
+  // ── Group positions ────────────────────────────────────────────────────────
+  const groups = useMemo(() => {
+    const map = {};
+    for (const pos of filtered) {
+      const key = getGroupValue(pos, filters.groupBy);
+      if (!map[key]) map[key] = [];
+      map[key].push(pos);
+    }
+
+    const entries = Object.entries(map).sort((a, b) => {
+      const ak = groupSortKey(filters.groupBy, a[0]);
+      const bk = groupSortKey(filters.groupBy, b[0]);
+      if (typeof ak === 'number' && typeof bk === 'number') return ak - bk;
+      return String(ak).localeCompare(String(bk));
+    });
+
+    const result = entries.map(([key, positions]) => ({
+      key,
+      name: groupLabel(filters.groupBy, key),
+      positions,
+    }));
+
+    if (filters.groupBy === 'Strategy') {
+      const emptyStrategies = ['weekly-grind', 'trend-rider'].filter(k => !map[k]);
+      for (const k of emptyStrategies) {
+        result.push({ key: k, name: STRATEGY_LABELS[k], positions: [] });
+      }
+    }
+
+    return result;
+  }, [filtered, filters.groupBy]);
+
+  // Empty groups default to collapsed
+  const effectiveCollapsed = useMemo(() => {
+    const result = { ...collapsedGroups };
+    for (const g of groups) {
+      if (g.positions.length === 0 && !(g.key in collapsedGroups)) {
+        result[g.key] = true;
+      }
+    }
+    return result;
+  }, [groups, collapsedGroups]);
+
+  const activeCount = positions.filter(p => !_inactive(p.status)).length;
+
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className="page-card">
+      {toast && <Toast message={toast} onDismiss={() => setToast(null)} />}
+
       <div className="pos-page-header">
         <h2 className="page-title">
           <span className="icon">◈</span> Positions
         </h2>
-        <span className="pos-header-count">
-          {!loading && totalActive > 0 && <span>{totalActive} active</span>}
-          {!loading && totalActive > 0 && totalClosed > 0 && ' · '}
-          {!loading && totalClosed > 0 && <span>{totalClosed} closed</span>}
-        </span>
+        <span className="pos-header-count">{activeCount} active</span>
       </div>
 
-      {/* Filter bar */}
-      <div className="pos-filter-bar">
-        <div className="pos-filter-group">
-          <label className="pos-filter-label">Status</label>
-          <select
-            className="pos-filter-select"
-            value={filters.status}
-            onChange={e => setFilter('status', e.target.value)}
-          >
-            <option value="all">All</option>
-            <option value="active">Active</option>
-            <option value="closed">Closed</option>
-          </select>
-        </div>
+      <FilterBar filters={filters} onChange={setFilter} />
 
-        <div className="pos-filter-group">
-          <label className="pos-filter-label">Type</label>
-          <select
-            className="pos-filter-select"
-            value={filters.source}
-            onChange={e => setFilter('source', e.target.value)}
-          >
-            <option value="all">All</option>
-            <option value="PAPER">Paper</option>
-            <option value="LIVE">Live</option>
-          </select>
-        </div>
-
-        <div className="pos-filter-group">
-          <label className="pos-filter-label">Symbol</label>
-          <input
-            type="text"
-            className="pos-filter-input"
-            placeholder="e.g. MSFT"
-            value={filters.symbol}
-            onChange={e => setFilter('symbol', e.target.value)}
-          />
-        </div>
-
-        <div className="pos-filter-group">
-          <label className="pos-filter-label">Strategy</label>
-          <select
-            className="pos-filter-select"
-            value={filters.strategy}
-            onChange={e => setFilter('strategy', e.target.value)}
-          >
-            <option value="all">All</option>
-            {STRATEGY_ORDER.map(k => (
-              <option key={k} value={k}>{STRATEGY_LABELS[k]}</option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      {/* Loading state */}
       {loading && (
-        <div style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
-          Loading positions...
-        </div>
-      )}
-
-      {/* Error state */}
-      {!loading && error && (
-        <div style={{ padding: '20px', textAlign: 'center', color: '#ef4444', fontSize: 13 }}>
-          {error}
-          <button
-            onClick={fetchPositions}
-            style={{ marginLeft: 12, fontSize: 12, cursor: 'pointer', color: 'var(--accent-cyan)', background: 'none', border: 'none' }}
-          >
-            Retry
-          </button>
-        </div>
-      )}
-
-      {/* Strategy groups */}
-      {!loading && !error && grouped.length === 0 && (
         <div className="empty-state">
-          <div className="empty-icon">◈</div>
-          <h3>No positions yet</h3>
-          <p>Follow a trade from the analysis screens to create your first position.</p>
+          <div className="empty-icon" style={{ opacity: 0.4 }}>◈</div>
+          <p style={{ color: 'var(--text-muted)' }}>Loading positions…</p>
         </div>
       )}
 
-      {!loading && !error && grouped.map(({ key, positions: grpPositions }) => (
-        <StrategyGroup
-          key={key}
-          strategyKey={key}
-          positions={grpPositions}
-          onClose={handleClose}
-          onView={handleView}
-        />
+      {!loading && error && (
+        <div className="empty-state">
+          <div className="empty-icon">⚠</div>
+          <h3>Could not load positions</h3>
+          <p style={{ color: 'var(--text-muted)', fontSize: 12 }}>{error}</p>
+        </div>
+      )}
+
+      {!loading && !error && groups.map(group => (
+        <PositionGroup
+          key={group.key}
+          name={group.name}
+          count={group.positions.length}
+          collapsed={effectiveCollapsed[group.key] ?? false}
+          onToggle={() => toggleGroup(group.key)}
+        >
+          <PositionsTable
+            positions={group.positions}
+            expandedRowIds={expandedRowIds}
+            onRowClick={handleRowClick}
+            onRefresh={handleRefresh}
+            onArchive={handleArchive}
+            refreshingId={refreshingId}
+            assessmentsCache={assessmentsCache}
+            loadingAssessmentIds={loadingAssessmentIds}
+          />
+        </PositionGroup>
       ))}
 
-      {/* Close confirmation modal */}
-      {closeModal && (
-        <CloseModal
-          pos={closeModal}
-          onCancel={() => setCloseModal(null)}
-          onConfirm={handleCloseConfirm}
-          closing={closing}
-        />
+      {!loading && !error && filtered.length === 0 && (
+        <div className="empty-state">
+          <div className="empty-icon">◈</div>
+          <h3>No positions</h3>
+          <p>Adjust your filters or follow a trade from the analysis screens.</p>
+        </div>
       )}
     </div>
   );

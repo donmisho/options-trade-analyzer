@@ -12,20 +12,24 @@
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=DM+Sans:wght@400;500;600;700&display=swap');
 
 :root {
-  /* ── Backgrounds ── */
-  --bg-primary: #0f1923;
-  --bg-card: #1a2736;
-  --bg-input: #0d1520;
-  --bg-hover: #223344;
+  /* ── OTA Canonical Design Tokens ── */
+  --bg:           #0d1117;   /* page background */
+  --bg2:          #161b22;   /* surface: filter bars, QuoteBar */
+  --bg3:          #21262d;   /* elevated: column dividers */
+  --border:       #30363d;   /* all borders */
+  --muted:        #8b949e;   /* muted text */
 
-  /* ── Borders ── */
-  --border: #2a3a4a;
-  --border-accent: #3a4f63;
+  /* ── Legacy aliases — point to canonical values ── */
+  --bg-primary:   #0d1117;
+  --bg-card:      #161b22;
+  --bg-input:     #0d1117;
+  --bg-hover:     #161b22;
+  --border-accent: #30363d;
 
   /* ── Text ── */
-  --text-primary: #e8edf2;
-  --text-secondary: #8a9bb0;
-  --text-muted: #5a6f82;
+  --text-primary: #e6edf3;
+  --text-secondary: #8b949e;
+  --text-muted: #8b949e;
 
   /* ── Accent Colors ── */
   --accent-blue: #3b82f6;

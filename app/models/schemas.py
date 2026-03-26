@@ -439,6 +439,52 @@ class PositionListResponse(BaseModel):
     aggregate: dict     # win_rate, avg_pnl, avg_hold_days, by_strategy
 
 
+class PositionAssessmentCreate(BaseModel):
+    """Used by the refresh endpoint to create a new UPDATE assessment."""
+    verdict: str
+    score: int = Field(..., ge=0, le=100)
+    synopsis: Optional[str] = None
+    claude_read: str
+    exit_levels: Optional[dict] = None
+    market_snapshot: Optional[dict] = None
+    agent_run_id: Optional[str] = None
+
+
+class PositionAssessmentResponse(BaseModel):
+    """Returned by GET /positions/{id}/assessments."""
+    assessment_id: str
+    position_id: str
+    version_number: int
+    assessment_type: str
+    verdict: str
+    score: int
+    synopsis: Optional[str] = None
+    claude_read: str
+    exit_levels: Optional[dict] = None
+    market_snapshot: Optional[dict] = None
+    agent_run_id: Optional[str] = None
+    created_at: datetime
+
+
+class PositionCurrentPrice(BaseModel):
+    """Per-position result from GET /positions/current-prices."""
+    position_id: str
+    current_premium: Optional[float] = None
+    current_pnl: Optional[float] = None
+    pnl_pct: Optional[float] = None
+    perf_status: str   # 'green' | 'amber' | 'red' | 'unknown'
+    error: Optional[str] = None
+
+
+class PositionRefreshResponse(BaseModel):
+    """Returned by POST /positions/{id}/refresh."""
+    assessment: PositionAssessmentResponse
+    current_premium: float
+    current_pnl: float
+    pnl_pct: float
+    perf_status: str   # 'green' | 'amber' | 'red'
+
+
 # ============================================================
 # Insight Engine Schemas (Phase 3.6)
 # ============================================================

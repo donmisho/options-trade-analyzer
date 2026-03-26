@@ -1,3 +1,5 @@
+_Last updated: 03-25-2026 00:00_
+
 # UI-DECISIONS.md
 ## Options Analyzer — Canonical UI Decisions
 
@@ -227,6 +229,41 @@ Text muted:    #8b949e  (--muted)
 - EXECUTE: green background (rgba(74,222,128,.15)), green text
 - WAIT: amber background (rgba(245,158,11,.15)), amber text
 - PASS: red background (rgba(248,113,113,.15)), red text
+
+### Surface Color Usage Rules
+
+The surface color `var(--bg2)` (#161b22) has RESTRICTED usage. It must NOT
+appear on table rows, table headers, expansion panels, assessment version
+rows, or group headers. These elements sit on the page background
+`var(--bg)` (#0d1117) with no surface treatment.
+
+**Allowed uses of var(--bg2) (#161b22):**
+- Filter bars and config panels
+- QuoteBar component background
+- Pill badge backgrounds (with low-opacity tints)
+- Calculation inset boxes (e.g. formula display in Verticals Column 2)
+- Signal check boxes in Strategy Details
+- Risk budget boxes in Pre-Screen Checks
+
+**Never use var(--bg2) on:**
+- Table rows (normal, hover, or alternating)
+- Table headers
+- Expansion panel backgrounds
+- Assessment version header rows
+- Assessment version content areas
+- Group-by section headers
+- Any full-width horizontal band in the content area
+
+**Table row backgrounds (the ONLY allowed backgrounds):**
+- Normal: `transparent` (shows var(--bg) #0d1117 underneath)
+- Hover: `rgba(45,212,191,0.02)` (barely visible teal tint)
+- Expanded row: `rgba(45,212,191,0.03)` (slightly more visible teal)
+- No alternating/striped row colors — every row has the same background
+
+This rule exists because Claude Code tends to add surface backgrounds to
+make tables "look nicer," but the OTA design language is deliberately stark
+with transparent rows on pure black. Surface color creates visual noise and
+breaks consistency across pages.
 
 ---
 

@@ -493,7 +493,7 @@ export default function OptionsTerminal({ activeStrategy }) {
   // ── Follow / Take position ────────────────────────────────────────────────
   const handlePositionConfirm = useCallback(async () => {
     if (!positionModal) return;
-    const { trade, type } = positionModal;
+    const { trade, verdictData, type } = positionModal;
     setPositionSubmitting(true);
     try {
       const isSpread = !!(trade.spread_type || trade.long_strike);
@@ -527,7 +527,17 @@ export default function OptionsTerminal({ activeStrategy }) {
           ? { sma_8: smaData.smaShort, sma_21: smaData.smaMid, sma_50: smaData.smaLong }
           : {},
         entry_underlying_price:  underlyingPrice,
-        claude_score:            null,
+        claude_score:            verdictData?.score ?? null,
+        claude_verdict: verdictData ? {
+          verdict:    verdictData.verdict    ?? null,
+          score:      verdictData.score      ?? null,
+          claude_read: verdictData.claude_read ?? '',
+        } : null,
+        claude_exit_levels: verdictData ? {
+          take_profit:   verdictData.take_profit   ?? null,
+          warning_level: verdictData.warning_level ?? null,
+          hard_stop:     verdictData.hard_stop     ?? null,
+        } : null,
       };
 
       const fn = type === 'follow' ? followTrade : takeTrade;
@@ -883,8 +893,8 @@ export default function OptionsTerminal({ activeStrategy }) {
                 scorecardLoading={scorecardLoading}
                 scorecardError={scorecardData?.error || null}
                 onLoadScorecard={loadScorecardForTrade}
-                onFollowTrade={(t) => setPositionModal({ trade: t, type: 'follow' })}
-                onTakeTrade={(t) => setPositionModal({ trade: t, type: 'take' })}
+                onFollowTrade={(t, vd) => setPositionModal({ trade: t, verdictData: vd, type: 'follow' })}
+                onTakeTrade={(t, vd) => setPositionModal({ trade: t, verdictData: vd, type: 'take' })}
               />
             )}
             defaultSortKey="composite_score"

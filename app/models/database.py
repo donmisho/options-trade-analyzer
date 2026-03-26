@@ -688,7 +688,7 @@ class Position(Base):
     __tablename__ = "positions"
 
     position_id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id = Column(String(36), ForeignKey("users.id"), nullable=False)
+    user_id = Column(String(36), nullable=False)  # WHY no FK: SKIP_AUTH dev mode compat (same as UserWatchlist)
     symbol = Column(String(20), nullable=False)
     strategy_key = Column(String(50), nullable=False)
     trade_structure = Column(Text, nullable=False)           # JSON
@@ -724,6 +724,37 @@ class Position(Base):
     __table_args__ = (
         Index("ix_positions_user_status", "user_id", "status"),
         Index("ix_positions_user_symbol", "user_id", "symbol"),
+    )
+
+
+class PositionAssessment(Base):
+    """
+    Versioned Claude assessment for a tracked position (Phase 2.11 OTA-263).
+
+    assessment_type='ORIGINAL' is created when the position is first followed
+    or taken. Subsequent evaluations (triggered by the UI or position monitor)
+    are 'UPDATE'. version_number increments per position (1, 2, 3...).
+
+    claude_read, exit_levels, and market_snapshot are stored as-is from the
+    TradeEvaluationCard so the full historical record can always be reconstructed.
+    """
+    __tablename__ = "position_assessments"
+
+    assessment_id  = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    position_id    = Column(String(36), ForeignKey("positions.position_id"), nullable=False)
+    version_number = Column(Integer, nullable=False)
+    assessment_type = Column(String(20), nullable=False)   # 'ORIGINAL' | 'UPDATE'
+    verdict        = Column(String(20), nullable=False)    # 'EXECUTE' | 'WAIT' | 'PASS'
+    score          = Column(Integer, nullable=False)        # 0-100
+    synopsis       = Column(String(200))                   # 5-7 word Claude summary
+    claude_read    = Column(Text, nullable=False)           # full analysis text
+    exit_levels    = Column(Text)                           # JSON: take_profit, warning, hard_stop, calendar_exit
+    market_snapshot = Column(Text)                          # JSON: underlying_price, iv, delta, spread_mark
+    agent_run_id   = Column(String(36))                    # FK to agent_run_log (nullable)
+    created_at     = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_position_assessments_position", "position_id", "created_at"),
     )
 
 

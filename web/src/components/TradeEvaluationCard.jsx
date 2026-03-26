@@ -521,6 +521,16 @@ function ActionBar({ card, symbol, currentPrice, smaData, tradeData, activeStrat
         : {},
       entry_underlying_price:  currentPrice ?? 0,
       claude_score:            card.score ?? null,
+      claude_verdict: {
+        verdict:    card.verdict   ?? null,
+        score:      card.score     ?? null,
+        claude_read: card.claude_read ?? '',
+      },
+      claude_exit_levels: {
+        take_profit:   card.take_profit   ?? null,
+        warning_level: card.warning_level ?? null,
+        hard_stop:     card.hard_stop     ?? null,
+      },
     };
   };
 

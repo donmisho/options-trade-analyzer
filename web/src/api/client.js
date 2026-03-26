@@ -505,7 +505,7 @@ export async function deleteRecommendation(tradeKey) {
 
 /**
  * List positions with composable filters.
- * @param {Object} filters — { status, source, symbol, strategy_key } — all optional
+ * @param {Object} filters — { status, source, symbol, strategy_key, include_archived } — all optional
  * @returns PositionListResponse — { positions, total, aggregate }
  */
 export async function getPositions(filters = {}) {
@@ -514,6 +514,7 @@ export async function getPositions(filters = {}) {
   if (filters.source && filters.source !== 'all') params.set('source', filters.source);
   if (filters.symbol) params.set('symbol', filters.symbol.toUpperCase());
   if (filters.strategy_key && filters.strategy_key !== 'all') params.set('strategy_key', filters.strategy_key);
+  if (filters.include_archived) params.set('include_archived', 'true');
   const qs = params.toString();
   return apiFetch(`/positions${qs ? `?${qs}` : ''}`);
 }
@@ -550,6 +551,42 @@ export async function closePosition(positionId, data) {
     method: 'PATCH',
     body: JSON.stringify(data),
   });
+}
+
+/**
+ * Return all Claude assessments for a position, newest first.
+ * @param {string} positionId — UUID
+ * @returns PositionAssessmentResponse[]
+ */
+export async function getPositionAssessments(positionId) {
+  return apiFetch(`/positions/${encodeURIComponent(positionId)}/assessments`);
+}
+
+/**
+ * Re-evaluate an open position with current market data and Claude.
+ * @param {string} positionId — UUID
+ * @returns PositionRefreshResponse — { assessment, current_premium, current_pnl, pnl_pct, perf_status }
+ */
+export async function refreshPosition(positionId) {
+  return apiFetch(`/positions/${encodeURIComponent(positionId)}/refresh`, { method: 'POST' });
+}
+
+/**
+ * Archive a position (status → ARCHIVED). No P&L recorded.
+ * @param {string} positionId — UUID
+ */
+export async function archivePosition(positionId) {
+  return apiFetch(`/positions/${encodeURIComponent(positionId)}/archive`, { method: 'PATCH' });
+}
+
+/**
+ * Fetch live pricing + P&L for a batch of positions.
+ * @param {string[]} positionIds — array of UUIDs
+ * @returns PositionCurrentPrice[]
+ */
+export async function getPositionCurrentPrices(positionIds) {
+  const ids = positionIds.join(',');
+  return apiFetch(`/positions/current-prices?position_ids=${encodeURIComponent(ids)}`);
 }
 
 

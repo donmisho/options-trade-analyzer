@@ -1083,8 +1083,8 @@ export default function TradeExpansionPanel({
           trade={trade}
           symbol={symbol}
           strategyKey={selectedStrategy}
-          onFollow={() => onFollowTrade(trade)}
-          onTake={() => onTakeTrade(trade)}
+          onFollow={() => onFollowTrade(trade, verdictData)}
+          onTake={() => onTakeTrade(trade, verdictData)}
           onDiscard={() => { setVerdictVisible(false); setVerdictData(null); }}
         />
       )}

@@ -25,8 +25,11 @@ weights become meaningful percentages.
 """
 
 from dataclasses import dataclass, field, asdict
+from datetime import date
 from typing import Optional
 import math
+
+from scipy.stats import norm
 
 
 def _normalize_iv(raw_iv):
@@ -37,6 +40,46 @@ def _normalize_iv(raw_iv):
     if raw_iv > 2.0:
         return raw_iv / 100.0
     return raw_iv
+
+
+def _bs_delta(option_type: str, S: float, K: float, T: float, sigma: float, r: float = 0.05) -> float:
+    """
+    Black-Scholes delta estimate used when Schwab returns null greeks (after hours).
+    Call delta = N(d1). Put delta = N(d1) - 1 (negative).
+    """
+    if T <= 0 or sigma <= 0 or S <= 0 or K <= 0:
+        return 0.0
+    d1 = (math.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * math.sqrt(T))
+    if option_type == "call":
+        return float(norm.cdf(d1))
+    else:
+        return float(norm.cdf(d1) - 1.0)  # negative for puts
+
+
+def _get_delta(leg: dict, underlying_price: float, exp: str) -> float:
+    """
+    Return the leg's delta from the API, or estimate it via Black-Scholes.
+
+    WHY: Schwab returns delta=null after market hours. Treating null as 0
+    means every spread fails the min_short_delta filter and the engine
+    returns empty results. Using BS delta lets the engine work after hours.
+    """
+    delta = leg.get("delta")
+    if delta is not None:
+        return delta
+    iv_raw = leg.get("implied_volatility") or leg.get("iv") or 0
+    iv = _normalize_iv(iv_raw) or 0
+    if iv <= 0:
+        return 0.0
+    strike = leg.get("strike", 0)
+    option_type = leg.get("option_type", "call")
+    try:
+        exp_date = date.fromisoformat(exp)
+        dte = max((exp_date - date.today()).days, 0)
+    except Exception:
+        return 0.0
+    T = dte / 365.0
+    return _bs_delta(option_type, underlying_price, strike, T, iv)
 
 
 # ─── Data Structures ─────────────────────────────────────────────
@@ -349,7 +392,7 @@ class VerticalSpreadEngine:
             return None
         
         # Filter: short leg delta range
-        short_delta = abs(short_leg.get("delta", 0) or 0)
+        short_delta = abs(_get_delta(short_leg, price, exp))
         if short_delta < self.filters.min_short_delta:
             return None
         if short_delta > self.filters.max_short_delta:
@@ -411,15 +454,15 @@ class VerticalSpreadEngine:
         # debit paid). True prob of profit is slightly lower than long
         # delta, typically by 3-8 percentage points. Still far more
         # accurate than the old formula.
-        long_delta_val = abs(long_leg.get("delta", 0) or 0)
+        long_delta_val = abs(_get_delta(long_leg, price, exp))
         prob_of_profit = long_delta_val
-        
+
         # Expected Value
         ev = (prob_of_profit * max_profit) - ((1 - prob_of_profit) * max_loss)
-        
+
         # Net Greeks
-        long_delta = long_leg.get("delta", 0) or 0
-        short_delta_raw = short_leg.get("delta", 0) or 0
+        long_delta = _get_delta(long_leg, price, exp)
+        short_delta_raw = _get_delta(short_leg, price, exp)
         net_delta = long_delta - short_delta_raw
         
         long_theta = long_leg.get("theta", 0) or 0
@@ -497,7 +540,7 @@ class VerticalSpreadEngine:
             return None
 
         # Short delta filter — same OTM range as debit spreads
-        short_delta = abs(short_leg.get("delta", 0) or 0)
+        short_delta = abs(_get_delta(short_leg, price, exp))
         if short_delta < self.filters.min_short_delta:
             return None
         if short_delta > self.filters.max_short_delta:
@@ -533,14 +576,14 @@ class VerticalSpreadEngine:
             breakeven = short_leg["strike"] + net_credit
 
         # Probability: short leg expires OTM
-        prob_of_profit = 1.0 - abs(short_leg.get("delta", 0) or 0)
+        prob_of_profit = 1.0 - abs(_get_delta(short_leg, price, exp))
 
         # Expected Value
         ev = (prob_of_profit * max_profit) - ((1 - prob_of_profit) * max_loss)
 
         # Net Greeks
-        long_delta = long_leg.get("delta", 0) or 0
-        short_delta_raw = short_leg.get("delta", 0) or 0
+        long_delta = _get_delta(long_leg, price, exp)
+        short_delta_raw = _get_delta(short_leg, price, exp)
         net_delta = long_delta - short_delta_raw
         long_theta = long_leg.get("theta", 0) or 0
         short_theta = short_leg.get("theta", 0) or 0

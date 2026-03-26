@@ -462,6 +462,7 @@ Key decisions summarized:
 ## House Style Rules
 
 - **Date format**: ALWAYS mm-dd-yyyy. With time: mm-dd-yyyy hh:mm. Use `formatDate()` from `web/src/utils/formatDate.js`. No other date formatting allowed.
+- **Context document timestamps**: Whenever a file in `claude_context/` is updated, insert or update a `_Last updated: mm-dd-yyyy hh:mm_` line at the very top of that file. If the line already exists, replace it. If it does not exist, add it as the first line.
 - **No `$` in UI**: Display `567.23` not `$567.23`
 - **Health pips**: Each pip is its own column — never group in a single cell
 - **`getHealthPips` signature**: Always `getHealthPips(trade, systemVars)`

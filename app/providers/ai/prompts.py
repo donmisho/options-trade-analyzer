@@ -15,6 +15,7 @@ Exit levels are COMPUTED here and passed INTO the prompt — per requirements:
 (don't ask the AI to calculate math)."
 """
 
+import json
 from .base import TradeContext
 
 
@@ -139,6 +140,109 @@ Underlying Target: ${exits.get('underlying_target', 0):.2f}
 Please evaluate this trade following your standard output format."""
 
     return prompt
+
+
+# ─── Position Refresh Prompt ─────────────────────────────────────
+
+def build_refresh_prompt(position, assessments: list, current_market_data: dict, strategy_def=None) -> str:
+    """
+    Build the user message for a position refresh Claude call.
+
+    Includes: original entry snapshot, all prior assessments (so Claude sees its
+    own history), current market data, and trade structure details.
+
+    Args:
+        position: Position ORM object
+        assessments: list of PositionAssessment ORM objects, ordered by version_number asc
+        current_market_data: dict with keys: date, underlying_price, iv, spread_mark,
+                             sma_alignment (optional sub-dict with sma_8/sma_21/sma_50/alignment)
+        strategy_def: optional StrategyDefinition dataclass from strategy_definitions.py
+    """
+    def _safe_json(raw):
+        if raw is None:
+            return {}
+        if isinstance(raw, dict):
+            return raw
+        try:
+            return json.loads(raw)
+        except (ValueError, TypeError):
+            return {}
+
+    strategy_label = strategy_def.label if strategy_def else position.strategy_key
+    trade_struct = _safe_json(position.trade_structure)
+    entry_sma = _safe_json(position.entry_sma_alignment)
+    entry_greeks = _safe_json(position.entry_greeks)
+    entry_date_str = position.entry_date.strftime("%m-%d-%Y") if position.entry_date else "N/A"
+
+    lines = [
+        f"=== POSITION REFRESH: {position.symbol} — {strategy_label} ===",
+        "",
+        "=== ORIGINAL ENTRY ===",
+        f"Entry Date: {entry_date_str}",
+        f"Entry Underlying Price: {position.entry_underlying_price}",
+        f"Entry Spread / Option Price: {position.entry_price}",
+        f"Entry IV Rank: {position.entry_iv_rank}",
+    ]
+
+    if entry_sma:
+        lines.append(
+            f"Entry SMA Alignment: SMA8={entry_sma.get('sma_8','N/A')} | "
+            f"SMA21={entry_sma.get('sma_21','N/A')} | SMA50={entry_sma.get('sma_50','N/A')} | "
+            f"Trend={entry_sma.get('alignment', entry_sma.get('ma_alignment','N/A'))}"
+        )
+
+    if entry_greeks:
+        lines.append(f"Entry Greeks: {json.dumps(entry_greeks)}")
+
+    lines += [
+        "",
+        "=== TRADE STRUCTURE ===",
+        json.dumps(trade_struct, indent=2),
+        "",
+    ]
+
+    if assessments:
+        lines.append("=== PRIOR ASSESSMENTS (your history — most recent last) ===")
+        for a in sorted(assessments, key=lambda x: x.version_number):
+            created_str = a.created_at.strftime("%m-%d-%Y") if a.created_at else "N/A"
+            lines.append(
+                f"v{a.version_number} [{a.assessment_type}] {created_str} — "
+                f"Verdict: {a.verdict} | Score: {a.score}"
+            )
+            if a.synopsis:
+                lines.append(f"  Synopsis: {a.synopsis}")
+            lines.append(f"  Analysis: {a.claude_read}")
+            if a.exit_levels:
+                el = _safe_json(a.exit_levels)
+                lines.append(f"  Exit Levels: {json.dumps(el)}")
+        lines.append("")
+
+    current_date = current_market_data.get("date", "N/A")
+    underlying = current_market_data.get("underlying_price", "N/A")
+    iv = current_market_data.get("iv", "N/A")
+    spread_mark = current_market_data.get("spread_mark", "N/A")
+    sma = current_market_data.get("sma_alignment", {})
+
+    lines += [
+        "=== CURRENT MARKET DATA ===",
+        f"Date: {current_date}",
+        f"Underlying Price: {underlying}",
+        f"Spread / Option Mark: {spread_mark}",
+        f"IV (annualized): {iv}",
+    ]
+
+    if sma:
+        lines.append(
+            f"SMA 8: {sma.get('sma_8','N/A')} | SMA 21: {sma.get('sma_21','N/A')} | "
+            f"SMA 50: {sma.get('sma_50','N/A')} | Trend: {sma.get('alignment', sma.get('ma_alignment','N/A'))}"
+        )
+
+    lines += [
+        "",
+        "Refresh this position evaluation. Return a single JSON object per the POSITION_REFRESH_SYSTEM schema.",
+    ]
+
+    return "\n".join(lines)
 
 
 # ─── Pre-Screen (rule-based, no AI needed) ────────────────────────

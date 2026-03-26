@@ -74,7 +74,7 @@ async def get_current_user(
 
     if settings.skip_auth:
         return {
-            "sub": "dev-user",
+            "sub": "00000000-0000-0000-0000-000000000001",  # UUID-format so position routes accept it
             "username": "dev",
             "role": "admin",
             "mfa": True,

@@ -22,6 +22,7 @@ async def run_migrations(engine: AsyncEngine) -> None:
     """Run all pending schema migrations. Called from init_db() at startup."""
     async with engine.begin() as conn:
         await _m001_trade_recommendations_add_user_id(conn)
+        await _m002_positions_drop_user_fk(conn)
 
 
 async def _m001_trade_recommendations_add_user_id(conn) -> None:
@@ -86,6 +87,46 @@ async def _m001_trade_recommendations_add_user_id(conn) -> None:
             "ON trade_recommendations (user_id, symbol)"
         ))
         logger.info("Migration 001: composite index created on trade_recommendations")
+
+
+async def _m002_positions_drop_user_fk(conn) -> None:
+    """
+    Migration 002: Drop FK constraint from positions.user_id (MSSQL only).
+
+    The positions table was initially defined with ForeignKey("users.id").
+    SKIP_AUTH dev mode uses sub="00000000-0000-0000-0000-000000000001" which
+    won't exist in the users table, causing FK violations on INSERT.
+
+    This migration finds and drops the FK constraint if it still exists.
+    The column itself (user_id) is kept — only the constraint is removed.
+    Safe to re-run: no-op if the constraint is already gone or never existed.
+    """
+    if not _is_mssql(conn):
+        return  # SQLite doesn't enforce FKs — no action needed
+
+    # Find the FK constraint name dynamically (it's auto-named by SQL Server)
+    fk_query = text("""
+        SELECT fk.name AS fk_name
+        FROM sys.foreign_keys AS fk
+        INNER JOIN sys.foreign_key_columns AS fkc
+            ON fk.object_id = fkc.constraint_object_id
+        INNER JOIN sys.tables AS t
+            ON fk.parent_object_id = t.object_id
+        INNER JOIN sys.columns AS c
+            ON fkc.parent_object_id = c.object_id
+           AND fkc.parent_column_id = c.column_id
+        WHERE t.name = 'positions'
+          AND c.name = 'user_id'
+    """)
+    result = await conn.execute(fk_query)
+    fk_name = result.scalar_one_or_none()
+
+    if fk_name:
+        logger.info(f"Migration 002: dropping FK {fk_name} from positions.user_id")
+        await conn.execute(text(f"ALTER TABLE positions DROP CONSTRAINT [{fk_name}]"))
+        logger.info("Migration 002: FK dropped")
+    else:
+        logger.debug("Migration 002: no FK on positions.user_id — skipping")
 
 
 def _is_mssql(conn) -> bool:

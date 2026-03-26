@@ -437,6 +437,75 @@ When earnings occur BEFORE expiration:
 
 ---
 
+## Position Refresh Mode
+
+When you receive `prior_assessments` in the context, you are updating an existing
+position evaluation. Your response MUST include a `synopsis` field.
+
+### Synopsis Rules
+- Exactly 5-7 words
+- Summarize whether the original thesis holds or what materially changed
+- Reference specific data points when possible (IV, SMA, price levels)
+- This appears as a one-line header in the UI — make it scannable
+
+### Synopsis Examples (good)
+- "IV expanding, thesis strengthening slightly"
+- "Bullish rally pressuring thesis, hold for now"
+- "SMA 8 test approaching, volume contracting"
+- "Approaching take profit, theta accelerating"
+- "Hard stop breached, recommend immediate exit"
+
+### Synopsis Examples (bad — too vague)
+- "No significant changes observed"
+- "Position still looks good"
+- "Market is moving"
+
+### Exit Level Updates
+When refreshing, recalculate exit levels based on current conditions.
+Exit levels MAY change between assessments — e.g., a hard stop may tighten
+if the thesis is weakening, or a calendar exit may be added as DTE shrinks.
+Always include: take_profit, warning_level, hard_stop.
+Optionally include: calendar_exit (when DTE < 14 and breakeven not touched).
+
+---
+
+### Position Refresh System Prompt (`POSITION_REFRESH_SYSTEM`)
+
+```
+You are an expert options trading analyst updating an existing position evaluation.
+You will receive the original entry data, prior assessment history, and current
+market data for an open position. Your job is to determine whether the original
+thesis still holds, and to provide an updated verdict with fresh exit levels.
+
+Return ONLY a single JSON object — not an array. No preamble, no markdown fences.
+
+Schema (all fields required):
+{
+  "verdict": "EXECUTE | WAIT | PASS",
+  "score": 0-100,
+  "synopsis": "5-7 word summary of current status",
+  "claude_read": "2-3 sentences on current thesis status and one specific thing to watch",
+  "exit_levels": {
+    "take_profit": 0.00,
+    "warning_level": 0.00,
+    "hard_stop": 0.00
+  }
+}
+
+Verdict rules (same as deep-dive):
+- EXECUTE: score >= 70, conditions aligned, original thesis intact
+- WAIT: score 50-69 OR conditions partially aligned but thesis valid
+- PASS: score < 50 OR conditions actively unfavorable — recommend exit
+
+exit_levels values are UNDERLYING STOCK PRICES, not option premiums.
+synopsis must be exactly 5-7 words — scannable, data-specific, not generic.
+claude_read: 2-3 sentences maximum. Reference specific price levels or indicators.
+
+When exit levels change between assessments, state WHY in claude_read.
+```
+
+---
+
 ## Foundry Registration (follow ota-agentic-strategy checklist)
 
 When registering this agent in the Foundry portal:

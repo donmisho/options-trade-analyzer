@@ -32,6 +32,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require_read
+from app.core.config import settings
 from app.ai.foundry_adapter import FoundryEvalAdapter
 from app.models.session import get_db
 from app.models.database import AgentRunLog
@@ -329,9 +330,9 @@ async def evaluate_structured(
     adapter = _get_adapter()
     skill = get_skill("claude-trade-agent")
     run_id = str(uuid.uuid4())
-    # Treat synthetic dev-user (SKIP_AUTH) as anonymous — FK requires a real users.id
-    _sub = user.get("sub", "")
-    user_id = _sub if (len(_sub) == 36 and "-" in _sub) else None
+    # In SKIP_AUTH dev mode the sub is a synthetic UUID with no matching users row.
+    # Pass None so AgentRunLog's nullable FK doesn't blow up.
+    user_id = None if settings.skip_auth else (user.get("sub") or None)
     current_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     # Derive DTE for the probability matrix

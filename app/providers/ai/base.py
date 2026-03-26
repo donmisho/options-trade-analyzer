@@ -70,7 +70,7 @@ class TradeContext:
 class TradeVerdict:
     """
     The AI's response, structured for the UI.
-    
+
     WHY structured: The UI needs to parse the verdict (EXECUTE/WAIT/PASS)
     separately from the analysis text. By returning a structured object,
     the API endpoint can send the verdict as a color-coded banner and
@@ -84,6 +84,7 @@ class TradeVerdict:
     provider: str = ""                   # "anthropic" or "foundry"
     input_tokens: int = 0               # For cost tracking
     output_tokens: int = 0              # For cost tracking
+    synopsis: Optional[str] = None      # 5-7 word summary; populated on position refresh
 
 
 class AIProvider(ABC):

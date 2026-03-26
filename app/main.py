@@ -44,7 +44,7 @@ from app.api.watchlist_routes import router as watchlist_router
 from app.api.entra_auth_routes import router as entra_auth_router
 from app.api.agent_routes import router as agent_router, init_agent_routes
 from app.api.admin_routes import router as admin_router
-from app.api.position_routes import router as position_router
+from app.api.position_routes import router as position_router, init_position_routes
 from app.api.agents_routes import router as agents_router, init_agents_routes, update_next_run_at
 from app.api.insight_routes import router as insight_router
 from app.api.validation_routes import router as validation_router
@@ -158,6 +158,7 @@ async def lifespan(app: FastAPI):
     provider_factory = ProviderFactory(secrets_manager)
     init_market_routes(provider_factory)
     init_analysis_routes(provider_factory)
+    init_position_routes(provider_factory)
 
     # 5. Initialize Schwab OAuth token manager + proactive background refresh
     schwab_token_manager = SchwabTokenManager(secrets_manager)
