@@ -415,9 +415,9 @@ class VerticalSpreadEngine:
         if net_debit <= 0:
             return None  # Credit spreads are a different strategy
         
-        # Max profit / loss (per-contract, multiply by 100 for dollar value)
-        max_profit = width - net_debit
-        max_loss = net_debit
+        # Max profit / loss in dollars (per contract)
+        max_profit = (width - net_debit) * 100
+        max_loss = net_debit * 100
         
         if max_profit <= 0:
             return None
@@ -463,16 +463,16 @@ class VerticalSpreadEngine:
         # Net Greeks
         long_delta = _get_delta(long_leg, price, exp)
         short_delta_raw = _get_delta(short_leg, price, exp)
-        net_delta = long_delta - short_delta_raw
-        
+        net_delta = abs(long_delta) - abs(short_delta_raw)
+
         long_theta = long_leg.get("theta", 0) or 0
         short_theta = short_leg.get("theta", 0) or 0
         net_theta = long_theta - short_theta  # Long theta is negative, short is positive for us
 
         # Net greeks filters (0 = no filter)
-        if self.filters.min_net_delta > 0 and net_delta < self.filters.min_net_delta:
+        if self.filters.min_net_delta > 0 and abs(net_delta) < self.filters.min_net_delta:
             return None
-        if self.filters.max_net_theta > 0 and abs(net_theta) > self.filters.max_net_theta:
+        if self.filters.max_net_theta != 0 and abs(net_theta) > self.filters.max_net_theta:
             return None
 
         long_vega = long_leg.get("vega", 0) or 0
@@ -560,8 +560,8 @@ class VerticalSpreadEngine:
         if net_credit <= 0:
             return None
 
-        max_profit = net_credit
-        max_loss = width - net_credit
+        max_profit = net_credit * 100
+        max_loss = (width - net_credit) * 100
         if max_loss <= 0:
             return None
 
@@ -584,15 +584,15 @@ class VerticalSpreadEngine:
         # Net Greeks
         long_delta = _get_delta(long_leg, price, exp)
         short_delta_raw = _get_delta(short_leg, price, exp)
-        net_delta = long_delta - short_delta_raw
+        net_delta = abs(long_delta) - abs(short_delta_raw)
         long_theta = long_leg.get("theta", 0) or 0
         short_theta = short_leg.get("theta", 0) or 0
         net_theta = long_theta - short_theta
 
         # Net greeks filters (0 = no filter)
-        if self.filters.min_net_delta > 0 and net_delta < self.filters.min_net_delta:
+        if self.filters.min_net_delta > 0 and abs(net_delta) < self.filters.min_net_delta:
             return None
-        if self.filters.max_net_theta > 0 and abs(net_theta) > self.filters.max_net_theta:
+        if self.filters.max_net_theta != 0 and abs(net_theta) > self.filters.max_net_theta:
             return None
 
         long_vega = long_leg.get("vega", 0) or 0
