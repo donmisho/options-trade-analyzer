@@ -50,6 +50,10 @@ from app.api.insight_routes import router as insight_router
 from app.api.validation_routes import router as validation_router
 from app.api.dashboard_routes import router as dashboard_router
 from app.providers.ai import AnthropicAdapter, FoundryAdapter
+
+# Dev-only test routes — imported and registered only outside production
+if settings.app_env != "production":
+    from app.api.test_routes import router as test_router, init_test_routes as _init_test_routes  # noqa: E402
 from app.ai.foundry_adapter import FoundryEvalAdapter
 from app.agents.telemetry import init_agent_telemetry
 
@@ -159,6 +163,8 @@ async def lifespan(app: FastAPI):
     init_market_routes(provider_factory)
     init_analysis_routes(provider_factory)
     init_position_routes(provider_factory)
+    if settings.app_env != "production":
+        _init_test_routes(provider_factory)
 
     # 5. Initialize Schwab OAuth token manager + proactive background refresh
     schwab_token_manager = SchwabTokenManager(secrets_manager)
@@ -334,6 +340,8 @@ app.include_router(agents_router, prefix="/api/v1")
 app.include_router(insight_router, prefix="/api/v1")
 app.include_router(validation_router, prefix="/api/v1")
 app.include_router(dashboard_router, prefix="/api/v1")
+if settings.app_env != "production":
+    app.include_router(test_router, prefix="/api/v1/test")
 
 
 # --- Health Check ---

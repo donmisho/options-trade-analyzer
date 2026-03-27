@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     app_name: str = "Options Analyzer"
     app_version: str = "0.1.0"
     debug: bool = False
+    app_env: str = "development"  # Set APP_ENV=production in Azure to gate dev-only endpoints
 
     skip_auth: bool = False  # Set to true in .env to bypass auth during development
 
