@@ -265,6 +265,37 @@ export async function evaluateStructured(data) {
 
 
 // ═══════════════════════════════════════════════════════════════════
+// TRADE EVALUATION — Phase 2.11 (OTA-292 / OTA-297)
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * Compute exit scenario rows for a vertical spread.
+ * Pure math — no AI involved.
+ * @param {Object} payload — ExitScenarioRequest fields
+ * @returns ExitScenarioResponse — { rows, breakeven, max_profit_price, max_loss_price, total_ev, dte, time_exit_date }
+ */
+export async function fetchExitScenario(payload) {
+  return apiFetch('/evaluate/exit-scenario', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+/**
+ * Get Claude's structured verdict on a single vertical spread (OTA-297).
+ * Accepts pre-computed spread economics from fetchExitScenario.
+ * @param {Object} payload — TradeVerdictRequest fields
+ * @returns TradeVerdictResponse — { ev_commentary, key_level, iv_context, verdict, verdict_rationale }
+ */
+export async function fetchStructuredEvaluation(payload) {
+  return apiFetch('/evaluate/trade-verdict', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+
+// ═══════════════════════════════════════════════════════════════════
 // CONFIG
 // ═══════════════════════════════════════════════════════════════════
 
@@ -587,6 +618,65 @@ export async function archivePosition(positionId) {
 export async function getPositionCurrentPrices(positionIds) {
   const ids = positionIds.join(',');
   return apiFetch(`/positions/current-prices?position_ids=${encodeURIComponent(ids)}`);
+}
+
+/**
+ * Fetch symbols that have active (FOLLOWING or LIVE) positions.
+ * Used by SymbolSearch to highlight Tier 1 results.
+ * @returns [{ symbol, position_count }]
+ */
+export async function getPositionSymbols() {
+  return apiFetch('/positions/symbols');
+}
+
+// ─── Static symbol search ─────────────────────────────────────────────────────
+// Used as the default searchFn prop for SymbolSearch. Filters a static ticker map
+// by prefix match on the query. Extend TICKER_MAP as needed for common symbols.
+
+const TICKER_MAP = {
+  AAPL: 'Apple', AMZN: 'Amazon', GOOG: 'Alphabet', GOOGL: 'Alphabet',
+  META: 'Meta Platforms', MSFT: 'Microsoft', NVDA: 'NVIDIA', TSLA: 'Tesla',
+  AMD: 'Advanced Micro Devices', NFLX: 'Netflix', COIN: 'Coinbase',
+  CRM: 'Salesforce', PYPL: 'PayPal', PLTR: 'Palantir', SOFI: 'SoFi',
+  RIVN: 'Rivian', INTC: 'Intel', DIS: 'Disney', V: 'Visa', MA: 'Mastercard',
+  JPM: 'JPMorgan Chase', BAC: 'Bank of America', GS: 'Goldman Sachs',
+  MS: 'Morgan Stanley', WFC: 'Wells Fargo', C: 'Citigroup',
+  SPY: 'S&P 500 ETF', QQQ: 'Nasdaq 100 ETF', IWM: 'Russell 2000 ETF',
+  TLT: 'Treasury Bond ETF', GLD: 'Gold ETF', SLV: 'Silver ETF',
+  XLF: 'Financial ETF', XLE: 'Energy ETF', XLK: 'Technology ETF',
+  XLV: 'Healthcare ETF', XLI: 'Industrial ETF', XLP: 'Consumer Staples ETF',
+  T: 'AT&T', VZ: 'Verizon', TMUS: 'T-Mobile',
+  CVX: 'Chevron', XOM: 'ExxonMobil', COP: 'ConocoPhillips',
+  LLY: 'Eli Lilly', JNJ: 'Johnson & Johnson', PFE: 'Pfizer',
+  ABBV: 'AbbVie', MRK: 'Merck', UNH: 'UnitedHealth',
+  AMGN: 'Amgen', GILD: 'Gilead Sciences', BIIB: 'Biogen',
+  ORCL: 'Oracle', IBM: 'IBM', HPQ: 'HP', CSCO: 'Cisco',
+  QCOM: 'Qualcomm', TXN: 'Texas Instruments', MU: 'Micron',
+  AVGO: 'Broadcom', AMAT: 'Applied Materials', LRCX: 'Lam Research',
+  COST: 'Costco', WMT: 'Walmart', TGT: 'Target', HD: 'Home Depot',
+  LOW: 'Lowe\'s', NKE: 'Nike', SBUX: 'Starbucks', MCD: 'McDonald\'s',
+  BABA: 'Alibaba', NIO: 'NIO', SPOT: 'Spotify', UBER: 'Uber',
+  LYFT: 'Lyft', SNAP: 'Snap', PINS: 'Pinterest', TWTR: 'Twitter',
+  GEV: 'GE Vernova', GE: 'General Electric', BA: 'Boeing', CAT: 'Caterpillar',
+  DE: 'Deere & Company', MMM: '3M', HON: 'Honeywell', RTX: 'Raytheon',
+  LMT: 'Lockheed Martin', NOC: 'Northrop Grumman',
+  BRK: 'Berkshire Hathaway', BRKB: 'Berkshire Hathaway B',
+  MSTR: 'MicroStrategy', MARA: 'Marathon Digital', RIOT: 'Riot Platforms',
+};
+
+/**
+ * Search symbols by prefix using the static TICKER_MAP.
+ * Injected as the `searchFn` prop for SymbolSearch on analysis pages.
+ * @param {string} query
+ * @returns Promise<[{ symbol, companyName }]>
+ */
+export async function searchSymbolsStatic(query) {
+  const q = query.toUpperCase().trim();
+  if (!q) return [];
+  return Object.entries(TICKER_MAP)
+    .filter(([sym]) => sym.startsWith(q))
+    .map(([symbol, companyName]) => ({ symbol, companyName }))
+    .slice(0, 12);
 }
 
 

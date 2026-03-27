@@ -21,7 +21,6 @@ import StarButton from '../components/StarButton';
 import ScoreBar from '../components/ScoreBar';
 import QuoteBar from '../components/QuoteBar';
 import SmaPanel from '../components/SmaPanel';
-import AskClaudePanel from '../components/AskClaudePanel';
 import FormulaBreakdownPanel from '../components/FormulaBreakdownPanel';
 import ConfigDrawer from '../components/ConfigDrawer';
 import { C, mono, DEFAULT_PRESETS } from '../styles/tokens';
@@ -439,14 +438,7 @@ export default function VerticalsPage() {
         weights={config.weights}
       />
               
-      {/* ═══ Ask Claude Panel ═══ */}
-      <AskClaudePanel
-        open={claudeOpen}
-        onClose={() => setClaudeOpen(false)}
-        trade={claudeTrade}
-        smaData={smaData}
-        smaPeriods={smaPeriods}
-      />
+      {/* AskClaudePanel retired — see TradeEvaluationView (OTA-299) */}
 
       {/* ═══ Config Drawer ═══ */}
       <ConfigDrawer
