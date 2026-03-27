@@ -8,7 +8,7 @@ between your API and its consumers (web app, Excel, MCP).
 """
 
 from pydantic import BaseModel, Field, EmailStr, field_validator
-from typing import Optional, List
+from typing import Optional, List, Literal
 from datetime import datetime
 
 
@@ -528,6 +528,89 @@ class ValidationAssessmentOut(ValidationAssessmentCreate):
 
     class Config:
         from_attributes = True
+
+
+# ============================================================
+# Exit Scenario Schemas (Phase 2.11 / OTA-292)
+# ============================================================
+
+class ExitScenarioRequest(BaseModel):
+    """
+    Request for the exit scenario computation engine.
+    Pure math — no AI involved.
+    """
+    spread_type: str            # BEAR_PUT_DEBIT | BULL_CALL_DEBIT | BULL_PUT_CREDIT | BEAR_CALL_CREDIT
+    long_strike: float          # strike of the long option leg
+    short_strike: float         # strike of the short option leg
+    expiry: str                 # ISO date string e.g. "2026-05-15"
+    entry_price: float          # per share (e.g. 8.80)
+    underlying_price: float     # current underlying price
+    iv: float                   # implied volatility as decimal (e.g. 0.28)
+    risk_free_rate: float = 0.05
+
+
+class ExitScenarioRow(BaseModel):
+    underlying_price: float
+    spread_value: float
+    pl_per_contract: float
+    pl_pct: float               # pl_per_contract / max_loss (decimal, e.g. 1.84 = +184%)
+    probability: float          # discrete PDF probability of landing at this price level
+    expected_value: float       # pl_per_contract * probability
+    zone: str                   # max_profit | profit | entry | warning | max_loss
+    exit_signal: str            # MAX PROFIT | BREAKEVEN | ENTRY | STOP | TIME EXIT | ""
+
+
+class ExitScenarioResponse(BaseModel):
+    rows: List[ExitScenarioRow]
+    breakeven: float
+    max_profit_price: float     # underlying price at which max profit is achieved
+    max_loss_price: float       # underlying price at which max loss is incurred
+    total_ev: float             # sum of all expected_value rows
+    dte: int
+    time_exit_date: str         # mm-dd-yyyy format
+
+
+# ============================================================
+# Trade Verdict Schemas (Phase 2.11 / OTA-297)
+# ============================================================
+
+class KeyLevel(BaseModel):
+    price: float
+    description: str
+
+
+class TradeVerdictResponse(BaseModel):
+    """
+    Structured Claude evaluation of a single vertical spread.
+    All five fields required — 422 if any are missing.
+    """
+    ev_commentary: str
+    key_level: KeyLevel
+    iv_context: str
+    verdict: Literal["EXECUTE", "WATCH", "PASS"]
+    verdict_rationale: str
+
+
+class TradeVerdictRequest(BaseModel):
+    """
+    Request for POST /api/v1/evaluate/trade-verdict.
+    Accepts pre-computed spread economics from the exit scenario engine.
+    """
+    spread_type: str
+    long_strike: float
+    short_strike: float
+    expiry: str
+    entry_price: float
+    max_profit: float
+    max_loss: float
+    breakeven: float
+    dte: int
+    total_ev: float
+    ev_pct_of_risk: float       # total_ev / max_loss * 100
+    p_max_profit: float         # probability at max profit row (0-1)
+    p_breakeven_or_better: float
+    p_max_loss: float
+    iv: float
 
 
 class InsightResponse(BaseModel):

@@ -19,9 +19,10 @@ STRUCTURED OUTPUTS:
 
 import json
 import logging
+import math
 import re
 import uuid
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone, date, timedelta
 from typing import Any, Optional, List
 
 logger = logging.getLogger(__name__)
@@ -36,7 +37,11 @@ from app.core.config import settings
 from app.ai.foundry_adapter import FoundryEvalAdapter
 from app.models.session import get_db
 from app.models.database import AgentRunLog
-from app.models.schemas import TradeEvaluationCard
+from app.models.schemas import (
+    TradeEvaluationCard,
+    ExitScenarioRequest, ExitScenarioRow, ExitScenarioResponse,
+    TradeVerdictRequest, TradeVerdictResponse,
+)
 from app.skills.skill_loader import get_skill
 from app.agents.telemetry import invoke_with_tracing
 from app.analysis.black_scholes import compute_probability_matrix
@@ -616,3 +621,363 @@ async def ai_health():
     if not ok:
         raise HTTPException(status_code=503, detail="Evaluation AI provider unavailable")
     return {"status": "ok", "provider": "foundry"}
+
+
+# ─── OTA-292: Exit Scenario Engine ───────────────────────────────────────────
+
+def _is_debit(spread_type: str) -> bool:
+    return spread_type.upper().endswith("DEBIT")
+
+
+def _spread_value(spread_type: str, long_strike: float, short_strike: float, S: float) -> float:
+    """Intrinsic value of the spread at underlying price S (at expiry)."""
+    st = spread_type.upper()
+    if st == "BEAR_PUT_DEBIT":
+        # Long higher put, short lower put
+        return max(0.0, long_strike - S) - max(0.0, short_strike - S)
+    elif st == "BULL_CALL_DEBIT":
+        # Long lower call, short higher call
+        return max(0.0, S - long_strike) - max(0.0, S - short_strike)
+    elif st == "BEAR_CALL_CREDIT":
+        # Short lower call (short_strike), long higher call (long_strike) — value to close
+        return max(0.0, S - short_strike) - max(0.0, S - long_strike)
+    elif st == "BULL_PUT_CREDIT":
+        # Short higher put (short_strike), long lower put (long_strike) — value to close
+        return max(0.0, short_strike - S) - max(0.0, long_strike - S)
+    return 0.0
+
+
+def _compute_breakeven(spread_type: str, long_strike: float, short_strike: float, entry_price: float) -> float:
+    st = spread_type.upper()
+    if st == "BEAR_PUT_DEBIT":
+        return round(long_strike - entry_price, 4)
+    elif st == "BULL_CALL_DEBIT":
+        return round(long_strike + entry_price, 4)
+    elif st == "BEAR_CALL_CREDIT":
+        return round(short_strike + entry_price, 4)
+    elif st == "BULL_PUT_CREDIT":
+        return round(short_strike - entry_price, 4)
+    return 0.0
+
+
+def _max_profit_loss(spread_type: str, long_strike: float, short_strike: float, entry_price: float):
+    """Returns (max_profit, max_loss) in dollar terms per contract (x100)."""
+    spread_width = abs(long_strike - short_strike)
+    if _is_debit(spread_type):
+        return round((spread_width - entry_price) * 100, 2), round(entry_price * 100, 2)
+    else:
+        return round(entry_price * 100, 2), round((spread_width - entry_price) * 100, 2)
+
+
+def _pdf_prob(S0: float, K: float, dte: int, iv: float, r: float, step: float = 5.0) -> float:
+    """Discrete PDF probability: P(underlying in [K-step/2, K+step/2] at expiry)."""
+    from app.analysis.black_scholes import black_scholes_probability
+    T = max(dte / 365.0, 0.001)
+    p_lo = black_scholes_probability(S0, K - step / 2, T, r, iv)
+    p_hi = black_scholes_probability(S0, K + step / 2, T, r, iv)
+    return round(max(0.0, p_lo - p_hi), 6)
+
+
+def _exit_zone(
+    spread_type: str,
+    long_strike: float,
+    short_strike: float,
+    breakeven: float,
+    underlying_price: float,
+    price: float,
+) -> str:
+    """Classify a price level into one of: max_profit | profit | entry | warning | max_loss."""
+    if abs(price - underlying_price) < 2.51:
+        return "entry"
+    bearish = spread_type.upper().startswith("BEAR")
+    lo = min(long_strike, short_strike)
+    hi = max(long_strike, short_strike)
+    if bearish:
+        if price <= lo:
+            return "max_profit"
+        if price < breakeven:
+            return "profit"
+        if price < hi:
+            return "warning"
+        return "max_loss"
+    else:
+        if price >= hi:
+            return "max_profit"
+        if price > breakeven:
+            return "profit"
+        if price > lo:
+            return "warning"
+        return "max_loss"
+
+
+def _build_exit_rows(
+    spread_type: str,
+    long_strike: float,
+    short_strike: float,
+    expiry: str,
+    entry_price: float,
+    underlying_price: float,
+    iv: float,
+    risk_free_rate: float,
+) -> tuple:
+    """
+    Compute all exit scenario rows.
+    Returns (rows, breakeven, max_profit_price, max_loss_price, dte, time_exit_date_str).
+    """
+    # ── DTE ──────────────────────────────────────────────────────────────────
+    dte = calculate_dte(expiry)
+
+    # ── Economics ──────────────────────────────────────────────────────────
+    max_profit, max_loss = _max_profit_loss(spread_type, long_strike, short_strike, entry_price)
+    breakeven = _compute_breakeven(spread_type, long_strike, short_strike, entry_price)
+
+    bearish = spread_type.upper().startswith("BEAR")
+    lo = min(long_strike, short_strike)
+    hi = max(long_strike, short_strike)
+
+    # Max profit / max loss price boundaries
+    max_profit_price = lo if bearish else hi
+    max_loss_price   = hi if bearish else lo
+
+    # ── Price range ─────────────────────────────────────────────────────────
+    start = lo - 5.0
+    end   = hi + 5.0
+    step  = 5.0
+    prices = []
+    p = start
+    while p <= end + step / 10:
+        prices.append(round(p, 2))
+        p = round(p + step, 2)
+
+    # ── Key level → exit_signal label mapping ───────────────────────────────
+    # Priority: MAX PROFIT > STOP > BREAKEVEN > ENTRY
+    # Find the closest price level for each key level.
+    def _closest(target: float) -> float:
+        return min(prices, key=lambda x: abs(x - target))
+
+    key_signals: dict[float, str] = {}
+    for target, label in [
+        (max_profit_price, "MAX PROFIT"),
+        (max_loss_price,   "STOP"),
+        (breakeven,        "BREAKEVEN"),
+        (underlying_price, "ENTRY"),
+    ]:
+        closest = _closest(target)
+        if closest not in key_signals:  # first one wins (priority order)
+            key_signals[closest] = label
+
+    # ── Build rows ──────────────────────────────────────────────────────────
+    rows: list[ExitScenarioRow] = []
+    for price in prices:
+        sv   = round(_spread_value(spread_type, long_strike, short_strike, price), 4)
+        if _is_debit(spread_type):
+            pl_contract = round((sv - entry_price) * 100, 2)
+        else:
+            pl_contract = round((entry_price - sv) * 100, 2)
+        pl_pct   = round(pl_contract / max_loss, 6) if max_loss != 0 else 0.0
+        prob     = _pdf_prob(underlying_price, price, dte, iv, risk_free_rate)
+        ev       = round(pl_contract * prob, 4)
+        zone     = _exit_zone(spread_type, long_strike, short_strike, breakeven, underlying_price, price)
+        signal   = key_signals.get(price, "")
+
+        rows.append(ExitScenarioRow(
+            underlying_price=price,
+            spread_value=sv,
+            pl_per_contract=pl_contract,
+            pl_pct=pl_pct,
+            probability=prob,
+            expected_value=ev,
+            zone=zone,
+            exit_signal=signal,
+        ))
+
+    # ── TIME EXIT row ────────────────────────────────────────────────────────
+    # Use today's underlying price; DTE-7 for probability.
+    time_exit_dte = max(dte - 7, 0)
+    sv_te  = round(_spread_value(spread_type, long_strike, short_strike, underlying_price), 4)
+    if _is_debit(spread_type):
+        pl_te = round((sv_te - entry_price) * 100, 2)
+    else:
+        pl_te = round((entry_price - sv_te) * 100, 2)
+    pl_pct_te = round(pl_te / max_loss, 6) if max_loss != 0 else 0.0
+    prob_te   = _pdf_prob(underlying_price, underlying_price, time_exit_dte, iv, risk_free_rate)
+    ev_te     = round(pl_te * prob_te, 4)
+    zone_te   = _exit_zone(spread_type, long_strike, short_strike, breakeven, underlying_price, underlying_price)
+
+    rows.append(ExitScenarioRow(
+        underlying_price=underlying_price,
+        spread_value=sv_te,
+        pl_per_contract=pl_te,
+        pl_pct=pl_pct_te,
+        probability=prob_te,
+        expected_value=ev_te,
+        zone=zone_te,
+        exit_signal="TIME EXIT",
+    ))
+
+    # Time exit date string (mm-dd-yyyy)
+    try:
+        exp_date = datetime.strptime(expiry, "%Y-%m-%d").date()
+    except ValueError:
+        exp_date = date.today()
+    te_date = exp_date - timedelta(days=7)
+    te_date_str = te_date.strftime("%m-%d-%Y")
+
+    total_ev = round(sum(r.expected_value for r in rows), 4)
+
+    return rows, breakeven, max_profit_price, max_loss_price, dte, te_date_str, total_ev
+
+
+@router.post("/exit-scenario", response_model=ExitScenarioResponse)
+async def exit_scenario(
+    request: ExitScenarioRequest,
+    user: dict = Depends(require_read),
+):
+    """
+    OTA-292 — Exit scenario computation engine.
+
+    Returns a row-by-row breakdown of P&L, probability, and expected value
+    for a vertical spread across all meaningful price levels at expiry.
+    Pure math — no AI involved.
+    """
+    rows, breakeven, max_profit_price, max_loss_price, dte, time_exit_date, total_ev = _build_exit_rows(
+        spread_type=request.spread_type,
+        long_strike=request.long_strike,
+        short_strike=request.short_strike,
+        expiry=request.expiry,
+        entry_price=request.entry_price,
+        underlying_price=request.underlying_price,
+        iv=request.iv,
+        risk_free_rate=request.risk_free_rate,
+    )
+    return ExitScenarioResponse(
+        rows=rows,
+        breakeven=breakeven,
+        max_profit_price=max_profit_price,
+        max_loss_price=max_loss_price,
+        total_ev=total_ev,
+        dte=dte,
+        time_exit_date=time_exit_date,
+    )
+
+
+# ─── OTA-297: Trade Verdict — AI Structured Evaluation ───────────────────────
+
+def _extract_verdict_json(text: str) -> Optional[dict]:
+    """Extract and parse TradeVerdictResponse JSON from raw AI output."""
+    text = text.strip()
+    fence = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text)
+    if fence:
+        text = fence.group(1).strip()
+    else:
+        start = text.find("{")
+        end   = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            text = text[start:end + 1]
+    try:
+        return json.loads(text)
+    except Exception:
+        return None
+
+
+@router.post("/trade-verdict", response_model=TradeVerdictResponse)
+async def trade_verdict(
+    request: TradeVerdictRequest,
+    user: dict = Depends(require_read),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    OTA-297 — Single-trade structured verdict from Claude.
+
+    Accepts pre-computed spread economics (from /evaluate/exit-scenario or client-side).
+    Loads TRADE_VERDICT_SYSTEM + TRADE_VERDICT_USER from SKILL.md.
+    Returns a TradeVerdictResponse with ev_commentary, key_level, iv_context,
+    verdict (EXECUTE | WATCH | PASS), and verdict_rationale.
+
+    agent_run_log write is fire-and-forget — failure never propagates to caller.
+    """
+    adapter = _get_adapter()
+    skill   = get_skill("claude-trade-agent")
+    run_id  = str(uuid.uuid4())
+    user_id = None if settings.skip_auth else (user.get("sub") or None)
+
+    # ── Build prompts ──────────────────────────────────────────────────────
+    system_prompt = skill.get("TRADE_VERDICT_SYSTEM")
+
+    reward_risk = round(request.max_profit / request.max_loss, 2) if request.max_loss else 0.0
+    user_message = skill.render(
+        "TRADE_VERDICT_USER",
+        spread_type=request.spread_type,
+        long_strike=request.long_strike,
+        short_strike=request.short_strike,
+        expiry=request.expiry,
+        dte=request.dte,
+        entry_price=request.entry_price,
+        max_profit=request.max_profit,
+        max_loss=request.max_loss,
+        breakeven=request.breakeven,
+        reward_risk=reward_risk,
+        p_max_profit=round(request.p_max_profit * 100, 2),
+        p_breakeven_or_better=round(request.p_breakeven_or_better * 100, 2),
+        p_max_loss=round(request.p_max_loss * 100, 2),
+        total_ev=request.total_ev,
+        ev_pct_of_risk=round(request.ev_pct_of_risk, 2),
+        iv=round(request.iv * 100, 1),
+    )
+
+    # ── Call AI ─────────────────────────────────────────────────────────────
+    try:
+        result = await adapter.chat(system_prompt, user_message, max_tokens=800)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"AI evaluation unavailable: {e}")
+
+    raw_text = result["text"]
+    data     = _extract_verdict_json(raw_text)
+
+    if data is None:
+        raise HTTPException(
+            status_code=422,
+            detail="AI returned malformed JSON for trade verdict.",
+        )
+
+    try:
+        verdict_response = TradeVerdictResponse(**data)
+    except Exception as e:
+        raise HTTPException(
+            status_code=422,
+            detail=f"AI response did not match TradeVerdictResponse schema: {e}",
+        )
+
+    # ── Fire-and-forget: agent_run_log ───────────────────────────────────────
+    try:
+        db.add(AgentRunLog(
+            run_id=run_id,
+            agent_name="claude-trade-agent",
+            stage="trade_verdict",
+            symbol=f"{request.spread_type} {request.long_strike}/{request.short_strike}",
+            user_id=user_id,
+            prompt_system=system_prompt,
+            prompt_user=user_message,
+            prompt_version=skill.prompt_version,
+            market_snapshot={"iv": request.iv, "dte": request.dte},
+            trade_snapshot={
+                "spread_type": request.spread_type,
+                "long_strike": request.long_strike,
+                "short_strike": request.short_strike,
+                "entry_price": request.entry_price,
+                "total_ev": request.total_ev,
+            },
+            model_response_raw=raw_text,
+            verdict=verdict_response.verdict,
+            verdict_summary=verdict_response.verdict_rationale[:120],
+            otel_trace_id=None,
+            input_tokens=result.get("input_tokens", 0),
+            output_tokens=result.get("output_tokens", 0),
+            model_name=result.get("model", "unknown"),
+            created_at=datetime.now(timezone.utc),
+        ))
+        await db.commit()
+    except Exception as e:
+        logger.warning(f"agent_run_log write failed (non-fatal): {e}")
+
+    return verdict_response
