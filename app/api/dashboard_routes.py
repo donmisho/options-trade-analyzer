@@ -30,6 +30,8 @@ DEFAULT_LAYOUT = [
      "minW": 3, "minH": 3, "isDraggable": False, "isResizable": False},
     {"i": "pnl-strategy-1",   "x": 6, "y": 4, "w": 6,  "h": 4,
      "minW": 3, "minH": 3, "isDraggable": False, "isResizable": False},
+    {"i": "positions-live-1",  "x": 0, "y": 8, "w": 4,  "h": 3,
+     "minW": 2, "minH": 2, "isDraggable": False, "isResizable": False},
 ]
 
 DEFAULT_WIDGETS = [
@@ -67,7 +69,39 @@ DEFAULT_WIDGETS = [
         "title": "P&L by Strategy",
         "settings": {}
     },
+    {
+        "id": "positions-live-1",
+        "type": "positions_live",
+        "title": "Active Positions",
+        "settings": {}
+    },
 ]
+
+# ── Idempotent widget injection ─────────────────────────────────────────────
+# New widgets added here are automatically injected into existing saved layouts
+# that don't already have them. Append entries as new widgets are introduced.
+_ALWAYS_PRESENT = [
+    {
+        "widget": {
+            "id": "positions-live-1",
+            "type": "positions_live",
+            "title": "Active Positions",
+            "settings": {},
+        },
+        "layout": {"i": "positions-live-1", "x": 0, "y": 8, "w": 4, "h": 3,
+                   "minW": 2, "minH": 2, "isDraggable": False, "isResizable": False},
+    },
+]
+
+
+def _inject_missing_widgets(layout: list, widgets: list) -> tuple[list, list]:
+    """Add any _ALWAYS_PRESENT widgets not yet in the saved layout (idempotent)."""
+    existing_ids = {w["id"] for w in widgets}
+    for entry in _ALWAYS_PRESENT:
+        if entry["widget"]["id"] not in existing_ids:
+            layout = layout + [entry["layout"]]
+            widgets = widgets + [entry["widget"]]
+    return layout, widgets
 
 
 # ── Layout endpoints ───────────────────────────────────────────────────────
@@ -89,9 +123,13 @@ async def get_layout(
             updated_at=None,
         )
 
+    layout  = json.loads(record.layout_json)
+    widgets = json.loads(record.widgets_json)
+    layout, widgets = _inject_missing_widgets(layout, widgets)
+
     return DashboardLayoutResponse(
-        layout=json.loads(record.layout_json),
-        widgets=json.loads(record.widgets_json),
+        layout=layout,
+        widgets=widgets,
         updated_at=record.updated_at,
     )
 

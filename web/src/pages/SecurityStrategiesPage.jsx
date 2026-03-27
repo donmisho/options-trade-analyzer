@@ -17,7 +17,8 @@ import {
 } from 'recharts';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
-import { getQuote, getStrategyScorecard, evaluateStructured } from '../api/client';
+import { getQuote, getStrategyScorecard, evaluateStructured, searchSymbolsStatic } from '../api/client';
+import SymbolSearch from '../components/SymbolSearch';
 import { STRATEGY_CONFIGS } from '../strategy-configs/index';
 import ConfigDrawer from '../components/ConfigDrawer';
 import QuoteBar from '../components/QuoteBar';
@@ -156,7 +157,7 @@ const MOCK_SCORES = [
 
 export default function SecurityStrategiesPage() {
   const { symbol: symbolParam } = useParams();
-  const { activeSymbol, setActiveSymbol, prices, configOpen, setConfigOpen } = useApp();
+  const { activeSymbol, setActiveSymbol, prices, configOpen, setConfigOpen, positionSymbols } = useApp();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -164,7 +165,6 @@ export default function SecurityStrategiesPage() {
 
   // ── State ──────────────────────────────────────────────────────────────────
   const [symbol,         setSymbol]         = useState(initSymbol);
-  const [inputSymbol,    setInputSymbol]    = useState(initSymbol);
   const [quote,          setQuote]          = useState(null);
   const [candles,        setCandles]        = useState([]);
   const [scores,         setScores]         = useState(null);
@@ -243,7 +243,6 @@ export default function SecurityStrategiesPage() {
     if (!symbolParam) return;
     const sym = symbolParam.toUpperCase();
     setSymbol(sym);
-    setInputSymbol(sym);
     if (sym !== activeSymbol) setActiveSymbol(sym);
 
     const isWatchlistNav = location.state?.fromWatchlist === true;
@@ -269,10 +268,8 @@ export default function SecurityStrategiesPage() {
     }
   }, [chartStartDate]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Symbol submit (Analyze button) ─────────────────────────────────────
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    const sym = inputSymbol.trim().toUpperCase();
+  // ── Symbol select — fires immediately on SymbolSearch selection ─────────
+  const handleSymbolSelect = (sym) => {
     if (!sym) return;
     setSymbol(sym);
     setActiveSymbol(sym);
@@ -280,7 +277,7 @@ export default function SecurityStrategiesPage() {
     setScores(null); setSmaSignal(null); setError(null);
     setSelectedKeys([]); setEvaluations([]); setEvalError(null);
     setQuote(null); setCandles([]); setLastAnalyzed(null);
-    // Update URL (no fromWatchlist state — fetch is driven explicitly here)
+    // Update URL
     prevSymbolParam.current = sym.toLowerCase();
     navigate(`/security-strategies/${sym}`);
     fetchQuote(sym);
@@ -378,34 +375,25 @@ export default function SecurityStrategiesPage() {
   return (
     <div style={{ backgroundColor: C.bg, minHeight: '100%', paddingBottom: 32 }}>
 
-      {/* ── Symbol input + Analyze ── */}
+      {/* ── Symbol search ── */}
       <div style={{ padding: '10px 16px 10px' }}>
-        <form onSubmit={handleSubmit} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <input
-            value={inputSymbol}
-            onChange={e => setInputSymbol(e.target.value.toUpperCase())}
-            placeholder="Enter a symbol"
-            style={{
-              flex: 1, maxWidth: 220, padding: '6px 10px', borderRadius: 6,
-              border: `1px solid ${C.border}`, backgroundColor: C.surface,
-              color: C.text, fontSize: 13, fontFamily: mono, outline: 'none',
-            }}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <SymbolSearch
+            onSelect={handleSymbolSelect}
+            placeholder="Search symbol..."
+            searchFn={searchSymbolsStatic}
+            positionSymbols={positionSymbols}
+            initialValue={null}
           />
-          <button type="submit" style={{
-            padding: '6px 18px', borderRadius: 6, border: 'none',
-            backgroundColor: C.accent, color: '#fff', fontFamily: mono,
-            fontSize: 13, fontWeight: 700, cursor: 'pointer',
-          }}>
-            Analyze
-          </button>
           {loading && (
             <div style={{
               width: 16, height: 16, border: `2px solid ${C.border}`,
               borderTopColor: C.accent, borderRadius: '50%',
               animation: 'spin 0.7s linear infinite',
+              flexShrink: 0,
             }} />
           )}
-        </form>
+        </div>
       </div>
 
       {/* ── QuoteBar ── */}

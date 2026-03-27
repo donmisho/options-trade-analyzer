@@ -441,6 +441,35 @@ async def take_position(
     return _to_response(pos)
 
 
+@router.get("/symbols")
+async def get_position_symbols(
+    user: dict = Depends(require_read),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Return distinct symbols with active (FOLLOWING or LIVE) position counts.
+    Used by the SymbolSearch component to highlight Tier 1 (symbols with positions).
+
+    Returns [{ symbol, position_count }] ordered by symbol. Empty array if none.
+    """
+    result = await db.execute(
+        select(
+            Position.symbol,
+            func.count(Position.position_id).label("position_count"),
+        )
+        .where(
+            and_(
+                Position.user_id == user["sub"],
+                Position.status.in_(["FOLLOWING", "LIVE"]),
+            )
+        )
+        .group_by(Position.symbol)
+        .order_by(Position.symbol)
+    )
+    rows = result.all()
+    return [{"symbol": row.symbol, "position_count": row.position_count} for row in rows]
+
+
 @router.get("/aggregate")
 async def get_aggregate(
     status: Optional[str] = Query(None),
@@ -714,17 +743,19 @@ async def refresh_position(
     """
     Re-evaluate an open position with current market data and Claude.
 
+    Prompts: POSITION_REFRESH_SYSTEM (system) + POSITION_REFRESH_USER (user)
+    from app/skills/claude-trade-agent/SKILL.md — "Position Refresh Assessment" section.
+
     Flow:
     1. Load position (must be FOLLOWING or LIVE)
     2. Fetch current quote + option chain marks
-    3. Build prompt from entry data + assessment history + current market
+    3. Build POSITION_REFRESH_USER prompt via skill.render() with prior assessment history
     4. Call Claude (POSITION_REFRESH_SYSTEM) → verdict / score / synopsis / exit_levels
     5. Write new PositionAssessment row (type=UPDATE, version=max+1)
     6. Update position current_price / current_pnl / last_monitored_at
     7. Write agent_run_log (non-blocking — failures are logged, not raised)
     """
     from app.skills.skill_loader import get_skill
-    from app.providers.ai.prompts import build_refresh_prompt
     from app.analysis.strategy_definitions import STRATEGIES
     from app.models.database import AgentRunLog
 
@@ -817,8 +848,10 @@ async def refresh_position(
 
     # 6. Build prompt and call Claude
     strategy_def = STRATEGIES.get(pos.strategy_key)
+    strategy_label = strategy_def.label if strategy_def else pos.strategy_key
+    current_date_str = datetime.now(timezone.utc).strftime("%m-%d-%Y")
     current_market_data = {
-        "date": datetime.now(timezone.utc).strftime("%m-%d-%Y"),
+        "date": current_date_str,
         "underlying_price": underlying_price,
         "spread_mark": current_premium,
         "iv": round(iv_approx, 4) if iv_approx else None,
@@ -826,7 +859,48 @@ async def refresh_position(
 
     skill = get_skill("claude-trade-agent")
     system_prompt = skill.get("POSITION_REFRESH_SYSTEM")
-    user_message = build_refresh_prompt(pos, prior_assessments, current_market_data, strategy_def)
+
+    # Build prior_assessments block (pre-formatted, injected as a single variable)
+    if prior_assessments:
+        pa_lines = []
+        for i, a in enumerate(sorted(prior_assessments, key=lambda x: x.version_number), 1):
+            date_str = a.created_at.strftime("%m-%d-%Y") if a.created_at else "N/A"
+            pa_lines.append(f"Assessment {i} ({date_str}):")
+            pa_lines.append(f"  Verdict: {a.verdict} | Score: {a.score}")
+            if a.synopsis:
+                pa_lines.append(f"  Synopsis: {a.synopsis}")
+            pa_lines.append(f"  Claude's Read: {a.claude_read}")
+        prior_assessments_block = "\n".join(pa_lines)
+    else:
+        prior_assessments_block = "No prior assessments — this is the first review."
+
+    # Build optional SMA context line
+    entry_sma = json.loads(pos.entry_sma_alignment) if isinstance(pos.entry_sma_alignment, str) and pos.entry_sma_alignment else (pos.entry_sma_alignment or {})
+    if entry_sma:
+        sma_ctx = (
+            f"Entry SMA Alignment: SMA8={entry_sma.get('sma_8','N/A')} | "
+            f"SMA21={entry_sma.get('sma_21','N/A')} | SMA50={entry_sma.get('sma_50','N/A')} | "
+            f"Trend={entry_sma.get('alignment', entry_sma.get('ma_alignment','N/A'))}\n"
+        )
+    else:
+        sma_ctx = ""
+
+    user_message = skill.render(
+        "POSITION_REFRESH_USER",
+        symbol=pos.symbol,
+        strategy_label=strategy_label,
+        entry_date=pos.entry_date.strftime("%m-%d-%Y") if pos.entry_date else "N/A",
+        entry_underlying_price=pos.entry_underlying_price or "N/A",
+        entry_price=pos.entry_price or "N/A",
+        entry_iv_rank=pos.entry_iv_rank or "N/A",
+        trade_structure=json.dumps(trade_struct, indent=2),
+        current_date=current_date_str,
+        current_price=underlying_price or "N/A",
+        spread_mark=current_premium or "N/A",
+        current_iv=round(iv_approx, 4) if iv_approx else "N/A",
+        sma_context=sma_ctx,
+        prior_assessments=prior_assessments_block,
+    )
 
     import uuid as _uuid
     run_id = str(_uuid.uuid4())

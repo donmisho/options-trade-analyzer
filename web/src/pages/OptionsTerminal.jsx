@@ -16,8 +16,9 @@ import {
   CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, Cell,
 } from 'recharts';
 import { STRATEGY_CONFIGS } from '../strategy-configs/index';
-import { apiPost, getQuote, followTrade, takeTrade, getStrategyScorecard } from '../api/client';
+import { apiPost, getQuote, followTrade, takeTrade, getStrategyScorecard, searchSymbolsStatic } from '../api/client';
 import { useApp } from '../context/AppContext';
+import SymbolSearch from '../components/SymbolSearch';
 import { useToast } from '../components/Toast';
 import ConfigDrawer from '../components/ConfigDrawer';
 import QuoteBar from '../components/QuoteBar';
@@ -293,13 +294,12 @@ function countTradingDays(startDateStr) {
 
 export default function OptionsTerminal({ activeStrategy }) {
   const config = STRATEGY_CONFIGS[activeStrategy] || STRATEGY_CONFIGS.verticals;
-  const { activeSymbol } = useApp();
+  const { activeSymbol, positionSymbols } = useApp();
   const { showToast } = useToast();
   const navigate = useNavigate();
 
   // ── State ──────────────────────────────────────────────────────────────────
   const [symbol,       setSymbol]       = useState(activeSymbol || 'QQQ');
-  const [inputSymbol,  setInputSymbol]  = useState(activeSymbol || 'QQQ');
   const [trades,       setTrades]       = useState([]);
   const [underlyingPrice, setUnderlyingPrice] = useState(0);
   const [quoteData,    setQuoteData]    = useState(null);
@@ -596,21 +596,18 @@ export default function OptionsTerminal({ activeStrategy }) {
   useEffect(() => {
     if (!initialized.current || !activeSymbol || activeSymbol === symbol) return;
     setSymbol(activeSymbol);
-    setInputSymbol(activeSymbol);
     setSelectedId(null);
     runAnalysis(activeSymbol);
   }, [activeSymbol]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Symbol submit ─────────────────────────────────────────────────────────
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    const sym = inputSymbol.trim().toUpperCase();
+  // ── Symbol select — fires immediately on SymbolSearch selection ──────────
+  const handleSymbolSelect = useCallback((sym) => {
     if (!sym) return;
     setSymbol(sym);
     setSelectedId(null);
     setConfigOpen(false);
     runAnalysis(sym);
-  };
+  }, [runAnalysis]);
 
   // ── Column config and display results ────────────────────────────────────
   // Select column set based on which strategy is active.
@@ -667,34 +664,23 @@ export default function OptionsTerminal({ activeStrategy }) {
       <div style={{ backgroundColor: BG, borderBottom: `1px solid ${BORDER}`, padding: '10px 16px 0' }}>
 
         {/* Nav bar */}
-        <form onSubmit={handleSubmit} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-          <input
-            value={inputSymbol}
-            onChange={e => setInputSymbol(e.target.value.toUpperCase())}
-            placeholder="Enter a symbol"
-            style={{
-              flex: 1, maxWidth: 220, padding: '6px 10px', borderRadius: 6,
-              border: `1px solid ${BORDER}`, backgroundColor: SURFACE,
-              color: TEXT, fontSize: 13, fontFamily: mono, outline: 'none',
-            }}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+          <SymbolSearch
+            onSelect={handleSymbolSelect}
+            placeholder="Search symbol..."
+            searchFn={searchSymbolsStatic}
+            positionSymbols={positionSymbols}
+            initialValue={null}
           />
-
-          <button type="submit" style={{
-            padding: '6px 18px', borderRadius: 6, border: 'none',
-            backgroundColor: ACCENT, color: '#fff', fontFamily: mono,
-            fontSize: 13, fontWeight: 700, cursor: 'pointer',
-          }}>
-            Analyze
-          </button>
-
           {loading && (
             <div style={{
               width: 16, height: 16, border: `2px solid ${BORDER}`,
               borderTopColor: ACCENT, borderRadius: '50%',
               animation: 'spin 0.7s linear infinite',
+              flexShrink: 0,
             }} />
           )}
-        </form>
+        </div>
 
         {/* Market ribbon — unified QuoteBar */}
         {(() => {

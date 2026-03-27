@@ -14,7 +14,7 @@
  */
 
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import { getQuotes, getWatchlist, addWatchlistSymbol, removeWatchlistSymbol, getFavorites, addFavoriteApi, removeFavoriteApi } from '../api/client';
+import { getQuotes, getWatchlist, addWatchlistSymbol, removeWatchlistSymbol, getFavorites, addFavoriteApi, removeFavoriteApi, getPositionSymbols } from '../api/client';
 import { useToast } from '../components/Toast';
 
 const AppContext = createContext(null);
@@ -82,6 +82,22 @@ export function AppProvider({ children }) {
 
   // Dynamic watchlist — persisted in Azure SQL via /api/v1/watchlist
   const [watchlist, setWatchlist] = useState([]);
+
+  // Active position symbols — [{ symbol, position_count }] for SymbolSearch Tier 1 highlighting
+  const [positionSymbols, setPositionSymbols] = useState([]);
+
+  const fetchPositionSymbols = useCallback(async () => {
+    try {
+      const data = await getPositionSymbols();
+      setPositionSymbols(Array.isArray(data) ? data : []);
+    } catch {
+      // Silently fail — SymbolSearch gracefully degrades to Tier 2 only
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchPositionSymbols();
+  }, [fetchPositionSymbols]);
 
   // Config drawer — shared so Header gear icon can open it from any page
   const [configOpen, setConfigOpen] = useState(false);
@@ -281,6 +297,10 @@ export function AppProvider({ children }) {
     watchlist,
     addToWatchlist,
     removeFromWatchlist,
+
+    // Position symbols — for SymbolSearch Tier 1 highlighting
+    positionSymbols,
+    fetchPositionSymbols,
 
     // Config drawer
     configOpen,
