@@ -29,6 +29,7 @@ import OptionsTerminal from './pages/OptionsTerminal';
 import PositionsPage from './pages/PositionsPage';
 import DashboardPage from './pages/DashboardPage';
 import SecurityStrategiesPage from './pages/SecurityStrategiesPage';
+import StrategyProfilePage from './pages/StrategyProfilePage';
 import LoginPage from './pages/LoginPage';
 import BrokerConnectPage from './pages/BrokerConnectPage';
 
@@ -99,6 +100,9 @@ export default function App() {
             {/* Security Strategies — primary landing page for a symbol */}
             <Route path="/security-strategies" element={<SecurityStrategiesPage />} />
             <Route path="/security-strategies/:symbol" element={<SecurityStrategiesPage />} />
+
+            {/* Strategy Profile — per-strategy detail page */}
+            <Route path="/strategies/:slug" element={<StrategyProfilePage />} />
 
             {/* Other pages */}
             <Route path="/directional" element={<Navigate to="/dashboard" replace />} />

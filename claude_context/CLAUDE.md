@@ -29,6 +29,11 @@ ordered by status ascending (so 1-To Do appears before 2-In Review, etc.).
 the Board view. The board is sprint-based and will appear empty.
 List view URL: https://tmtctech-team.atlassian.net/jira/software/projects/OTA/list
 
+**Atlassian MCP workaround (as of March 2026):** Atlassian MCP tools do not surface
+in Claude.ai tool_search. Workaround: export Jira CSV manually, or use Claude in
+Chrome to navigate the list view URL above. When MCP tools become available, update
+this protocol to use them directly instead of browser automation.
+
 ## Jira Workflow — Status Definitions
 
 The OTA project uses a 5-stage workflow. When reading or updating Jira status,
@@ -61,6 +66,10 @@ Example: `OTA-152 OTA-153 feat: implement StrategyScorecard and SecurityDashboar
 
 This automation only works if ticket numbers appear in the commit message.
 Always include ALL ticket numbers addressed in a session in the commit prefix.
+
+**Verification status (2026-03-27):** Automation rule configured; manual verification
+pending. To test: push a commit to main with an OTA ticket number and check ticket
+status in Jira within a few minutes of the push.
 
 ## Chrome Extension Notes
 
