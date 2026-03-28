@@ -235,6 +235,104 @@ def post_escalation(
     return _post_card(channel, card)
 
 
+def post_approval_request(
+    channel: str,
+    request_type: str,
+    summary: str,
+    details: str,
+    options: list = None,
+    qa_level: int = None,
+    files_changed: list = None,
+) -> bool:
+    """
+    Post an approval request to Teams so the human can see it on any device.
+    The human always responds in Claude Code — Teams is notification only.
+
+    Args:
+        channel:       qa-ux or qa-data
+        request_type:  BUILD_COMPLETE | QA_RECOMMENDATION | PR_READY |
+                       FIX_APPROVAL | PUSH_APPROVAL | ESCALATION
+        summary:       One-line summary of what needs approval
+        details:       Full context — what was built, what changed, what's recommended
+        options:       Response options (default: ["Approve", "Adjust", "Skip"])
+        qa_level:      If QA_RECOMMENDATION, the recommended level (0/1/2)
+        files_changed: List of files modified in this build
+    """
+    if options is None:
+        options = ["Approve", "Adjust", "Skip"]
+
+    type_config = {
+        "BUILD_COMPLETE":    {"emoji": "🔨", "color": "accent",   "label": "Build Complete — Approval Needed"},
+        "QA_RECOMMENDATION": {"emoji": "🧪", "color": "warning",  "label": "QA Recommendation — Approval Needed"},
+        "PR_READY":          {"emoji": "✅", "color": "good",     "label": "PR Ready — Review Needed"},
+        "FIX_APPROVAL":      {"emoji": "🔧", "color": "warning",  "label": "Fix Approval Needed"},
+        "PUSH_APPROVAL":     {"emoji": "🚀", "color": "accent",   "label": "Push Approval Needed"},
+        "ESCALATION":        {"emoji": "🚨", "color": "attention","label": "Escalation — Decision Required"},
+    }
+    cfg = type_config.get(request_type, {"emoji": "📋", "color": "default", "label": request_type})
+
+    qa_level_labels = {0: "Level 0 — No QA needed", 1: "Level 1 — Targeted validation", 2: "Level 2 — Full regression"}
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+    body_blocks = [
+        {
+            "type": "TextBlock",
+            "text": f"{cfg['emoji']} {cfg['label']}",
+            "weight": "Bolder",
+            "size": "Medium",
+            "color": cfg["color"],
+        },
+        {
+            "type": "TextBlock",
+            "text": summary,
+            "weight": "Bolder",
+            "wrap": True,
+        },
+        {
+            "type": "TextBlock",
+            "text": details,
+            "wrap": True,
+            "spacing": "Small",
+        },
+    ]
+
+    if qa_level is not None:
+        body_blocks.append({
+            "type": "TextBlock",
+            "text": f"**Recommended QA:** {qa_level_labels.get(qa_level, f'Level {qa_level}')}",
+            "wrap": True,
+            "spacing": "Small",
+        })
+
+    if files_changed:
+        body_blocks.append({
+            "type": "TextBlock",
+            "text": "**Files changed:**\n" + "\n".join(f"- {f}" for f in files_changed),
+            "wrap": True,
+            "spacing": "Small",
+            "fontType": "Monospace",
+        })
+
+    body_blocks.append({
+        "type": "TextBlock",
+        "text": f"**Respond in Claude Code with:** {' / '.join(options)}",
+        "weight": "Bolder",
+        "color": "accent",
+        "spacing": "Medium",
+    })
+
+    body_blocks.append({
+        "type": "TextBlock",
+        "text": f"Posted at {timestamp}",
+        "size": "Small",
+        "isSubtle": True,
+        "spacing": "Small",
+    })
+
+    card = {"body": body_blocks}
+    return _post_card(channel, card)
+
+
 if __name__ == "__main__":
     """Test mode: python teams-notifier.py <channel>"""
     import sys

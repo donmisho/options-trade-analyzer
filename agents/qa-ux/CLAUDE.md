@@ -30,6 +30,8 @@ Escalate to Teams channel "QA - UX Compliance":
 - Any deviation that isn't UI-only
 - Running against production endpoints
 
+For all items requiring human approval: post the approval request to Teams using `post_approval_request` from `agents/shared/teams-notifier.py` before waiting. Include full context so the human can make a decision from any device. Use channel `"qa-ux"` for this agent. Then wait for the response in this Claude Code session.
+
 ## Escalation Format
 
 ```

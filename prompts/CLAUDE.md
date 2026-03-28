@@ -50,6 +50,10 @@ Run QA? [waiting for your answer]
 
 The human approves, adjusts, or skips. Never run QA without asking. Never skip the recommendation — always state the level even if you expect a Level 0.
 
+After stating your recommendation, also post it to Teams using `post_approval_request` from `agents/shared/teams-notifier.py` so the human can see it on any device. Use channel `"qa-ux"` for frontend-heavy builds, `"qa-data"` for backend-heavy builds, or `"qa-ux"` as default. Then wait for the human's response in this Claude Code session.
+
+For any approval that requires human input (git push, PR creation, fix approval, QA level selection), always post to Teams first, then wait in Claude Code.
+
 ### Regression runs
 
 When running Level 2 QA, compare current results against the baseline files in `agents/qa-context/`. A test that failed in the previous run and still fails is a known issue. A test that passed in the previous run and now fails is a REGRESSION — mark severity BLOCKER and escalate immediately to Teams.

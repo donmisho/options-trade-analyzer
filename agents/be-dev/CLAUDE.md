@@ -23,6 +23,8 @@ No approval needed:
 - Anything touching SecretsManager/auth/providers
 - Any HIGH cascade_risk fix
 
+For all items requiring human approval: post the approval request to Teams using `post_approval_request` from `agents/shared/teams-notifier.py` before waiting. Include full context so the human can make a decision from any device. Use channel `"qa-data"` for this agent. Then wait for the response in this Claude Code session.
+
 ## Rules
 - Only implement fixes with an approved root cause analysis
 - After fix: run full 64-config matrix, then MSFT anchor regression
