@@ -319,6 +319,7 @@ def post_approval_request(
         "weight": "Bolder",
         "color": "accent",
         "spacing": "Medium",
+        "wrap": True,
     })
 
     body_blocks.append({
