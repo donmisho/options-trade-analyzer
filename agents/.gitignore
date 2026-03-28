@@ -1,0 +1,8 @@
+qa-ux/test-results/*
+!qa-ux/test-results/.gitkeep
+qa-data/test-results/*
+!qa-data/test-results/.gitkeep
+qa-context/jira-extract.json
+qa-context/agent-run-log.jsonl
+# Baseline files ARE committed — they are the regression reference
+# Do not add baseline-ux.json or baseline-data.json to this gitignore
