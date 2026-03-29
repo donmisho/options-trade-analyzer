@@ -11,6 +11,7 @@
 import { useState, useEffect } from 'react';
 import { C, mono } from '../styles/tokens';
 import { useApp } from '../context/AppContext';
+import { SCORECARD_STRATEGIES } from '../strategy-configs/index';
 
 // ─── Default values ──────────────────────────────────────────────────────────
 
@@ -123,29 +124,63 @@ const SLIDER_STYLES = `
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function SystemVarsPanel({ open, onClose }) {
-  const { systemVars, setSystemVars } = useApp();
-  const [draft, setDraft] = useState({ ...DEFAULT_SV });
+// Build default strategyAdmin from config (all enabled, original names)
+function buildDefaultStrategyAdmin() {
+  const admin = {};
+  for (const s of SCORECARD_STRATEGIES) {
+    admin[s.key] = { name: s.label, enabled: true };
+  }
+  return admin;
+}
 
-  // Sync draft when panel opens
+export default function SystemVarsPanel({ open, onClose }) {
+  const { systemVars, setSystemVars, strategyAdmin, setStrategyAdmin } = useApp();
+  const [draft, setDraft] = useState({ ...DEFAULT_SV });
+  const [strategyDraft, setStrategyDraft] = useState(buildDefaultStrategyAdmin);
+
+  // Sync drafts when panel opens
   useEffect(() => {
-    if (open) setDraft({ ...DEFAULT_SV, ...systemVars });
+    if (!open) return;
+    setDraft({ ...DEFAULT_SV, ...systemVars });
+    // Merge stored admin over defaults so new strategies default to enabled
+    const defaults = buildDefaultStrategyAdmin();
+    const merged = {};
+    for (const s of SCORECARD_STRATEGIES) {
+      merged[s.key] = {
+        name: strategyAdmin[s.key]?.name ?? s.label,
+        enabled: strategyAdmin[s.key]?.enabled ?? true,
+      };
+    }
+    setStrategyDraft(merged);
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const upd = (key, val) => setDraft(prev => ({ ...prev, [key]: val }));
 
+  const updStrategy = (key, field, val) =>
+    setStrategyDraft(prev => ({ ...prev, [key]: { ...prev[key], [field]: val } }));
+
   const handleApply = () => {
+    // Save system vars
     setSystemVars(draft);
     try {
       const stored = JSON.parse(localStorage.getItem('analysisConfig') || '{}');
       localStorage.setItem('analysisConfig', JSON.stringify({ ...stored, systemVars: draft }));
+    } catch { /* silently ignore */ }
+    // Save strategy admin
+    setStrategyAdmin(strategyDraft);
+    try {
+      localStorage.setItem('strategyAdmin', JSON.stringify(strategyDraft));
     } catch { /* silently ignore */ }
     onClose();
   };
 
   const handleReset = () => {
     setDraft({ ...DEFAULT_SV });
+    setStrategyDraft(buildDefaultStrategyAdmin());
   };
+
+  // Collapsible strategy settings section
+  const [stratSectionOpen, setStratSectionOpen] = useState(false);
 
   return (
     <>
@@ -215,6 +250,68 @@ export default function SystemVarsPanel({ open, onClose }) {
           <p style={{ fontSize: 10, color: C.textMuted, margin: '-8px 0 12px' }}>Green when IV ≤ left value, amber when ≤ right value, red above.</p>
           <DualRangeSlider label="Runway Pip (amber / green)" minVal={draft.pip_runway_amber} maxVal={draft.pip_runway_green} min={1} max={120} step={1} unit="d" color={C.green} onChange={(a, b) => setDraft(p => ({ ...p, pip_runway_amber: a, pip_runway_green: b }))} />
           <p style={{ fontSize: 10, color: C.textMuted, margin: '-8px 0 12px' }}>Green when runway ≥ right value, amber when ≥ left value, red below.</p>
+
+          {/* Strategy Settings — collapsible */}
+          <div style={{ borderTop: `1px solid ${C.border}`, marginTop: 8 }}>
+            <button
+              onClick={() => setStratSectionOpen(o => !o)}
+              style={{
+                width: '100%', padding: '10px 0', display: 'flex', alignItems: 'center',
+                justifyContent: 'space-between', background: 'none', border: 'none',
+                cursor: 'pointer',
+              }}
+            >
+              <span style={{ fontSize: 10.5, color: C.textDim, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Strategy Settings</span>
+              <span style={{ color: C.textMuted, fontSize: 12 }}>{stratSectionOpen ? '▾' : '▸'}</span>
+            </button>
+
+            {stratSectionOpen && (
+              <div style={{ paddingBottom: 8 }}>
+                <p style={{ fontSize: 11, color: C.textDim, margin: '0 0 12px', lineHeight: 1.5 }}>
+                  Enable or disable strategies and override their display names. Disabled strategies are hidden from the nav and excluded from scorecards.
+                </p>
+                {SCORECARD_STRATEGIES.map(strategy => {
+                  const row = strategyDraft[strategy.key] || { name: strategy.label, enabled: true };
+                  return (
+                    <div key={strategy.key} style={{ marginBottom: 14, padding: '10px 12px', borderRadius: 6, border: `1px solid ${C.border}`, backgroundColor: C.card }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                        <span style={{ fontSize: 11, color: C.text, fontWeight: 600 }}>{strategy.label}</span>
+                        {/* Enabled toggle */}
+                        <button
+                          onClick={() => updStrategy(strategy.key, 'enabled', !row.enabled)}
+                          style={{
+                            padding: '3px 10px', borderRadius: 12, fontSize: 10, fontWeight: 600,
+                            cursor: 'pointer', transition: 'all 0.15s',
+                            border: `1.5px solid ${row.enabled ? C.green : C.border}`,
+                            backgroundColor: row.enabled ? `${C.green}18` : 'transparent',
+                            color: row.enabled ? C.green : C.textMuted,
+                          }}
+                        >
+                          {row.enabled ? 'Enabled' : 'Disabled'}
+                        </button>
+                      </div>
+                      {/* Name input */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <label style={{ fontSize: 9.5, color: C.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', flexShrink: 0 }}>Name</label>
+                        <input
+                          type="text"
+                          value={row.name}
+                          onChange={e => updStrategy(strategy.key, 'name', e.target.value)}
+                          style={{
+                            flex: 1, padding: '4px 8px', borderRadius: 5,
+                            border: `1px solid ${C.border}`, backgroundColor: C.bg,
+                            color: C.text, fontSize: 12, fontFamily: mono, outline: 'none',
+                          }}
+                          onFocus={e => e.target.style.borderColor = C.borderFocus}
+                          onBlur={e => e.target.style.borderColor = C.border}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
 
         </div>
 

@@ -22,3 +22,12 @@ export const STRATEGY_CONFIGS = {
   [trendRiderConfig.key]:     trendRiderConfig,
   [lotteryTicketConfig.key]:  lotteryTicketConfig,
 };
+
+// Ordered list of scorecard strategies for nav and admin UI.
+// Verticals and long_calls are excluded — they have top-level nav items.
+export const SCORECARD_STRATEGIES = [
+  steadyPaycheckConfig,
+  weeklyGrindConfig,
+  trendRiderConfig,
+  lotteryTicketConfig,
+];

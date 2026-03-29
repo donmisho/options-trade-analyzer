@@ -1,15 +1,18 @@
 /**
- * MarketOverviewWidget — Phase 2.3
+ * MarketOverviewWidget — OTA-177
  *
- * Renders the market index card grid extracted from the original DashboardPage.
- * Card visual design is PRESERVED exactly — same dark card style, teal ticker,
- * red/green change colors, YTD row.
+ * Renders the market index card grid. Loads cached values immediately on mount
+ * (zero flicker), then fires live quote calls and replaces values once live data
+ * returns. Shows "Last Updated mm-dd-yyyy hh:mm" below the cards.
  *
  * Props: { config: { id, type, title, settings: { symbols: [{ticker, apiSymbol, label, noYtd}] } }, isEditMode }
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { getQuote, getHistoricalClose } from '../api/client';
+import { formatDate } from '../utils/formatDate';
+
+const CACHE_KEY = 'market_overview_cache';
 
 // First trading day of 2026 — used as YTD baseline
 const YTD_REF = '2026-01-02';
@@ -38,54 +41,81 @@ function changeColor(val) {
   return '#8b90a0';
 }
 
-export default function MarketOverviewWidget({ config, isEditMode }) {
+export default function MarketOverviewWidget({ config }) {
   const symbols = config.settings?.symbols ?? [];
 
-  const [quotes, setQuotes]   = useState({});
-  const [ytdRefs, setYtdRefs] = useState({});
-  const [loading, setLoading] = useState(true);
+  const [quotes, setQuotes]       = useState({});
+  const [ytdRefs, setYtdRefs]     = useState({});
+  const [updatedAt, setUpdatedAt] = useState(null);
+  const [loading, setLoading]     = useState(true);
 
+  // Load cached values immediately on mount
   useEffect(() => {
-    if (!symbols.length) return;
-
-    async function load() {
-      setLoading(true);
-      try {
-        const [quoteResults, ...ytdResults] = await Promise.all([
-          Promise.all(
-            symbols.map(async (s) => {
-              try {
-                const q = await getQuote(s.apiSymbol || s.ticker);
-                return { ticker: s.ticker, data: q };
-              } catch {
-                return { ticker: s.ticker, data: null };
-              }
-            })
-          ),
-          ...symbols
-            .filter(s => !s.noYtd)
-            .map(s =>
-              getHistoricalClose(s.apiSymbol || s.ticker, YTD_REF)
-                .then(d => ({ ticker: s.ticker, close: d?.close ?? null }))
-                .catch(() => ({ ticker: s.ticker, close: null }))
-            ),
-        ]);
-
-        const q = {};
-        for (const { ticker, data } of quoteResults) q[ticker] = data;
-        setQuotes(q);
-
-        const ytd = {};
-        for (const { ticker, close } of ytdResults) ytd[ticker] = close;
-        setYtdRefs(ytd);
-      } catch {
-        // silently fail
-      } finally {
+    try {
+      const raw = localStorage.getItem(CACHE_KEY);
+      if (raw) {
+        const { quotes: q, ytdRefs: y, timestamp } = JSON.parse(raw);
+        if (q) setQuotes(q);
+        if (y) setYtdRefs(y);
+        if (timestamp) setUpdatedAt(new Date(timestamp));
         setLoading(false);
       }
-    }
+    } catch (_) { /* ignore corrupt cache */ }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-    load();
+  const fetchLive = useCallback(async () => {
+    if (!symbols.length) return;
+    try {
+      const [quoteResults, ...ytdResults] = await Promise.all([
+        Promise.all(
+          symbols.map(async (s) => {
+            try {
+              const q = await getQuote(s.apiSymbol || s.ticker);
+              return { ticker: s.ticker, data: q };
+            } catch {
+              return { ticker: s.ticker, data: null };
+            }
+          })
+        ),
+        ...symbols
+          .filter(s => !s.noYtd)
+          .map(s =>
+            getHistoricalClose(s.apiSymbol || s.ticker, YTD_REF)
+              .then(d => ({ ticker: s.ticker, close: d?.close ?? null }))
+              .catch(() => ({ ticker: s.ticker, close: null }))
+          ),
+      ]);
+
+      const q = {};
+      for (const { ticker, data } of quoteResults) q[ticker] = data;
+
+      const ytd = {};
+      for (const { ticker, close } of ytdResults) ytd[ticker] = close;
+
+      const now = new Date();
+      setQuotes(q);
+      setYtdRefs(ytd);
+      setUpdatedAt(now);
+      setLoading(false);
+
+      // Update cache
+      try {
+        localStorage.setItem(CACHE_KEY, JSON.stringify({
+          quotes: q,
+          ytdRefs: ytd,
+          timestamp: now.toISOString(),
+        }));
+      } catch (_) { /* storage full — ignore */ }
+    } catch {
+      setLoading(false);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.id]);
+
+  // Fire live fetch on mount (runs alongside cached render)
+  useEffect(() => {
+    fetchLive();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config.id]);
 
@@ -93,6 +123,7 @@ export default function MarketOverviewWidget({ config, isEditMode }) {
     <div style={s.wrap}>
       <div style={s.header}>
         <span style={s.title}>{config.title}</span>
+        <button style={s.refreshBtn} onClick={fetchLive} title="Refresh">↺</button>
       </div>
       <div style={s.grid}>
         {symbols.map(sym => {
@@ -127,6 +158,11 @@ export default function MarketOverviewWidget({ config, isEditMode }) {
           );
         })}
       </div>
+      {updatedAt && (
+        <div style={s.lastUpdated}>
+          Last Updated {formatDate(updatedAt, true)}
+        </div>
+      )}
     </div>
   );
 }
@@ -138,6 +174,9 @@ const s = {
     padding: '12px 14px',
   },
   header: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     marginBottom: 10,
   },
   title: {
@@ -146,6 +185,15 @@ const s = {
     color: '#6b7280',
     textTransform: 'uppercase',
     letterSpacing: '0.1em',
+  },
+  refreshBtn: {
+    background: 'none',
+    border: 'none',
+    color: '#6b7280',
+    fontSize: 16,
+    cursor: 'pointer',
+    padding: '0 4px',
+    lineHeight: 1,
   },
   grid: {
     display: 'grid',
@@ -191,5 +239,10 @@ const s = {
     paddingTop: 8,
     borderTop: '1px solid #252a3a',
     fontFamily: 'monospace',
+  },
+  lastUpdated: {
+    marginTop: 10,
+    fontSize: 11,
+    color: '#6b7280',
   },
 };

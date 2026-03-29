@@ -22,6 +22,7 @@ import Toast from './Toast';
 import TradeAgentPanel from './TradeAgentPanel';
 import SystemVarsPanel from './SystemVarsPanel';
 import { useApp } from '../context/AppContext';
+import { SCORECARD_STRATEGIES } from '../strategy-configs/index';
 import { getSchwabStatus, getSchwabAuthUrl } from '../api/client';
 import { msalInstance } from '../auth/msalConfig';
 import './Layout.css';
@@ -73,7 +74,7 @@ const NAV_ITEMS = [
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function Layout({ setActiveStrategy }) {
-  const { fetchPrices, activeSymbol, systemVarsPanelOpen, setSystemVarsPanelOpen } = useApp();
+  const { fetchPrices, activeSymbol, systemVarsPanelOpen, setSystemVarsPanelOpen, strategyAdmin } = useApp();
   const location = useLocation();
   const navigate  = useNavigate();
 
@@ -140,6 +141,16 @@ export default function Layout({ setActiveStrategy }) {
     localStorage.setItem('watchlist_open', String(watchlistOpen));
   }, [watchlistOpen]);
 
+  // ── Strategies nav section toggle ─────────────────────────────────────────
+  const [strategiesNavOpen, setStrategiesNavOpen] = useState(() => {
+    const saved = localStorage.getItem('strategiesNavOpen');
+    return saved === null ? true : saved === 'true';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('strategiesNavOpen', String(strategiesNavOpen));
+  }, [strategiesNavOpen]);
+
   // ── Nav click handler ─────────────────────────────────────────────────────
   const handleNavClick = (item) => {
     if (item.strategy) setActiveStrategy?.(item.strategy);
@@ -194,7 +205,7 @@ export default function Layout({ setActiveStrategy }) {
         <div style={{ height: 1, backgroundColor: BORD, marginBottom: 8, flexShrink: 0 }} />
 
         {/* Nav items */}
-        <div style={{ flex: 1 }}>
+        <div style={{ flexShrink: 0 }}>
           {NAV_ITEMS.map(item => {
             const isActive = item.matchFn(location.pathname);
             return (
@@ -229,6 +240,68 @@ export default function Layout({ setActiveStrategy }) {
             );
           })}
         </div>
+
+        {/* Strategies section */}
+        <div style={{ flexShrink: 0 }}>
+          <div style={{ height: 1, backgroundColor: BORD, margin: '4px 0' }} />
+          {/* Section header */}
+          <button
+            onClick={() => setStrategiesNavOpen(o => !o)}
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              width: '100%', padding: '8px 16px',
+              background: 'none', border: 'none', cursor: 'pointer',
+              fontFamily: 'monospace', fontSize: 10,
+              fontWeight: 700, letterSpacing: '0.08em',
+              color: MUTED, textTransform: 'uppercase',
+            }}
+          >
+            <span>Strategies</span>
+            <span style={{ fontSize: 9 }}>{strategiesNavOpen ? '▾' : '▸'}</span>
+          </button>
+
+          {/* Strategy items */}
+          {strategiesNavOpen && SCORECARD_STRATEGIES.map(strategy => {
+            const override = strategyAdmin[strategy.key];
+            const isEnabled = override?.enabled ?? strategy.enabled ?? true;
+            if (!isEnabled) return null;
+            const displayName = override?.name ?? strategy.label;
+            const isActive = location.pathname === `/strategies/${strategy.key}`;
+            return (
+              <div
+                key={strategy.key}
+                onClick={() => navigate(`/strategies/${strategy.key}`)}
+                style={{
+                  display: 'flex', alignItems: 'center',
+                  padding: '8px 16px 8px 24px',
+                  fontFamily: 'monospace', fontSize: 11,
+                  cursor: 'pointer', userSelect: 'none',
+                  color: isActive ? TEAL : MUTED,
+                  borderLeft: `3px solid ${isActive ? TEAL : 'transparent'}`,
+                  backgroundColor: isActive ? 'rgba(45,212,191,0.08)' : 'transparent',
+                  transition: 'background 0.1s, color 0.1s',
+                }}
+                onMouseEnter={e => {
+                  if (!isActive) {
+                    e.currentTarget.style.color = TEXT;
+                    e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.04)';
+                  }
+                }}
+                onMouseLeave={e => {
+                  if (!isActive) {
+                    e.currentTarget.style.color = MUTED;
+                    e.currentTarget.style.backgroundColor = 'transparent';
+                  }
+                }}
+              >
+                {displayName}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Flex spacer — pushes bottom area to rail bottom */}
+        <div style={{ flex: 1 }} />
 
         {/* Bottom area */}
         <div style={{ marginTop: 'auto', borderTop: `1px solid ${BORD}`, flexShrink: 0 }}>

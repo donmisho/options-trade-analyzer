@@ -125,6 +125,15 @@ export function AppProvider({ children }) {
     }
   });
 
+  // Strategy Admin — user enable/disable and rename overrides, saved to localStorage
+  const [strategyAdmin, setStrategyAdmin] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('strategyAdmin') || '{}');
+    } catch {
+      return {};
+    }
+  });
+
   // Trade Agent Panel — shared so any page can trigger Claude evaluation
   const [agentOpen, setAgentOpen] = useState(false);
   const [agentTrades, setAgentTrades] = useState([]);
@@ -334,6 +343,10 @@ export function AppProvider({ children }) {
     setSystemVarsPanelOpen,
     systemVars,
     setSystemVars,
+
+    // Strategy Admin — user overrides for strategy enable/disable and names
+    strategyAdmin,
+    setStrategyAdmin,
 
     // Prices
     prices,

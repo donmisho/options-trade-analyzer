@@ -6,6 +6,7 @@ MCP tools will call these endpoints too.
 """
 
 import logging
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.schemas import Quote, OptionChainResponse
 from app.models.session import get_db
 from app.models.database import SymbolQuote
-from app.auth.dependencies import require_read
+from app.auth.dependencies import require_read, require_write
 from app.providers.factory import ProviderFactory
 from app.core.config import settings
 
@@ -181,3 +182,54 @@ async def get_strikes(
         return {"symbol": symbol.upper(), "expiration": expiration, "strikes": strikes}
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Provider error: {str(e)}")
+
+
+@router.get("/overview")
+async def get_market_overview(
+    user: dict = Depends(require_read),
+):
+    """
+    Fetch live quotes for the four market overview symbols (SPY, QQQ, IWM, VIX).
+    Used by the MarketOverviewWidget as the live data source.
+
+    Full path: GET /api/v1/market/overview
+    """
+    factory = _get_factory()
+    provider = _get_provider(factory, user.get("sub"))
+    symbols = ["SPY", "QQQ", "IWM", "VIX"]
+    quotes = {}
+    for sym in symbols:
+        try:
+            quotes[sym] = await provider.get_quote(sym)
+        except Exception:
+            quotes[sym] = None
+    return {"quotes": quotes, "fetched_at": datetime.now(timezone.utc).isoformat()}
+
+
+@router.post("/collect-chains")
+async def trigger_chain_collection(
+    symbols: list[str],
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_write),
+):
+    """
+    On-demand daily chain snapshot collection. Provide a list of symbols.
+    Idempotent — a second call on the same day returns status: skipped for each.
+    Scheduler calls this nightly; manual trigger available for testing.
+
+    Full path: POST /api/v1/market/collect-chains
+    """
+    from app.analysis.chain_collection import collect_chain_snapshot
+
+    factory = _get_factory()
+    results = []
+    for symbol in symbols:
+        result = await collect_chain_snapshot(symbol.upper(), db, factory)
+        results.append(result)
+
+    return {
+        "collected": len([r for r in results if r["status"] == "inserted"]),
+        "skipped": len([r for r in results if r["status"] == "skipped"]),
+        "errors": len([r for r in results if r["status"] == "error"]),
+        "details": results,
+    }

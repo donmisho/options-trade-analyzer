@@ -14,6 +14,7 @@ const config = {
 
   // ── Strategy classification ────────────────────────────────────────────
   scorecardStrategy: true,        // Routed to SecurityDashboard, not OptionsTerminal
+  enabled: true,                  // Visible in nav and scoring (can be overridden via strategyAdmin)
   trade_structure: 'credit_spread',
   non_applicable_reason: 'requires credit spread structure',
   dte_min: 25,

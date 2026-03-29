@@ -4,20 +4,22 @@
 // 2. Import it here and add one line to WIDGET_REGISTRY
 // That's it — no other files need to change.
 
-import MarketOverviewWidget  from './MarketOverviewWidget';
-import ActionsWidget         from './ActionsWidget';
-import PnLByStrategyWidget   from './PnLByStrategyWidget';
-import ChartWidget           from './ChartWidget';
-import MediaWidget           from './MediaWidget';
-import PositionsLiveWidget   from './PositionsLiveWidget';
+import MarketOverviewWidget       from './MarketOverviewWidget';
+import ActionsWidget              from './ActionsWidget';
+import PnLByStrategyWidget        from './PnLByStrategyWidget';
+import ChartWidget                from './ChartWidget';
+import MediaWidget                from './MediaWidget';
+import PositionsLiveWidget        from './PositionsLiveWidget';
+import PositionsScorecardWidget   from './PositionsScorecardWidget';
 
 export const WIDGET_REGISTRY = {
-  market_overview:  MarketOverviewWidget,
-  actions:          ActionsWidget,
-  pnl_by_strategy:  PnLByStrategyWidget,
-  chart:            ChartWidget,
-  media:            MediaWidget,
-  positions_live:   PositionsLiveWidget,
+  market_overview:      MarketOverviewWidget,
+  actions:              ActionsWidget,
+  pnl_by_strategy:      PnLByStrategyWidget,
+  chart:                ChartWidget,
+  media:                MediaWidget,
+  positions_live:       PositionsLiveWidget,
+  positions_scorecard:  PositionsScorecardWidget,
 };
 
 // Standard props contract — every widget receives exactly these props:

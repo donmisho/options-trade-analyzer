@@ -14,7 +14,7 @@ authenticated user's ID.
 import uuid
 from datetime import datetime
 from sqlalchemy import (
-    Column, Integer, String, Float, Boolean, DateTime, Text, Numeric,
+    Column, Integer, String, Float, Boolean, DateTime, Date, Text, Numeric,
     ForeignKey, JSON, Index, UniqueConstraint
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
@@ -798,4 +798,36 @@ class DashboardMedia(Base):
 
     __table_args__ = (
         Index("ix_dashboard_media_widget", "widget_id", "sort_order"),
+    )
+
+
+# ─── Options Chain Snapshots (OTA-200) ────────────────────────────────────────
+
+
+class OptionsChainSnapshot(Base):
+    """
+    Daily options chain snapshot for a symbol, used as the data foundation
+    for backtesting (Phase 3.3.x).
+
+    One row per symbol per day — the UniqueConstraint prevents duplicates.
+    chain_json stores the full serialized chain as returned by provider.get_chain().
+    Normalization into individual contract rows comes in a later phase.
+
+    System-level (not per-user): collection runs nightly for all watchlist symbols.
+    """
+    __tablename__ = "options_chain_snapshots"
+
+    snapshot_id      = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    symbol           = Column(String(20), nullable=False, index=True)
+    snapshot_date    = Column(Date, nullable=False, index=True)
+    captured_at      = Column(DateTime, nullable=False)
+    underlying_price = Column(Float, nullable=False)
+    chain_json       = Column(Text, nullable=False)    # full serialized chain from provider
+    contract_count   = Column(Integer, nullable=False) # number of contracts in snapshot
+    dte_min          = Column(Integer, nullable=True)  # min DTE in snapshot
+    dte_max          = Column(Integer, nullable=True)  # max DTE in snapshot
+    provider         = Column(String(50), nullable=False, default="schwab")
+
+    __table_args__ = (
+        UniqueConstraint("symbol", "snapshot_date", name="uq_chain_snapshot_symbol_date"),
     )
