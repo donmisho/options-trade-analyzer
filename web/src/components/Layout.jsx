@@ -20,6 +20,7 @@ import Logo from '../assets/Logo';
 import Watchlist from './Watchlist';
 import Toast from './Toast';
 import TradeAgentPanel from './TradeAgentPanel';
+import SystemVarsPanel from './SystemVarsPanel';
 import { useApp } from '../context/AppContext';
 import { getSchwabStatus, getSchwabAuthUrl } from '../api/client';
 import { msalInstance } from '../auth/msalConfig';
@@ -72,7 +73,7 @@ const NAV_ITEMS = [
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function Layout({ setActiveStrategy }) {
-  const { fetchPrices, setConfigOpen, activeSymbol } = useApp();
+  const { fetchPrices, activeSymbol, systemVarsPanelOpen, setSystemVarsPanelOpen } = useApp();
   const location = useLocation();
   const navigate  = useNavigate();
 
@@ -261,12 +262,15 @@ export default function Layout({ setActiveStrategy }) {
 
           {/* Settings */}
           <button
-            onClick={() => setConfigOpen(true)}
+            onClick={() => setSystemVarsPanelOpen(true)}
+            title="System Settings"
+            aria-label="System Settings"
             style={{
               display: 'flex', alignItems: 'center', gap: 8,
               padding: '8px 16px', background: 'none', border: 'none',
               width: '100%', cursor: 'pointer', fontSize: 11,
               color: MUTED, fontFamily: 'monospace', textAlign: 'left',
+              transition: 'color 150ms ease',
             }}
             onMouseEnter={onHoverIn}
             onMouseLeave={onHoverOut}
@@ -360,6 +364,10 @@ export default function Layout({ setActiveStrategy }) {
 
       <Toast />
       <TradeAgentPanel />
+      <SystemVarsPanel
+        open={systemVarsPanelOpen}
+        onClose={() => setSystemVarsPanelOpen(false)}
+      />
     </div>
   );
 }

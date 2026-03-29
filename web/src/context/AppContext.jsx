@@ -76,9 +76,8 @@ const SYMBOL_NAMES = {
 
 export function AppProvider({ children }) {
   // Active symbol — shared across all analysis screens
-  const [activeSymbol, setActiveSymbol] = useState(() => {
-    return localStorage.getItem('optionsAnalyzer_symbol') || 'SPY';
-  });
+  // Session-only: do NOT read from localStorage on init (UI-DECISIONS.md / OTA-327)
+  const [activeSymbol, setActiveSymbol] = useState(null);
 
   // Dynamic watchlist — persisted in Azure SQL via /api/v1/watchlist
   const [watchlist, setWatchlist] = useState([]);
@@ -101,6 +100,30 @@ export function AppProvider({ children }) {
 
   // Config drawer — shared so Header gear icon can open it from any page
   const [configOpen, setConfigOpen] = useState(false);
+
+  // System Vars Panel — application-wide settings drawer
+  const [systemVarsPanelOpen, setSystemVarsPanelOpen] = useState(false);
+
+  // System Variables — loaded from localStorage, updated by SystemVarsPanel
+  const DEFAULT_SV = {
+    exit_warning_pct: 67, exit_scale_out_pct: 160,
+    exit_underlying_stop_pct: 1.5, exit_time_stop_days: 10,
+    min_reward_risk: 0.5, min_ev_threshold: 0,
+    pip_rr_green: 1.5, pip_rr_amber: 1.0,
+    pip_prob_green: 0.55, pip_prob_amber: 0.45,
+    pip_score_green: 0.65, pip_score_amber: 0.45,
+    pip_delta_lo: 0.30, pip_delta_hi: 0.65,
+    pip_iv_green: 30, pip_iv_amber: 50,
+    pip_runway_green: 30, pip_runway_amber: 15,
+  };
+  const [systemVars, setSystemVars] = useState(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem('analysisConfig') || '{}');
+      return stored.systemVars ? { ...DEFAULT_SV, ...stored.systemVars } : DEFAULT_SV;
+    } catch {
+      return DEFAULT_SV;
+    }
+  });
 
   // Trade Agent Panel — shared so any page can trigger Claude evaluation
   const [agentOpen, setAgentOpen] = useState(false);
@@ -305,6 +328,12 @@ export function AppProvider({ children }) {
     // Config drawer
     configOpen,
     setConfigOpen,
+
+    // System Vars Panel
+    systemVarsPanelOpen,
+    setSystemVarsPanelOpen,
+    systemVars,
+    setSystemVars,
 
     // Prices
     prices,
