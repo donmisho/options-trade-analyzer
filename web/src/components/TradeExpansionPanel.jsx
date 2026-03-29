@@ -654,11 +654,8 @@ function VerdictCard({ verdictData, trade, symbol, strategyKey, onFollow, onTake
     { label: `DTE ${dte}`, status: dte >= 7 ? 'pass' : 'caution' },
   ];
 
-  // Risk budget
-  const maxLossPerShare = trade.max_loss ?? Math.abs(trade.net_debit ?? 0);
-  const maxLossDollars  = maxLossPerShare * 100;
-  const ACCT_DEFAULT    = 10000;
-  const riskPct         = ACCT_DEFAULT > 0 ? (maxLossDollars / ACCT_DEFAULT * 100).toFixed(1) : '—';
+  // Risk budget — max_loss is already dollars per contract (post OTA-283), no ×100
+  const maxLossDollars = trade.max_loss ?? Math.abs(trade.net_debit ?? 0);
 
   const handleFollowUp = async () => {
     const q = followUpText.trim();
@@ -821,10 +818,7 @@ function VerdictCard({ verdictData, trade, symbol, strategyKey, onFollow, onTake
           }}>
             <div style={{ fontSize: 9, color: MUTED, marginBottom: 2 }}>Risk Budget</div>
             <div style={{ fontSize: 11, color: TEXT, fontFamily: 'monospace' }}>
-              {maxLossDollars.toFixed(0)} max loss
-            </div>
-            <div style={{ fontSize: 9, color: parseFloat(riskPct) > 5 ? AMBER : MUTED }}>
-              {riskPct}% of {ACCT_DEFAULT.toLocaleString()} acct
+              {maxLossDollars.toFixed(2)} max loss
             </div>
           </div>
         </div>

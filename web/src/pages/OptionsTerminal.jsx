@@ -26,6 +26,7 @@ import ResultsTable from '../components/ResultsTable';
 import StrategyScorecard from '../components/StrategyScorecard';
 import TradeEvaluationCard from '../components/TradeEvaluationCard';
 import TradeExpansionPanel from '../components/TradeExpansionPanel';
+import TradeEvaluationView from '../components/TradeEvaluationView';
 import { verticalsColumns } from '../config/verticals-columns';
 import { longOptionsColumns } from '../config/long-options-columns';
 import { C, mono, DEFAULT_PRESETS } from '../styles/tokens';
@@ -868,20 +869,27 @@ export default function OptionsTerminal({ activeStrategy }) {
               setConfigOpen(false);
             }}
             renderExpansionRow={(trade) => (
-              <TradeExpansionPanel
-                trade={trade}
-                config={config}
-                symbol={symbol}
-                underlyingPrice={underlyingPrice}
-                smaData={smaData}
-                scorecardStrategies={filteredScorecardScores}
-                scorecardNotApplicable={notApplicableScores}
-                scorecardLoading={scorecardLoading}
-                scorecardError={scorecardData?.error || null}
-                onLoadScorecard={loadScorecardForTrade}
-                onFollowTrade={(t, vd) => setPositionModal({ trade: t, verdictData: vd, type: 'follow' })}
-                onTakeTrade={(t, vd) => setPositionModal({ trade: t, verdictData: vd, type: 'take' })}
-              />
+              <>
+                <TradeExpansionPanel
+                  trade={trade}
+                  config={config}
+                  symbol={symbol}
+                  underlyingPrice={underlyingPrice}
+                  smaData={smaData}
+                  scorecardStrategies={filteredScorecardScores}
+                  scorecardNotApplicable={notApplicableScores}
+                  scorecardLoading={scorecardLoading}
+                  scorecardError={scorecardData?.error || null}
+                  onLoadScorecard={loadScorecardForTrade}
+                  onFollowTrade={(t, vd) => setPositionModal({ trade: t, verdictData: vd, type: 'follow' })}
+                  onTakeTrade={(t, vd) => setPositionModal({ trade: t, verdictData: vd, type: 'take' })}
+                />
+                {!isLongOptions && (
+                  <TradeEvaluationView
+                    spread={{ ...trade, symbol, underlying_price: underlyingPrice }}
+                  />
+                )}
+              </>
             )}
             defaultSortKey="composite_score"
             defaultSortDir="desc"
