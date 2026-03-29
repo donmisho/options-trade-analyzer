@@ -1,4 +1,4 @@
-# Options Analyzer — CLAUDE.md (Updated 2026-03-28 18:05)
+﻿# Options Analyzer — CLAUDE.md (Updated 2026-03-28)
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -133,6 +133,42 @@ curl -s -X POST \
 - The `parent` field is how Features link to Epics — always use direct field, never `additional_fields`
 - Description must use Atlassian Document Format (ADF), not plain text
 - After creating issues, report the created issue keys back to Don for verification
+
+---
+
+### Jira Issue Hierarchy — STRICT
+
+The OTA project uses a strict 3-level hierarchy. Every API-created ticket
+must respect this structure or it will not appear correctly on the board.
+
+**Rules:**
+- Subtasks are the ONLY level that represents actionable build work
+- Subtasks must ALWAYS be parented to a Feature — never directly to an Epic
+- Features must ALWAYS be parented to an Epic
+- NEVER create a Feature as a child of another Feature
+- NEVER create implementation tickets as Feature type — use Subtask (id: 10007)
+- Issue type IDs: Epic=10001, Feature=10003, Subtask=10007
+
+**Before creating any ticket via API:**
+1. Identify the correct Epic (e.g. OTA-8 for Dashboard work)
+2. Identify or create the correct Feature parent under that Epic
+3. Create the implementation ticket as a Subtask under that Feature
+
+**Board visibility rule:**
+The Jira board displays items by status. Subtasks appear as actionable TO DO
+items. Features parented directly to Epics will appear as planning items but
+their children will not flow through the board correctly.
+
+**Common Feature parents for reference:**
+- OTA-34 — Config Drawer Popout Sidebar (Dashboard / Settings work)
+- OTA-33 — Dashboard Sections Build (Dashboard widget work)
+- OTA-28 — Positions Frontend Phase 2.10 Stream B (Positions UI work)
+- OTA-19 — DEV Housekeeping (bugs, hotfixes, dev process)
+- OTA-14 — Ongoing: Strategy Validation Reviews (validation work)
+
+When in doubt about the correct Feature parent, ask Don before creating tickets.
+
+---
 
 ## Jira Automation
 
