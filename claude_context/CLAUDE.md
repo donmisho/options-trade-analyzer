@@ -1,4 +1,4 @@
-﻿# Options Analyzer — CLAUDE.md (Updated 2026-03-28)
+﻿# Options Analyzer — CLAUDE.md (Updated 2026-03-28 22:03)
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -147,7 +147,7 @@ must respect this structure or it will not appear correctly on the board.
 - Features must ALWAYS be parented to an Epic
 - NEVER create a Feature as a child of another Feature
 - NEVER create implementation tickets as Feature type — use Subtask (id: 10007)
-- Issue type IDs: Epic=10001, Feature=10003, Subtask=10007
+- Issue type IDs: Epic=10001, Feature=10003, Subtask=10002
 
 **Before creating any ticket via API:**
 1. Identify the correct Epic (e.g. OTA-8 for Dashboard work)
