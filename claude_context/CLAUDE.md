@@ -1,4 +1,4 @@
-﻿# Options Analyzer — CLAUDE.md (Updated 2026-03-28 22:03)
+﻿# Options Analyzer — CLAUDE.md (Updated 2026-03-28)
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -39,20 +39,33 @@ this protocol to use them directly instead of browser automation.
 The OTA project uses a 5-stage workflow. When reading or updating Jira status,
 always map to these definitions:
 
-| # | Jira Status | Who Acts | Meaning |
-|---|-------------|----------|---------|
-| 0 | Idea | Don | Raw backlog item, not yet committed to |
-| 1 | To Do | Don | Promoted — confirmed candidate for next work set |
-| 2 | In Review | Claude (Web) | Being grouped, sequenced, dependencies mapped, prompts being planned |
-| 3 | In Progress | Claude (Code) | Prompt written and actively executing in Claude Code |
-| 4 | Done | Automation | Commit pushed to main → Jira auto-closes via commit trigger |
+| # | Status | Status ID | Who Acts | Meaning |
+|---|--------|-----------|----------|---------|
+| 0 | IDEA | 10000 | Product Owner | Raw backlog item, not yet committed to |
+| 1 | TO DO | 10001 | Product Owner | Promoted — confirmed candidate for next work set |
+| 2 | IN PROGRESS | 10002 | Claude (Web) | Claude Web is actively grouping, sequencing, and writing prompts |
+| 3 | IN REVIEW | 10003 | Claude (Code) | Prompt written and handed to Claude Code — actively executing |
+| 4 | DONE | 10004 | Automation | Claude Code pushed to GitHub → Jira auto-closes via commit trigger |
 
 **Workflow rules:**
-- Don selects items from Idea → promotes to To Do
-- Claude Web groups To Do items into logical prompt sequences → moves to In Review
-- Claude Web writes the Claude Code prompt → status moves to In Progress
+- Product Owner selects items from IDEA → promotes to TO DO (transition ID: 3)
+- Claude Web groups TO DO items into logical prompt sequences → moves to IN PROGRESS (transition ID: 2)
+- Claude Web writes the Claude Code prompt → moves to IN REVIEW (transition ID: 4)
 - Claude Code executes the prompt, pushes to GitHub with OTA ticket numbers in commit message
-- Jira automation moves In Progress → Done automatically on commit
+- Jira automation moves IN REVIEW → DONE automatically on commit (transition ID: 5)
+
+**Transition ID reference (for REST API calls):**
+
+| Transition | From | To | ID |
+|------------|------|----|----|
+| Idea Selected | IDEA | TO DO | 3 |
+| Selected by PM for Build | TO DO | IN PROGRESS | 2 |
+| Claude.ai writes prompts | IN PROGRESS | IN REVIEW | 4 |
+| Developer feeds prompts. C.code write. Pushes to GitHub. | IN REVIEW | DONE | 5 |
+| To Do (any status) | Any | TO DO | 21 |
+| In Progress (any status) | Any | IN PROGRESS | 31 |
+| In Review (any status) | Any | IN REVIEW | 41 |
+| Done (any status) | Any | DONE | 51 |
 
 ## Jira Temporary Solution
 
@@ -80,7 +93,7 @@ copy of CLAUDE.md at that time.
 |------|------|
 | Epic | 10001 |
 | Feature | 10003 |
-| Subtask | 10007 |
+| Subtask | 10002 |
 
 ### Create an Issue
 ```bash
@@ -146,7 +159,7 @@ must respect this structure or it will not appear correctly on the board.
 - Subtasks must ALWAYS be parented to a Feature — never directly to an Epic
 - Features must ALWAYS be parented to an Epic
 - NEVER create a Feature as a child of another Feature
-- NEVER create implementation tickets as Feature type — use Subtask (id: 10007)
+- NEVER create implementation tickets as Feature type — use Subtask (id: 10002)
 - Issue type IDs: Epic=10001, Feature=10003, Subtask=10002
 
 **Before creating any ticket via API:**
