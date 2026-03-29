@@ -1,4 +1,4 @@
-﻿# Options Analyzer — CLAUDE.md (Updated 2026-03-28)
+﻿# Options Analyzer — CLAUDE.md (Updated 2026-03-28 rev2)
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -43,13 +43,13 @@ always map to these definitions:
 |---|--------|-----------|----------|---------|
 | 0 | IDEA | 10000 | Product Owner | Raw backlog item, not yet committed to |
 | 1 | TO DO | 10001 | Product Owner | Promoted — confirmed candidate for next work set |
-| 2 | IN PROGRESS | 10002 | Claude (Web) | Claude Web is actively grouping, sequencing, and writing prompts |
+| 2 | IN PROGRESS | 10002 | Claude (Web) | Claude Web will actively review, group, sequence, and write prompts |
 | 3 | IN REVIEW | 10003 | Claude (Code) | Prompt written and handed to Claude Code — actively executing |
 | 4 | DONE | 10004 | Automation | Claude Code pushed to GitHub → Jira auto-closes via commit trigger |
 
 **Workflow rules:**
 - Product Owner selects items from IDEA → promotes to TO DO (transition ID: 3)
-- Claude Web groups TO DO items into logical prompt sequences → moves to IN PROGRESS (transition ID: 2)
+- Claude Web reviews TO DO items, groups them logically, sequences dependencies, and writes Claude Code prompts → moves to IN PROGRESS (transition ID: 2)
 - Claude Web writes the Claude Code prompt → moves to IN REVIEW (transition ID: 4)
 - Claude Code executes the prompt, pushes to GitHub with OTA ticket numbers in commit message
 - Jira automation moves IN REVIEW → DONE automatically on commit (transition ID: 5)
