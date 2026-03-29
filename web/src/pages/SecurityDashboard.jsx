@@ -18,6 +18,7 @@ import { useApp } from '../context/AppContext';
 import { getStrategyScorecard, evaluateStrategies } from '../api/client';
 import { STRATEGY_CONFIGS } from '../strategy-configs/index';
 import QuoteBar from '../components/QuoteBar';
+import PositionContextBanner from '../components/PositionContextBanner';
 import StrategyScorecard from '../components/StrategyScorecard';
 import TradeEvaluationCard from '../components/TradeEvaluationCard';
 import ConfigDrawer from '../components/ConfigDrawer';
@@ -139,6 +140,9 @@ export default function SecurityDashboard() {
 
       {/* Quote bar */}
       <QuoteBar symbol={symbolUpper || undefined} smaSignal={smaAlignment || undefined} />
+
+      {/* Portfolio context banner — shown when user has open positions in this symbol */}
+      <PositionContextBanner symbol={symbolUpper || undefined} />
 
       <div style={{ padding: '20px 20px 0' }}>
 

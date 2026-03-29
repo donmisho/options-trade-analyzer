@@ -22,6 +22,7 @@ import SymbolSearch from '../components/SymbolSearch';
 import { useToast } from '../components/Toast';
 import ConfigDrawer from '../components/ConfigDrawer';
 import QuoteBar from '../components/QuoteBar';
+import PositionContextBanner from '../components/PositionContextBanner';
 import ResultsTable from '../components/ResultsTable';
 import StrategyScorecard from '../components/StrategyScorecard';
 import TradeEvaluationCard from '../components/TradeEvaluationCard';
@@ -697,6 +698,9 @@ export default function OptionsTerminal({ activeStrategy }) {
             />
           );
         })()}
+
+        {/* Portfolio context banner — shown when user has open positions in this symbol */}
+        <PositionContextBanner symbol={symbol} />
 
         {/* Candlestick chart */}
         {candles.length > 0 && (

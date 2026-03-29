@@ -516,6 +516,62 @@ async def list_positions(
     )
 
 
+@router.post("/update-health-grades")
+async def update_health_grades(
+    user: dict = Depends(require_write),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Recompute health grades for all open positions belonging to the current user.
+    Called by the scheduler daily after market close. Also callable on-demand via Swagger.
+
+    Full path: POST /api/v1/positions/update-health-grades
+    """
+    result = await db.execute(
+        select(Position).where(
+            Position.user_id == user["sub"],
+            Position.status.in_(["FOLLOWING", "LIVE"]),
+        )
+    )
+    positions = list(result.scalars().all())
+    if not positions:
+        return {"updated": 0, "errors": []}
+
+    # Batch-fetch quotes for unique symbols
+    symbols = list({p.symbol for p in positions})
+    provider = _get_provider()
+    quotes: dict[str, float] = {}
+    for sym in symbols:
+        try:
+            q = await provider.get_quote(sym)
+            quotes[sym] = q.get("price")
+        except Exception as exc:
+            log.warning(f"update_health_grades: quote error for {sym}: {exc}")
+
+    updated = 0
+    errors = []
+    for pos in positions:
+        current_price = quotes.get(pos.symbol)
+        if current_price is None:
+            errors.append({"position_id": pos.position_id, "symbol": pos.symbol, "reason": "quote unavailable"})
+            continue
+        try:
+            grade = compute_health_grade(
+                entry_price=float(pos.entry_price) if pos.entry_price is not None else 0.0,
+                current_price=current_price,
+                claude_exit_levels_json=pos.claude_exit_levels,
+            )
+            pos.health_grade = grade
+            pos.updated_at = datetime.now(timezone.utc)
+            updated += 1
+        except Exception as exc:
+            errors.append({"position_id": pos.position_id, "symbol": pos.symbol, "reason": str(exc)})
+
+    await db.commit()
+    log.info(f"update_health_grades: {updated} updated, {len(errors)} errors — user={user['sub']}")
+    return {"updated": updated, "errors": errors}
+
+
 @router.get("/current-prices")
 async def get_current_prices(
     position_ids: str = Query(..., description="Comma-separated position UUIDs"),
