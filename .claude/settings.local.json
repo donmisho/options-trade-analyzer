@@ -145,7 +145,14 @@
       "Bash(powershell -Command \"Get-NetTCPConnection -LocalPort 8000 -State Listen | ForEach-Object { \\\\$p = Get-Process -Id \\\\$_.OwningProcess -EA SilentlyContinue; [PSCustomObject]@{PID=\\\\$_.OwningProcess; Name=\\\\$p.Name; Start=\\\\$p.StartTime} }\" 2>&1)",
       "Bash(powershell -Command \"Get-NetTCPConnection -LocalPort 8000 -EA SilentlyContinue | Select-Object -ExpandProperty OwningProcess | Sort-Object -Unique | ForEach-Object { Stop-Process -Id $_ -Force -EA SilentlyContinue; Write-Host Killed $_ }\" 2>&1)",
       "Bash(find \"C:\\\\Users\\\\DonMishory\\\\OneDrive - jmholistic.com\\\\VS Code Projects\\\\Options Analyzer\\\\options-analyzer\\\\app\" -name \"*.pyc\" -delete 2>/dev/null; find \"C:\\\\Users\\\\DonMishory\\\\OneDrive - jmholistic.com\\\\VS Code Projects\\\\Options Analyzer\\\\options-analyzer\\\\app\" -name \"__pycache__\" -type d -exec rm -rf {} + 2>/dev/null; echo \"Cache cleared\")",
-      "Bash(find \"/c/Users/DonMishory/OneDrive - jmholistic.com/VS Code Projects/Options Analyzer/options-analyzer/web/src\" -type f -iname \"*security*\" -o -iname \"*dashboard*\" 2>/dev/null | head -20)"
+      "Bash(find \"/c/Users/DonMishory/OneDrive - jmholistic.com/VS Code Projects/Options Analyzer/options-analyzer/web/src\" -type f -iname \"*security*\" -o -iname \"*dashboard*\" 2>/dev/null | head -20)",
+      "Bash(az --version 2>&1 | head -3 && az account show --query \"{subscription:name, tenant:tenantId}\" -o table 2>&1)",
+      "Bash(ls \"C:\\\\Users\\\\DonMishory\\\\OneDrive - jmholistic.com\\\\VS Code Projects\\\\Options Analyzer\\\\options-analyzer\\\\web\\\\.env\"* 2>&1)",
+      "Bash(echo \"VITE_API_BASE_URL=https://options-analyzer-api-d7aqhsdmd6f2anbc.centralus-01.azurewebsites.net\" > \"C:\\\\Users\\\\DonMishory\\\\OneDrive - jmholistic.com\\\\VS Code Projects\\\\Options Analyzer\\\\options-analyzer\\\\web\\\\.env.production\")",
+      "Bash(cd \"/c/Users/DonMishory/OneDrive - jmholistic.com/VS Code Projects/Options Analyzer/options-analyzer/web\" && npm run build 2>&1 | tail -30)",
+      "Bash(cd \"/c/Users/DonMishory/OneDrive - jmholistic.com/VS Code Projects/Options Analyzer/options-analyzer/web\" && npx eslint src/components/StrategyScorecard.jsx src/pages/SecurityDashboard.jsx src/api/client.js --max-warnings=20 2>&1 | tail -20)",
+      "Bash(cd \"/c/Users/DonMishory/OneDrive - jmholistic.com/VS Code Projects/Options Analyzer/options-analyzer/web\" && npx eslint src/components/StrategyScorecard.jsx src/pages/SecurityDashboard.jsx src/api/client.js --max-warnings=20 2>&1 | tail -10)",
+      "Bash(cd \"C:\\\\Users\\\\DonMishory\\\\OneDrive - jmholistic.com\\\\VS Code Projects\\\\Options Analyzer\\\\options-analyzer\" && venv/Scripts/python -c \"\nfrom app.main import app\nprint\\('App loaded OK'\\)\nprint\\('Routers:', [r.prefix for r in app.routes if hasattr\\(r, 'prefix'\\)]\\)\n\" 2>&1 | head -30)"
     ]
   }
 }
