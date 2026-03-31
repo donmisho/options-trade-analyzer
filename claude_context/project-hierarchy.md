@@ -1,4 +1,4 @@
-# Options Analyzer — Project Hierarchy (Updated 2026-02-28)
+# Options Analyzer — Project Hierarchy (Updated 2026-03-31 18:00)
 
 ```
 Options Analyzer/                          ← VS Code workspace root
@@ -80,20 +80,36 @@ Options Analyzer/                          ← VS Code workspace root
         │   └── client.js                 ← API bridge (needs evaluateTrade, followUp functions)
         │
         ├── components/                    ← Shared UI components
-        │   ├── Layout.jsx                 ← Sidebar nav + top bar
-        │   ├── Chart.jsx                  ← (placeholder)
-        │   ├── shared.jsx                 ← (placeholder)
+        │   ├── Layout.jsx                 ← Left rail (200px) — 4 primary items + strategy sub-nav
+        │   ├── QuoteBar.jsx               ← Shared symbol header — one component, used everywhere
+        │   ├── ResultsTable.jsx           ← Pure display table — controlled columns + expansion rows
+        │   ├── StrategyPill.jsx           ← SP/WG/TR/LT abbreviated badge with CSS tooltip
+        │   ├── TradeTypeBadge.jsx         ← Trade type badge — title case, bull=green/bear=red
+        │   ├── ScoreCell.jsx              ← Score bar + number — threshold colors
         │   ├── StrategyScorecard.jsx      ← Phase 2.9 4-strategy score rows with selection
         │   ├── TradeEvaluationCard.jsx    ← Phase 2.11 structured evaluation result card
         │   ├── ProbabilityMatrix.jsx      ← Phase 2.11 Black-Scholes heatmap visualization
-        │   └── PositionHealthBadge.jsx    ← Phase 2.10 A-F health grade badge
+        │   ├── PositionHealthBadge.jsx    ← Phase 2.10 A-F health grade badge
+        │   └── TradeDetail/               ← Sections A-E of inline trade detail expansion
+        │       ├── index.js               ← Re-exports SectionA…SectionE
+        │       ├── SectionA.jsx           ← Trade header (type badge, strikes, key metrics)
+        │       ├── SectionB.jsx           ← Exit scenario table (price × P&L)
+        │       ├── SectionC.jsx           ← Outcome summary (probabilities, EV)
+        │       ├── SectionD.jsx           ← Probability matrix placeholder
+        │       └── SectionE.jsx           ← Claude's Read (verdict, analysis, action buttons)
+        │
+        ├── utils/
+        │   ├── formatDate.js              ← formatDate() — always mm-dd-yyyy
+        │   └── strategyColors.js          ← STRATEGY_COLORS constant (SP/WG/TR/LT abbr + colors)
         │
         └── pages/
-            ├── VerticalsPage.jsx          ← Vertical spread analysis screen
-            ├── LongCallsPage.jsx          ← Long call analysis screen
-            ├── SecurityDashboard.jsx      ← Phase 2.9 per-symbol strategy scorecard + evaluation
+            ├── TradesPage.jsx             ← Trades screen — search, QuoteBar, chart, 3 sections
+            ├── StrategyPage.jsx           ← /strategies/:key placeholder (full build in later session)
+            ├── SecurityStrategiesPage.jsx ← Scan screen — card grid with 4-strategy score bars
             ├── PositionsPage.jsx          ← Phase 2.10 positions list with health grades
-            └── (other pages planned)
+            ├── DashboardPage.jsx          ← Dashboard with insight feed
+            ├── VerticalsPage.jsx          ← (deprecated — migrated to TradesPage)
+            └── LongCallsPage.jsx          ← (deprecated — migrated to TradesPage)
 ```
 
 ## API Endpoints

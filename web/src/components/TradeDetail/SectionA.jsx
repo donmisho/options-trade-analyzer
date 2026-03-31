@@ -1,19 +1,6 @@
 import { formatDate } from '../../utils/formatDate';
+import TradeTypeBadge from '../TradeTypeBadge';
 
-// NOTE: Once TradeTypeBadge is built in the parallel session, replace this fallback with:
-// import TradeTypeBadge from '../TradeTypeBadge';
-// For now, render an inline badge using the same spec (9px bold, directional color).
-const TradeTypeBadge = null;
-
-function getTradeTypeDisplay(type) {
-  if (!type) return { display: '', color: 'var(--text)' };
-  const upper = type.toUpperCase();
-  const isBull = upper.startsWith('BULL');
-  const color = isBull ? 'var(--green)' : 'var(--red)';
-  const bg = isBull ? 'rgba(74,222,128,0.15)' : 'rgba(248,113,113,0.15)';
-  const display = type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-  return { display, color, bg };
-}
 
 function getContextLabel(type) {
   if (!type) return '';
@@ -62,7 +49,6 @@ export default function SectionA({ trade }) {
     breakeven, rewardRisk, profitTrigger, stopTrigger, timeExit,
   } = trade;
 
-  const { display, color: typeColor, bg: typeBg } = getTradeTypeDisplay(type);
   const contextLabel = getContextLabel(type);
 
   return (
@@ -82,23 +68,7 @@ export default function SectionA({ trade }) {
     >
       {/* Trade type badge */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        {TradeTypeBadge ? (
-          <TradeTypeBadge type={type} />
-        ) : (
-          <span
-            style={{
-              fontSize: 12,
-              fontWeight: 700,
-              background: typeBg,
-              color: typeColor,
-              padding: '2px 6px',
-              borderRadius: 3,
-              display: 'inline-block',
-            }}
-          >
-            {display}
-          </span>
-        )}
+        <TradeTypeBadge type={type} />
         {contextLabel && (
           <span style={{ fontSize: 10, color: 'var(--muted)' }}>{contextLabel}</span>
         )}

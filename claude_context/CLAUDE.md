@@ -1,4 +1,4 @@
-﻿# Options Analyzer — CLAUDE.md (Updated 2026-03-28 rev2)
+﻿# Options Analyzer — CLAUDE.md (Updated 2026-03-31 18:00)
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -638,18 +638,19 @@ No open-ended chat. Claude is an analytical engine, not a conversationalist.
 
 ## UI Decisions — Read This First
 
-All finalized UI decisions live in `UI-DECISIONS.md` in the project root.
+All finalized UI decisions live in `UI-GUIDANCE.md` in `claude_context/`.
 Before building or modifying ANY frontend component, read that file.
 It is the visual contract. When it conflicts with other sources, it wins.
 
-Key decisions summarized:
-- Nav: Left rail (220px fixed). Items top-to-bottom: Dashboard · Security Strategies · Verticals · Puts & Calls · Positions. Watchlist is a collapsible panel in the content area, not a column.
-- Strategy tabs (Steady Paycheck etc.) do NOT appear in nav — scoring lenses only
+Key decisions summarized (v3.1 — 03-31-2026):
+- Nav: Left rail (200px fixed). Items: Dashboard · Security Strategies · Trades · Positions. Strategy sub-nav: Steady Paycheck / Weekly Grind / Trend Rider / Lottery Ticket.
+- Verticals and Puts & Calls merged into the Trades page per UI-GUIDANCE.md v3.1
 - QuoteBar is ONE shared component used identically on every page
 - Watchlist click navigates to Security Strategies for that symbol
-- Verticals expansion: all 4 strategies shown in scorecard
-- Puts & Calls expansion: only long_option strategies scored; credit_spread shown grayed out
+- Trades page has 3 collapsible sections: Vertical spreads · Puts & calls · Iron condors (coming soon)
 - Strategy filtering MUST use trade_structure field, never hardcoded strategy names
+- Shared components: StrategyPill (SP/WG/TR/LT pills with tooltip), TradeTypeBadge (directional color, title case), ScoreCell (bar + number with threshold color)
+- Claude summary advice badge: white outlined (rgba(255,255,255,0.06) bg, rgba(255,255,255,0.35) border) — not purple
 
 ---
 

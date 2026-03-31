@@ -1,62 +1,55 @@
 /**
- * Verticals Column Configuration — for use with ResultsTable.
+ * Verticals Column Configuration — v3 layout for ResultsTable.
  *
- * Exact replica of the columns previously hardcoded in OptionsTerminal.
+ * v3 column order (chevron handled by ResultsTable):
+ *   Score · Spread · Type · Expiration · Delta · IV · Theta · Net · R:R · Prob · Strategies
+ *
  * Field names verified against ScoredSpread in vertical_engine.py.
- *
- * Column set: # · TYPE · SPREAD · EXPIRATION · DELTA · THETA · NET · R:R · PROB · SCORE · [R:R pip] · [PROB pip] · [SCR pip]
- * Default sort: composite_score descending.
+ * Row numbers removed per UI-GUIDANCE v3.1.
+ * Pip columns removed — score thresholds communicated via ScoreCell color.
  */
 
-import ScoreBar from '../components/ScoreBar';
+import ScoreCell from '../components/ScoreCell';
 import TradeTypeBadge from '../components/TradeTypeBadge';
-
-function pipColor(value, greenThresh, amberThresh, higherIsBetter = true) {
-  if (higherIsBetter) {
-    return value >= greenThresh ? '#26a69a' : value >= amberThresh ? '#f59e0b' : '#ef5350';
-  }
-  return value <= greenThresh ? '#26a69a' : value <= amberThresh ? '#f59e0b' : '#ef5350';
-}
-
-function Pip({ color }) {
-  return (
-    <div style={{ width: 10, height: 10, borderRadius: '50%', backgroundColor: color, margin: '0 auto' }} />
-  );
-}
+import StrategyPill from '../components/StrategyPill';
 
 export const verticalsColumns = [
   {
-    key: '#',
-    label: '#',
-    width: 30,
-    align: 'center',
-    sortable: false,
-    render: (trade, ctx) => (
-      <span style={{ color: '#555b6e' }}>{ctx.idx + 1}</span>
-    ),
-  },
-  {
-    key: 'spread_type',
-    label: 'Type',
-    width: 100,
-    align: 'center',
-    render: (trade) => <TradeTypeBadge type={trade.spread_type} />,
+    key: 'composite_score',
+    label: 'Score',
+    width: 90,
+    align: 'left',
+    sortable: true,
+    render: (trade) => <ScoreCell score={trade.composite_score} />,
   },
   {
     key: 'long_strike',
     label: 'Spread',
     width: 90,
     align: 'center',
-    render: (trade) => `${trade.long_strike}/${trade.short_strike}`,
+    sortable: true,
+    render: (trade) => trade.long_strike != null && trade.short_strike != null
+      ? `${trade.long_strike}/${trade.short_strike}`
+      : '—',
+  },
+  {
+    key: 'spread_type',
+    label: 'Type',
+    width: 110,
+    align: 'center',
+    sortable: true,
+    render: (trade) => <TradeTypeBadge type={trade.spread_type} />,
   },
   {
     key: 'expiration',
     label: 'Expiration',
     width: 90,
     align: 'center',
-    render: (trade) => trade.expiration
-      ? `${trade.expiration.slice(5)}-${trade.expiration.slice(0, 4)}`
-      : '—',
+    render: (trade) => {
+      if (!trade.expiration) return '—';
+      const [yr, mo, dy] = trade.expiration.split('-');
+      return `${mo}-${dy}-${yr}`;
+    },
   },
   {
     key: 'net_delta',
@@ -69,9 +62,9 @@ export const verticalsColumns = [
     key: 'iv',
     label: 'IV',
     title: 'Implied volatility of the short leg',
-    width: 60,
+    width: 65,
     align: 'right',
-    render: (trade) => trade.iv != null ? (trade.iv * 100).toFixed(1) + '%' : '—',
+    render: (trade) => trade.iv != null ? `${(trade.iv * 100).toFixed(2)}%` : '—',
   },
   {
     key: 'net_theta',
@@ -94,69 +87,35 @@ export const verticalsColumns = [
   {
     key: 'reward_risk_ratio',
     label: 'R:R',
-    width: 55,
+    width: 60,
     align: 'right',
-    render: (trade) => trade.reward_risk_ratio != null ? trade.reward_risk_ratio.toFixed(2) : '—',
+    render: (trade) => trade.reward_risk_ratio != null
+      ? `${trade.reward_risk_ratio.toFixed(2)}:1`
+      : '—',
   },
   {
     key: 'prob_of_profit',
     label: 'Prob',
-    width: 55,
+    width: 65,
     align: 'right',
     render: (trade) => trade.prob_of_profit != null
-      ? `${(trade.prob_of_profit * 100).toFixed(0)}%`
+      ? `${(trade.prob_of_profit * 100).toFixed(2)}%`
       : '—',
   },
   {
-    key: 'composite_score',
-    label: 'Score',
-    width: 80,
-    align: 'center',
-    render: (trade) => <ScoreBar score={trade.composite_score} />,
-  },
-  {
-    key: 'pip_rr',
-    label: 'R:R',
-    title: 'Reward:Risk — green ≥1.5, amber ≥1.0, red <1.0',
-    width: 36,
-    align: 'center',
+    key: 'strategies',
+    label: 'Strategies',
+    width: 90,
+    align: 'left',
     sortable: false,
-    render: (trade, ctx) => {
-      const sv     = ctx?.systemVars || {};
-      const rr     = trade.reward_risk_ratio || 0;
-      const green  = sv.pip_rr_green ?? 1.5;
-      const amber  = sv.pip_rr_amber ?? 1.0;
-      return <Pip color={pipColor(rr, green, amber)} />;
-    },
-  },
-  {
-    key: 'pip_prob',
-    label: 'Prob',
-    title: 'Probability of Profit — green ≥55%, amber ≥45%, red <45%',
-    width: 36,
-    align: 'center',
-    sortable: false,
-    render: (trade, ctx) => {
-      const sv    = ctx?.systemVars || {};
-      const prob  = trade.prob_of_profit || 0;
-      const green = sv.pip_prob_green ?? 0.55;
-      const amber = sv.pip_prob_amber ?? 0.45;
-      return <Pip color={pipColor(prob, green, amber)} />;
-    },
-  },
-  {
-    key: 'pip_score',
-    label: 'Scr',
-    title: 'Composite Score — green ≥65, amber ≥45, red <45',
-    width: 36,
-    align: 'center',
-    sortable: false,
-    render: (trade, ctx) => {
-      const sv    = ctx?.systemVars || {};
-      const score = trade.composite_score || 0;
-      const green = sv.pip_score_green ?? 65;
-      const amber = sv.pip_score_amber ?? 45;
-      return <Pip color={pipColor(score, green, amber)} />;
+    render: (trade) => {
+      const pills = trade.strategies || trade.strategy_pills || [];
+      if (!pills.length) return null;
+      return (
+        <span>
+          {pills.map((s, i) => <StrategyPill key={i} strategy={s} />)}
+        </span>
+      );
     },
   },
 ];

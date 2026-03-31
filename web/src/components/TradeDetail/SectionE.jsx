@@ -1,21 +1,14 @@
 import { useState } from 'react';
-
-// Local strategy color definitions — import from StrategyPill.jsx once available
-const STRATEGY_COLORS = {
-  'steady-paycheck': 'var(--amber)',
-  'weekly-grind': 'var(--green)',
-  'trend-rider': 'var(--blue)',
-  'lottery-ticket': 'var(--purple)',
-  SP: 'var(--amber)',
-  WG: 'var(--green)',
-  TR: 'var(--blue)',
-  LT: 'var(--purple)',
-};
+import { STRATEGY_COLORS, ABBR_TO_STRATEGY_KEY } from '../../utils/strategyColors';
 
 function getStrategyColor(strategyKey) {
   if (!strategyKey) return 'var(--text)';
-  const lower = strategyKey.toLowerCase().replace(/\s+/g, '-');
-  return STRATEGY_COLORS[lower] || STRATEGY_COLORS[strategyKey.toUpperCase()] || 'var(--text)';
+  // Try abbr lookup first (SP/WG/TR/LT)
+  const abbrKey = ABBR_TO_STRATEGY_KEY[strategyKey.toUpperCase()];
+  if (abbrKey) return STRATEGY_COLORS[abbrKey]?.text || 'var(--text)';
+  // Try normalized key (steady_paycheck, steady-paycheck, etc.)
+  const normalized = strategyKey.toLowerCase().replace(/[-\s]+/g, '_');
+  return STRATEGY_COLORS[normalized]?.text || 'var(--text)';
 }
 
 function VerdictBadge({ verdict }) {
