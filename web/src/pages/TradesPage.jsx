@@ -6,7 +6,7 @@
  * Layout (top → bottom):
  *   1. Symbol search
  *   2. QuoteBar
- *   3. SMA chart (placeholder until analysis data available)
+ *   3. SMA chart (configurable moving averages)
  *   4. Collapsible sections: Vertical spreads · Puts & calls · Iron condors (soon)
  *      Each section fetches independently when expanded.
  *      Row click → inline Sections A-E trade detail expansion.
@@ -22,12 +22,165 @@ import ResultsTable from '../components/ResultsTable';
 import { SectionA, SectionB, SectionC, SectionD, SectionE } from '../components/TradeDetail';
 import { verticalsColumns } from '../config/verticals-columns';
 import { longOptionsColumns } from '../config/long-options-columns';
-import { analyzeVerticals, analyzeLongCalls, searchSymbolsStatic } from '../api/client';
+import { analyzeVerticals, analyzeLongCalls, searchSymbolsStatic, getQuote } from '../api/client';
 
 const MUTED  = '#8b949e';
 const TEXT   = '#e6edf3';
 const BORDER = '#30363d';
-const TEAL   = '#2dd4bf';
+
+// ─── Normal CDF (Abramowitz & Stegun approximation, max error 1.5×10⁻⁷) ──────
+function normCdf(z) {
+  const a1 = 0.254829592, a2 = -0.284496736, a3 = 1.421413741;
+  const a4 = -1.453152027, a5 = 1.061405429, p = 0.3275911;
+  const sign = z < 0 ? -1 : 1;
+  const x = Math.abs(z) / Math.SQRT2;
+  const t = 1 / (1 + p * x);
+  const erf = 1 - t * (a1 + t * (a2 + t * (a3 + t * (a4 + t * a5)))) * Math.exp(-x * x);
+  return (1 + sign * erf) / 2;
+}
+
+// ─── Synthetic candlestick generator (same approach as DirectionalPage) ───────
+function generateCandles(price, count = 120) {
+  const candles = [];
+  let p = price * 0.95;
+  for (let i = 0; i < count; i++) {
+    const change = (Math.random() - 0.48) * price * 0.012;
+    const open = p, close = p + change;
+    const high = Math.max(open, close) + Math.random() * price * 0.005;
+    const low = Math.min(open, close) - Math.random() * price * 0.005;
+    candles.push({ open, high, low, close, day: `d${i}` });
+    p = close;
+  }
+  const scale = price / candles[candles.length - 1].close;
+  return candles.map(c => ({
+    open: c.open * scale, high: c.high * scale,
+    low: c.low * scale, close: c.close * scale, day: c.day,
+  }));
+}
+
+// ─── Strategy pill inference (stopgap until Phase 2.9 scoring is wired) ───────
+function inferStrategies(spreadType, dte) {
+  if (!spreadType) return [];
+  const type = spreadType.toLowerCase();
+  const isCredit = type.includes('credit');
+  if (isCredit) {
+    if (dte == null) return ['SP'];
+    if (dte >= 5 && dte < 25) return ['WG'];
+    return ['SP'];
+  }
+  // Debit spreads — directional
+  if (dte != null && dte < 21) return ['LT'];
+  return ['TR'];
+}
+
+function inferLongOptionStrategies(optionType, dte) {
+  if (dte != null && dte < 21) return ['LT'];
+  return ['TR'];
+}
+
+// ─── Exit scenario builder for vertical spreads ──────────────────────────────
+function buildExitScenarios(spread, underlying) {
+  const { long_strike, short_strike, net_debit, iv, expiration } = spread;
+  if (!long_strike || !short_strike || net_debit == null || !underlying) {
+    return { scenarios: [], totalEV: null };
+  }
+
+  const loStrike = Math.min(long_strike, short_strike);
+  const hiStrike = Math.max(long_strike, short_strike);
+  const width = hiStrike - loStrike;
+  const isBull = (spread.spread_type || '').startsWith('bull');
+  const isDebit = net_debit > 0;
+  const creditAmt = Math.abs(net_debit);
+
+  const dte = expiration
+    ? Math.max(1, Math.round((new Date(expiration) - new Date()) / 86400000))
+    : 30;
+  const sigma = Math.max(1, (iv || 0.25) * underlying * Math.sqrt(dte / 365));
+
+  function spreadValueAt(price) {
+    if (isBull) return Math.max(0, Math.min(price - loStrike, width));
+    return Math.max(0, Math.min(hiStrike - price, width));
+  }
+
+  function pnlAt(price) {
+    const sv = spreadValueAt(price);
+    return isDebit ? (sv - net_debit) * 100 : (creditAmt - sv) * 100;
+  }
+
+  const maxPnl    = isDebit ? (width - net_debit) * 100 : creditAmt * 100;
+  const maxLossAmt = isDebit ? net_debit * 100 : (width - creditAmt) * 100;
+  const risk = isDebit ? net_debit * 100 : (width - creditAmt) * 100;
+
+  function exitSignalFor(pnl) {
+    if (pnl >= maxPnl * 0.95) return 'MAX PROFIT';
+    if (Math.abs(pnl) < 0.5) return 'BREAKEVEN';
+    if (maxLossAmt > 0 && pnl <= -maxLossAmt * 0.95) return 'STOP';
+    return null;
+  }
+
+  const rangeStart = Math.max(1, Math.floor((underlying - 3 * sigma) / 5) * 5);
+  const rangeEnd   = Math.ceil((underlying + 3 * sigma) / 5) * 5;
+
+  const scenarios = [];
+  let totalEV = 0;
+
+  for (let price = rangeStart; price <= rangeEnd; price += 5) {
+    const zLo = (price - 2.5 - underlying) / sigma;
+    const zHi = (price + 2.5 - underlying) / sigma;
+    const probability = (normCdf(zHi) - normCdf(zLo)) * 100;
+    const pnl = pnlAt(price);
+    const pnlPct = risk > 0 ? (pnl / risk) * 100 : 0;
+    const ev = pnl * probability / 100;
+    totalEV += ev;
+    scenarios.push({
+      price,
+      spreadValue: spreadValueAt(price),
+      pnl,
+      pnlPct,
+      probability,
+      expectedValue: ev,
+      exitSignal: exitSignalFor(pnl),
+    });
+  }
+
+  return { scenarios, totalEV };
+}
+
+// ─── Outcome summary builder for Section C ────────────────────────────────────
+function buildOutcome(spread, underlying, totalEV) {
+  const { long_strike, short_strike, net_debit, iv, expiration } = spread;
+  if (!long_strike || !short_strike || net_debit == null || !underlying) return null;
+
+  const loStrike = Math.min(long_strike, short_strike);
+  const hiStrike = Math.max(long_strike, short_strike);
+  const width = hiStrike - loStrike;
+  const isBull = (spread.spread_type || '').startsWith('bull');
+  const isDebit = net_debit > 0;
+  const creditAmt = Math.abs(net_debit);
+
+  const dte = expiration
+    ? Math.max(1, Math.round((new Date(expiration) - new Date()) / 86400000))
+    : 30;
+  const sigma = Math.max(1, (iv || 0.25) * underlying * Math.sqrt(dte / 365));
+
+  const breakeven = isBull
+    ? (isDebit ? loStrike + net_debit : hiStrike - creditAmt)
+    : (isDebit ? hiStrike - net_debit : loStrike + creditAmt);
+
+  // For bull spreads: profit if price above breakeven; max profit if above hiStrike
+  // For bear spreads: profit if price below breakeven; max profit if below loStrike
+  function pAbove(price) { return (1 - normCdf((price - underlying) / sigma)) * 100; }
+  function pBelow(price) { return normCdf((price - underlying) / sigma) * 100; }
+
+  const pMaxProfit = isBull ? pAbove(hiStrike) : pBelow(loStrike);
+  const pBreakeven = isBull ? pAbove(breakeven) : pBelow(breakeven);
+  const pMaxLoss   = isBull ? pBelow(loStrike)  : pAbove(hiStrike);
+  const pPartial   = Math.max(0, pBreakeven - pMaxProfit);
+  const maxRisk    = isDebit ? net_debit * 100 : (width - creditAmt) * 100;
+  const evPctRisk  = maxRisk > 0 ? (totalEV / maxRisk) * 100 : 0;
+
+  return { pMaxProfit, pBreakeven, pPartial, pMaxLoss, expectedValue: totalEV, evPctRisk };
+}
 
 // ─── Map ScoredSpread → SectionA trade object ────────────────────────────────
 function mapSpreadToDetail(spread) {
@@ -43,8 +196,16 @@ function mapSpreadToDetail(spread) {
   const maxLoss = spreadWidth != null && debit != null
     ? (isDebit ? debit : spreadWidth - debit) * 100
     : null;
-  const breakeven = debit != null && spread.long_strike != null
-    ? isBull ? spread.long_strike + debit : spread.long_strike - debit
+  const loStrike = spread.long_strike != null && spread.short_strike != null
+    ? Math.min(spread.long_strike, spread.short_strike)
+    : null;
+  const hiStrike = spread.long_strike != null && spread.short_strike != null
+    ? Math.max(spread.long_strike, spread.short_strike)
+    : null;
+  const breakeven = debit != null && loStrike != null
+    ? (isBull
+      ? (isDebit ? loStrike + debit : hiStrike - Math.abs(debit))
+      : (isDebit ? hiStrike - debit : loStrike + Math.abs(debit)))
     : null;
   const dte = spread.expiration
     ? Math.max(0, Math.round((new Date(spread.expiration) - new Date()) / 86400000))
@@ -135,7 +296,10 @@ function SectionHeader({ title, count, expanded, onToggle, showConfig, comingSoo
 }
 
 // ─── Trade detail expansion panel ────────────────────────────────────────────
-function TradeDetailExpansion({ detailProps, tradeContext, evaluation, onEvaluate, onDiscard }) {
+function TradeDetailExpansion({
+  detailProps, tradeContext, evaluation, onEvaluate, onDiscard,
+  scenarios, totalEV, outcome,
+}) {
   return (
     <div style={{
       borderTop: `2px solid rgba(45,212,191,0.35)`,
@@ -143,8 +307,8 @@ function TradeDetailExpansion({ detailProps, tradeContext, evaluation, onEvaluat
       fontFamily: 'monospace',
     }}>
       <SectionA trade={detailProps} />
-      <SectionB scenarios={[]} totalEV={null} />
-      <SectionC outcome={null} />
+      <SectionB scenarios={scenarios || []} totalEV={totalEV ?? null} />
+      <SectionC outcome={outcome || null} />
       <SectionD />
       <SectionE
         evaluation={evaluation || null}
@@ -168,20 +332,20 @@ export default function TradesPage() {
 
   // ── SMA chart state ──────────────────────────────────────────────────────
   const [smaPeriods, setSmaPeriods] = useState({ short: 8, mid: 21, long: 50 });
-  const [candles] = useState([]); // populated by integration session when analysis data arrives
+  const [candles, setCandles] = useState([]);
 
   // ── Vertical spreads state ───────────────────────────────────────────────
-  const [vertExpanded, setVertExpanded]   = useState(true);
-  const [vertSpreads, setVertSpreads]     = useState([]);
-  const [vertLoading, setVertLoading]     = useState(false);
-  const [vertError, setVertError]         = useState(null);
+  const [vertExpanded, setVertExpanded]     = useState(true);
+  const [vertSpreads, setVertSpreads]       = useState([]);
+  const [vertLoading, setVertLoading]       = useState(false);
+  const [vertError, setVertError]           = useState(null);
   const [vertUnderlying, setVertUnderlying] = useState(0);
 
   // ── Puts & calls state ───────────────────────────────────────────────────
-  const [callsExpanded, setCallsExpanded] = useState(false);
-  const [callResults, setCallResults]     = useState([]);
-  const [callsLoading, setCallsLoading]   = useState(false);
-  const [callsError, setCallsError]       = useState(null);
+  const [callsExpanded, setCallsExpanded]     = useState(false);
+  const [callResults, setCallResults]         = useState([]);
+  const [callsLoading, setCallsLoading]       = useState(false);
+  const [callsError, setCallsError]           = useState(null);
   const [callsUnderlying, setCallsUnderlying] = useState(0);
 
   // ── Expansion state — one row expanded at a time across both sections ────
@@ -199,8 +363,20 @@ export default function TradesPage() {
         spread_types: ['bull_call', 'bear_put'],
         max_results: 20,
       });
-      setVertSpreads(data.spreads || []);
-      setVertUnderlying(data.underlying_price || 0);
+      const underlying = data.underlying_price || 0;
+      setVertUnderlying(underlying);
+      // Use underlying price to seed chart if quote fetch hasn't already
+      if (underlying > 0) {
+        setCandles(prev => prev.length ? prev : generateCandles(underlying));
+      }
+      // Inject stopgap strategy pills
+      const spreads = (data.spreads || []).map(s => {
+        const dte = s.expiration
+          ? Math.max(0, Math.round((new Date(s.expiration) - new Date()) / 86400000))
+          : null;
+        return { ...s, strategies: s.strategies?.length ? s.strategies : inferStrategies(s.spread_type, dte) };
+      });
+      setVertSpreads(spreads);
     } catch (err) {
       setVertError(err.message || 'Failed to fetch vertical spreads');
       setVertSpreads([]);
@@ -220,8 +396,18 @@ export default function TradesPage() {
         max_results: 20,
         option_types: ['call', 'put'],
       });
-      setCallResults(data.calls || []);
-      setCallsUnderlying(data.underlying_price || 0);
+      const underlying = data.underlying_price || 0;
+      setCallsUnderlying(underlying);
+      if (underlying > 0) {
+        setCandles(prev => prev.length ? prev : generateCandles(underlying));
+      }
+      const calls = (data.calls || []).map(c => {
+        const dte = c.expiration
+          ? Math.max(0, Math.round((new Date(c.expiration) - new Date()) / 86400000))
+          : null;
+        return { ...c, strategies: c.strategies?.length ? c.strategies : inferLongOptionStrategies(c.option_type, dte) };
+      });
+      setCallResults(calls);
     } catch (err) {
       setCallsError(err.message || 'Failed to fetch puts & calls');
       setCallResults([]);
@@ -231,16 +417,21 @@ export default function TradesPage() {
   }
 
   // ── Symbol select ────────────────────────────────────────────────────────
-  function handleSymbolSelect(sym) {
+  async function handleSymbolSelect(sym) {
     const next = new URLSearchParams(searchParams);
     next.set('symbol', sym);
     setSearchParams(next, { replace: true });
-    // Reset results
     setVertSpreads([]);
     setCallResults([]);
     setExpandedRowId(null);
     setEvaluations({});
-    // Auto-fetch expanded sections
+    setCandles([]);
+    // Fetch quote immediately to seed SMA chart
+    try {
+      const q = await getQuote(sym);
+      const price = q?.last || q?.close || q?.price;
+      if (price) setCandles(generateCandles(price));
+    } catch { /* chart will fall back to underlying price when analysis returns */ }
     if (vertExpanded) fetchVerticals(sym);
     if (callsExpanded) fetchCalls(sym);
   }
@@ -280,46 +471,52 @@ export default function TradesPage() {
     }));
   }, [callResults, callsUnderlying]);
 
-  // ── Expansion row renderer ───────────────────────────────────────────────
+  // ── Expansion row renderers ──────────────────────────────────────────────
   function renderVertExpansion(trade) {
     const rowId = `vert-${vertSpreads.indexOf(trade)}`;
     const detailProps = mapSpreadToDetail(trade);
     const ctx = `${symbol} · ${detailProps.strikes} · ${detailProps.type} · ${detailProps.expiry || ''}`;
+    const { scenarios, totalEV } = buildExitScenarios(trade, vertUnderlying);
+    const outcome = buildOutcome(trade, vertUnderlying, totalEV);
     return (
       <TradeDetailExpansion
-        trade={trade}
         detailProps={detailProps}
         tradeContext={ctx}
         evaluation={evaluations[rowId] || null}
         onEvaluate={() => console.log('Evaluate', trade)}
         onDiscard={() => setExpandedRowId(null)}
+        scenarios={scenarios}
+        totalEV={totalEV}
+        outcome={outcome}
       />
     );
   }
 
   function renderCallExpansion(trade) {
-    const rowId = `calls-${callResults.indexOf(trade)}`;
     const detailProps = mapCallToDetail(trade);
     const ctx = `${symbol} · ${trade.option_type} · ${trade.strike} · ${trade.expiration || ''}`;
+    const rowId = `calls-${callResults.indexOf(trade)}`;
     return (
       <TradeDetailExpansion
-        trade={trade}
         detailProps={detailProps}
         tradeContext={ctx}
         evaluation={evaluations[rowId] || null}
         onEvaluate={() => console.log('Evaluate', trade)}
         onDiscard={() => setExpandedRowId(null)}
+        scenarios={[]}
+        totalEV={null}
+        outcome={null}
       />
     );
   }
 
   // ── Row ID helpers ───────────────────────────────────────────────────────
-  const getVertRowId = (trade, idx) => `vert-${idx}`;
-  const getCallRowId = (trade, idx) => `calls-${idx}`;
+  const getVertRowId  = (_, idx) => `vert-${idx}`;
+  const getCallRowId  = (_, idx) => `calls-${idx}`;
 
   // ── Table context ────────────────────────────────────────────────────────
-  const vertContext   = { currentPrice: vertUnderlying };
-  const callsContext  = { currentPrice: callsUnderlying, thetaThreshold: 10 };
+  const vertContext  = { currentPrice: vertUnderlying };
+  const callsContext = { currentPrice: callsUnderlying, thetaThreshold: 10 };
 
   // ── Section count display ────────────────────────────────────────────────
   function countText(loading, error, results) {
