@@ -146,9 +146,9 @@ function sortPositions(positions, sortKey, sortDir) {
 // ─── Assessment Version Stack ─────────────────────────────────────────────────
 
 function scoreColor(score) {
-  if (score >= 70) return '#4ade80';
-  if (score >= 40) return '#f59e0b';
-  return '#f87171';
+  if (score >= 70) return 'var(--green, #4ade80)';
+  if (score >= 40) return 'var(--amber, #f59e0b)';
+  return 'var(--red, #f87171)';
 }
 
 const VERDICT_STYLES = {
@@ -167,20 +167,6 @@ function VerdictBadge({ verdict }) {
     }}>
       {verdict}
     </span>
-  );
-}
-
-function ExitPlanRow({ label, sublabel, price, color, isDate }) {
-  return (
-    <div className="av-exit-row">
-      <div>
-        <div className="av-exit-label">{label}</div>
-        {sublabel && <div className="av-exit-sublabel">{sublabel}</div>}
-      </div>
-      <span className="av-exit-price" style={{ color }}>
-        {isDate ? formatDate(price) : Number(price).toFixed(2)}
-      </span>
-    </div>
   );
 }
 
@@ -555,8 +541,9 @@ export default function PositionsPage() {
   const [expandedRowIds, setExpandedRowIds]         = useState(new Set());
   const [toast, setToast]                           = useState(null);
   const [collapsedGroups, setCollapsedGroups]       = useState({});
-  const [showRefreshConfirm, setShowRefreshConfirm] = useState(false);
-  const [refreshingAll, setRefreshingAll]           = useState(false);
+  const [showRefreshConfirm, setShowRefreshConfirm]       = useState(false);
+  const [refreshingAll, setRefreshingAll]                 = useState(false);
+  const [pendingRefreshPositions, setPendingRefreshPositions] = useState(null);
   const [filters, setFilters]                       = useState({
     status:   'Active',
     source:   'all',
@@ -715,6 +702,7 @@ export default function PositionsPage() {
 
   function handleRefreshAllClick() {
     if (filtered.length > 1) {
+      setPendingRefreshPositions(filtered); // capture current filter snapshot
       setShowRefreshConfirm(true);
     } else if (filtered.length === 1) {
       handleRefresh(filtered[0]);
@@ -722,12 +710,18 @@ export default function PositionsPage() {
   }
 
   async function confirmRefreshAll() {
+    const toRefresh = pendingRefreshPositions ?? [];
     setShowRefreshConfirm(false);
+    setPendingRefreshPositions(null);
     setRefreshingAll(true);
-    for (const pos of filtered) {
-      await handleRefresh(pos);
+    try {
+      // Sequential to avoid rate-limit spikes
+      for (const pos of toRefresh) {
+        await handleRefresh(pos);
+      }
+    } finally {
+      setRefreshingAll(false);
     }
-    setRefreshingAll(false);
   }
 
   // ── Filter positions ───────────────────────────────────────────────────────
@@ -809,11 +803,11 @@ export default function PositionsPage() {
             maxWidth: 400, background: 'var(--bg2, #161b22)',
           }}>
             <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 10, color: 'var(--text, #e6edf3)' }}>
-              Refresh {filtered.length} positions?
+              Refresh {pendingRefreshPositions?.length ?? 0} positions?
             </div>
             <p style={{ fontSize: 10, color: '#c9d1d9', lineHeight: 1.5, margin: '0 0 16px' }}>
-              This will trigger {filtered.length} Claude API calls to update scores, synopses,
-              and exit levels for all positions matching your current filter.
+              This will trigger {pendingRefreshPositions?.length ?? 0} Claude API calls to update scores,
+              synopses, and exit levels for all positions matching your current filter.
             </p>
             <div style={{ display: 'flex', gap: 10 }}>
               <button

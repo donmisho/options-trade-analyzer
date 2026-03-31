@@ -35,8 +35,9 @@ function toUnderscoreKey(key) {
 }
 
 // Numeric sort weight for health grade (A=best)
+const HEALTH_WEIGHTS = { A: 5, B: 4, C: 3, D: 2, F: 1 };
 function healthSortWeight(grade) {
-  return { A: 5, B: 4, C: 3, D: 2, F: 1 }[grade] ?? 0;
+  return HEALTH_WEIGHTS[grade] ?? 0;
 }
 
 export const positionsColumns = [
