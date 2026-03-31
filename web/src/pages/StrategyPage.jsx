@@ -9,12 +9,12 @@
  *   OTA-361 — Filtered positions list for this strategy
  */
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, Fragment } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { STRATEGY_CONFIGS } from '../strategy-configs/index';
 import { STRATEGY_COLORS } from '../utils/strategyColors';
 import { PositionHealthBadge } from '../components/PositionHealthBadge';
-import { getPositions } from '../api/client';
+import { getPositions, refreshPosition } from '../api/client';
 import { formatDate } from '../utils/formatDate';
 import './PageShared.css';
 
@@ -221,6 +221,7 @@ export default function StrategyPage() {
   const [sourceFilter,   setSourceFilter]   = useState('all');
   const [expandedIds,    setExpandedIds]    = useState(new Set());
   const [showConfirm,    setShowConfirm]    = useState(false);
+  const [refreshingAll,  setRefreshingAll]  = useState(false);
 
   useEffect(() => {
     if (key) loadPositions();
@@ -241,12 +242,35 @@ export default function StrategyPage() {
     }
   }
 
+  async function runRefreshAll() {
+    const activePositions = filtered.filter(p => !isInactive(p.status));
+    setRefreshingAll(true);
+    for (const pos of activePositions) {
+      try {
+        const result = await refreshPosition(pos.id);
+        setPositions(prev => prev.map(p => {
+          if (p.id !== pos.id) return p;
+          return {
+            ...p,
+            current_price: result.current_premium ?? p.current_price,
+            pnl_amount:    result.current_pnl != null ? result.current_pnl * 100 : p.pnl_amount,
+            pnl_pct:       result.pnl_pct     != null ? result.pnl_pct     * 100 : p.pnl_pct,
+          };
+        }));
+      } catch {
+        // continue with remaining positions
+      }
+    }
+    setRefreshingAll(false);
+    setLastRefreshed(new Date());
+  }
+
   function handleRefreshAll() {
     const activeCount = filtered.filter(p => !isInactive(p.status)).length;
     if (activeCount > 1) {
       setShowConfirm(true);
     } else {
-      loadPositions();
+      runRefreshAll();
     }
   }
 
@@ -503,8 +527,15 @@ export default function StrategyPage() {
               fontFamily: 'monospace', cursor: 'pointer',
             }}
             onClick={handleRefreshAll}
+            disabled={refreshingAll}
+            style={{
+              background: 'rgba(45,212,191,0.1)', border: '1px solid rgba(45,212,191,0.4)',
+              color: '#2dd4bf', padding: '4px 10px', borderRadius: 4, fontSize: 10,
+              fontFamily: 'monospace', cursor: refreshingAll ? 'default' : 'pointer',
+              opacity: refreshingAll ? 0.35 : 1,
+            }}
           >
-            ↻ Refresh all
+            {refreshingAll ? '↻ Refreshing…' : '↻ Refresh all'}
           </button>
         </div>
       </div>
@@ -513,7 +544,7 @@ export default function StrategyPage() {
       {showConfirm && (
         <RefreshConfirmDialog
           count={filtered.filter(p => !isInactive(p.status)).length}
-          onConfirm={() => { setShowConfirm(false); loadPositions(); }}
+          onConfirm={() => { setShowConfirm(false); runRefreshAll(); }}
           onCancel={() => setShowConfirm(false)}
         />
       )}
@@ -574,9 +605,8 @@ export default function StrategyPage() {
               {filtered.map(pos => {
                 const isExpanded = expandedIds.has(pos.id);
                 return (
-                  <>
+                  <Fragment key={pos.id}>
                     <tr
-                      key={pos.id}
                       style={{
                         cursor: 'pointer',
                         background: isExpanded ? 'rgba(45,212,191,0.03)' : 'transparent',
@@ -632,7 +662,7 @@ export default function StrategyPage() {
                     </tr>
 
                     {isExpanded && (
-                      <tr key={`exp-${pos.id}`}>
+                      <tr>
                         <td
                           colSpan={11}
                           style={{
@@ -651,7 +681,7 @@ export default function StrategyPage() {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </Fragment>
                 );
               })}
             </tbody>
