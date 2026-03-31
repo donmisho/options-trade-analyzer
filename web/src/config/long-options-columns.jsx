@@ -15,6 +15,7 @@
  */
 
 import ScoreBar from '../components/ScoreBar';
+import TradeTypeBadge from '../components/TradeTypeBadge';
 
 function Pip({ color }) {
   return (
@@ -36,18 +37,8 @@ export const longOptionsColumns = [
     width: 100,
     align: 'center',
     render: (trade) => {
-      const isCall = trade.option_type === 'call';
-      const label  = isCall ? 'LONG CALL' : 'LONG PUT';
-      const color  = isCall ? '#26a69a' : '#f59e0b';
-      return (
-        <span style={{
-          display: 'inline-block', padding: '2px 7px', borderRadius: 4,
-          fontSize: 10, fontWeight: 700, letterSpacing: '0.04em',
-          color, backgroundColor: color + '20',
-        }}>
-          {label}
-        </span>
-      );
+      const label = trade.option_type === 'call' ? 'LONG_CALL' : 'LONG_PUT';
+      return <TradeTypeBadge type={label} />;
     },
   },
   {

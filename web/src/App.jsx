@@ -15,21 +15,17 @@
  * Layout's nav items call setActiveStrategy on click.
  */
 
-import { useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { MsalProvider } from '@azure/msal-react';
 import { msalInstance } from './auth/msalConfig';
 import { AppProvider } from './context/AppContext';
 import { ToastProvider } from './components/Toast';
 import Layout from './components/Layout';
-import OptionsTerminal from './pages/OptionsTerminal';
-// import VerticalsPage from './pages/VerticalsPage';      // DEPRECATED — retained for reference
-// import NakedOptionsPage from './pages/NakedOptionsPage'; // DEPRECATED — retained for reference
-// import FavoritesPage from './pages/FavoritesPage';  // DEPRECATED — /favorites redirects to /positions
+import TradesPage from './pages/TradesPage';
+import StrategyPage from './pages/StrategyPage';
 import PositionsPage from './pages/PositionsPage';
 import DashboardPage from './pages/DashboardPage';
 import SecurityStrategiesPage from './pages/SecurityStrategiesPage';
-import StrategyProfilePage from './pages/StrategyProfilePage';
 import LoginPage from './pages/LoginPage';
 import BrokerConnectPage from './pages/BrokerConnectPage';
 
@@ -58,9 +54,6 @@ function RequireAuth({ children }) {
 }
 
 export default function App() {
-  // activeStrategy drives OptionsTerminal — tabs in Header write to this state
-  const [activeStrategy, setActiveStrategy] = useState('verticals');
-
   return (
     <MsalProvider instance={msalInstance}>
       <ToastProvider>
@@ -82,7 +75,7 @@ export default function App() {
             element={
               <RequireAuth>
                 <AppProvider>
-                  <Layout setActiveStrategy={setActiveStrategy} />
+                  <Layout />
                 </AppProvider>
               </RequireAuth>
             }
@@ -90,9 +83,14 @@ export default function App() {
             {/* Dashboard — default home */}
             <Route path="/dashboard" element={<DashboardPage />} />
 
-            {/* Strategy routes — all handled by OptionsTerminal */}
-            <Route path="/verticals"     element={<OptionsTerminal activeStrategy={activeStrategy} />} />
-            <Route path="/naked-options" element={<OptionsTerminal activeStrategy={activeStrategy} />} />
+            {/* Trades — primary trade-finding screen */}
+            <Route path="/trades" element={<TradesPage />} />
+
+            {/* Redirects from retired routes */}
+            <Route path="/verticals"     element={<Navigate to="/trades" replace />} />
+            <Route path="/naked-options" element={<Navigate to="/trades" replace />} />
+            <Route path="/puts-calls"    element={<Navigate to="/trades" replace />} />
+            <Route path="/long-calls"    element={<Navigate to="/trades" replace />} />
 
             {/* Security Dashboard — per-symbol strategy scorecard (legacy) */}
             <Route path="/security/:symbol" element={<Navigate to="/security-strategies" replace />} />
@@ -101,8 +99,8 @@ export default function App() {
             <Route path="/security-strategies" element={<SecurityStrategiesPage />} />
             <Route path="/security-strategies/:symbol" element={<SecurityStrategiesPage />} />
 
-            {/* Strategy Profile — per-strategy detail page */}
-            <Route path="/strategies/:slug" element={<StrategyProfilePage />} />
+            {/* Strategy pages — per-strategy detail (placeholder, wired in later session) */}
+            <Route path="/strategies/:key" element={<StrategyPage />} />
 
             {/* Other pages */}
             <Route path="/directional" element={<Navigate to="/dashboard" replace />} />

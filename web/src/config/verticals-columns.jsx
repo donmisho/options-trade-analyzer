@@ -9,17 +9,7 @@
  */
 
 import ScoreBar from '../components/ScoreBar';
-
-const BADGE_MAP = {
-  bull_call: { label: 'BULL CALL', color: '#26a69a', bg: '#26a69a20' },
-  bear_put:  { label: 'BEAR PUT',  color: '#f59e0b', bg: '#f59e0b20' },
-  bear_call: { label: 'BEAR CALL', color: '#a855f7', bg: '#a855f720' },
-  bull_put:  { label: 'BULL PUT',  color: '#4f8ef7', bg: '#4f8ef720' },
-};
-
-function getBadge(trade) {
-  return BADGE_MAP[trade.spread_type] || { label: trade.spread_type || '—', color: '#8b90a0', bg: '#8b90a020' };
-}
+import TradeTypeBadge from '../components/TradeTypeBadge';
 
 function pipColor(value, greenThresh, amberThresh, higherIsBetter = true) {
   if (higherIsBetter) {
@@ -50,18 +40,7 @@ export const verticalsColumns = [
     label: 'Type',
     width: 100,
     align: 'center',
-    render: (trade) => {
-      const badge = getBadge(trade);
-      return (
-        <span style={{
-          display: 'inline-block', padding: '2px 7px', borderRadius: 4,
-          fontSize: 10, fontWeight: 700, letterSpacing: '0.04em',
-          color: badge.color, backgroundColor: badge.bg,
-        }}>
-          {badge.label}
-        </span>
-      );
-    },
+    render: (trade) => <TradeTypeBadge type={trade.spread_type} />,
   },
   {
     key: 'long_strike',

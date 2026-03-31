@@ -28,7 +28,7 @@ import { msalInstance } from '../auth/msalConfig';
 import './Layout.css';
 
 // ─── Spec-exact colors ────────────────────────────────────────────────────────
-const RAIL_W = 220;
+const RAIL_W = 200;
 const TEAL   = '#2dd4bf';
 const MUTED  = '#8b949e';
 const TEXT   = '#e6edf3';
@@ -36,44 +36,33 @@ const BG     = '#0d1117';
 const BORD   = '#30363d';
 
 // ─── Nav definition ───────────────────────────────────────────────────────────
-// strategy: if set, calls setActiveStrategy(strategy) on click
 // matchFn: determines "active" state from current pathname
 const NAV_ITEMS = [
   {
     label:   'Dashboard',
     path:    '/dashboard',
     matchFn: (p) => p === '/dashboard' || p === '/',
-    strategy: null,
   },
   {
     label:   'Security Strategies',
     path:    null, // dynamic — uses activeSymbol
     matchFn: (p) => p.startsWith('/security-strategies'),
-    strategy: null,
   },
   {
-    label:    'Verticals',
-    path:     '/verticals',
-    matchFn:  (p) => p === '/verticals',
-    strategy: 'verticals',
-  },
-  {
-    label:    'Puts & Calls',
-    path:     '/naked-options',
-    matchFn:  (p) => p === '/naked-options',
-    strategy: 'long_calls',
+    label:   'Trades',
+    path:    '/trades',
+    matchFn: (p) => p === '/trades' || p.startsWith('/trades?'),
   },
   {
     label:   'Positions',
     path:    '/positions',
     matchFn: (p) => p === '/positions',
-    strategy: null,
   },
 ];
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function Layout({ setActiveStrategy }) {
+export default function Layout() {
   const { fetchPrices, activeSymbol, systemVarsPanelOpen, setSystemVarsPanelOpen, strategyAdmin } = useApp();
   const location = useLocation();
   const navigate  = useNavigate();
@@ -123,14 +112,6 @@ export default function Layout({ setActiveStrategy }) {
     }
   };
 
-  // ── Sync activeStrategy with current route on load/navigation ────────────
-  // Ensures OptionsTerminal gets the right config even when the user
-  // loads /naked-options or /verticals directly (e.g., bookmark).
-  useEffect(() => {
-    if (location.pathname === '/naked-options') setActiveStrategy?.('long_calls');
-    else if (location.pathname === '/verticals')    setActiveStrategy?.('verticals');
-  }, [location.pathname, setActiveStrategy]);
-
   // ── Watchlist toggle ──────────────────────────────────────────────────────
   const [watchlistOpen, setWatchlistOpen] = useState(() => {
     const saved = localStorage.getItem('watchlist_open');
@@ -141,19 +122,8 @@ export default function Layout({ setActiveStrategy }) {
     localStorage.setItem('watchlist_open', String(watchlistOpen));
   }, [watchlistOpen]);
 
-  // ── Strategies nav section toggle ─────────────────────────────────────────
-  const [strategiesNavOpen, setStrategiesNavOpen] = useState(() => {
-    const saved = localStorage.getItem('strategiesNavOpen');
-    return saved === null ? true : saved === 'true';
-  });
-
-  useEffect(() => {
-    localStorage.setItem('strategiesNavOpen', String(strategiesNavOpen));
-  }, [strategiesNavOpen]);
-
   // ── Nav click handler ─────────────────────────────────────────────────────
   const handleNavClick = (item) => {
-    if (item.strategy) setActiveStrategy?.(item.strategy);
     if (item.label === 'Security Strategies') {
       navigate(activeSymbol
         ? `/security-strategies/${activeSymbol}`
@@ -244,24 +214,18 @@ export default function Layout({ setActiveStrategy }) {
         {/* Strategies section */}
         <div style={{ flexShrink: 0 }}>
           <div style={{ height: 1, backgroundColor: BORD, margin: '4px 0' }} />
-          {/* Section header */}
-          <button
-            onClick={() => setStrategiesNavOpen(o => !o)}
-            style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              width: '100%', padding: '8px 16px',
-              background: 'none', border: 'none', cursor: 'pointer',
-              fontFamily: 'monospace', fontSize: 10,
-              fontWeight: 700, letterSpacing: '0.08em',
-              color: MUTED, textTransform: 'uppercase',
-            }}
-          >
-            <span>Strategies</span>
-            <span style={{ fontSize: 9 }}>{strategiesNavOpen ? '▾' : '▸'}</span>
-          </button>
+          {/* Section header — static, non-collapsible */}
+          <div style={{
+            padding: '20px 16px 6px 16px',
+            fontFamily: 'monospace', fontSize: 9,
+            fontWeight: 700, letterSpacing: '0.6px',
+            color: MUTED, textTransform: 'uppercase',
+          }}>
+            Strategies
+          </div>
 
           {/* Strategy items */}
-          {strategiesNavOpen && SCORECARD_STRATEGIES.map(strategy => {
+          {SCORECARD_STRATEGIES.map(strategy => {
             const override = strategyAdmin[strategy.key];
             const isEnabled = override?.enabled ?? strategy.enabled ?? true;
             if (!isEnabled) return null;
@@ -273,7 +237,7 @@ export default function Layout({ setActiveStrategy }) {
                 onClick={() => navigate(`/strategies/${strategy.key}`)}
                 style={{
                   display: 'flex', alignItems: 'center',
-                  padding: '8px 16px 8px 24px',
+                  padding: '7px 16px 7px 24px',
                   fontFamily: 'monospace', fontSize: 11,
                   cursor: 'pointer', userSelect: 'none',
                   color: isActive ? TEAL : MUTED,
@@ -321,7 +285,7 @@ export default function Layout({ setActiveStrategy }) {
             }}
           >
             <div style={{
-              width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+              width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
               backgroundColor: schwabConnected === null ? '#888'
                 : schwabConnected ? '#4ade80' : '#f87171',
               boxShadow: schwabConnected ? '0 0 4px rgba(74,222,128,0.5)' : 'none',
@@ -386,7 +350,7 @@ export default function Layout({ setActiveStrategy }) {
       }}>
 
         {/* Watchlist toggle — visible only on analysis pages, fixed so it always shows */}
-        {/\/(verticals|naked-options|security-strategies)/.test(location.pathname) && (
+        {/\/(trades|security-strategies)/.test(location.pathname) && (
           <button
             onClick={() => setWatchlistOpen(o => !o)}
             style={{
@@ -418,7 +382,7 @@ export default function Layout({ setActiveStrategy }) {
       </div>
 
       {/* Watchlist panel — fixed right edge overlay, only on analysis pages */}
-      {watchlistOpen && /\/(verticals|naked-options|security-strategies)/.test(location.pathname) && (
+      {watchlistOpen && /\/(trades|security-strategies)/.test(location.pathname) && (
         <div style={{
           position: 'fixed',
           top: 0,
