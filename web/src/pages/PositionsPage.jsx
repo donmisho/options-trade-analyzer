@@ -73,6 +73,8 @@ function normalizePosition(apiPos) {
     dte,
     perf_status:    'unknown',   // updated by getPositionCurrentPrices
     status:         apiPos.status,
+    health_grade:   apiPos.health_grade ?? null,
+    score:          apiPos.claude_score ?? null,
   };
 }
 
@@ -96,26 +98,16 @@ const STRATEGY_ORDER = [
 
 function getGroupValue(pos, groupBy) {
   switch (groupBy) {
-    case 'Strategy':      return pos.strategy_key;
-    case 'Symbol':        return pos.symbol;
-    case 'Position Type': return pos.source === 'LIVE' ? 'Live' : 'Paper';
-    case 'Structure':     return pos.structure ?? 'Unknown';
-    case 'Type':          return pos.trade_type ?? 'Unknown';
-    case 'DTE': {
-      const d = pos.dte ?? 0;
-      if (d <= 7)  return '0-7 DTE';
-      if (d <= 14) return '8-14 DTE';
-      if (d <= 30) return '15-30 DTE';
-      return '30+ DTE';
-    }
-    case 'Performance':   return pos.perf_status ?? 'red';
-    default:              return pos.strategy_key;
+    case 'Strategy': return pos.strategy_key;
+    case 'Symbol':   return pos.symbol;
+    case 'Health':   return pos.health_grade ?? 'Ungraded';
+    default:         return pos.strategy_key;
   }
 }
 
 function groupLabel(groupBy, key) {
-  if (groupBy === 'Strategy')    return STRATEGY_LABELS[key] ?? key;
-  if (groupBy === 'Performance') return key === 'green' ? 'On Track' : key === 'amber' ? 'Watch' : 'At Risk';
+  if (groupBy === 'Strategy') return STRATEGY_LABELS[key] ?? key;
+  if (groupBy === 'Health')   return key === 'Ungraded' ? 'Ungraded' : `Grade ${key}`;
   return key;
 }
 
@@ -124,7 +116,9 @@ function groupSortKey(groupBy, key) {
     const idx = STRATEGY_ORDER.indexOf(key);
     return idx >= 0 ? idx : 99;
   }
-  if (groupBy === 'Performance') return key === 'green' ? 0 : key === 'amber' ? 1 : 2;
+  if (groupBy === 'Health') {
+    return { A: 0, B: 1, C: 2, D: 3, F: 4, Ungraded: 5 }[key] ?? 6;
+  }
   return key;
 }
 
@@ -190,82 +184,77 @@ function ExitPlanRow({ label, sublabel, price, color, isDate }) {
   );
 }
 
-function AssessmentVersion({ version, defaultExpanded }) {
+function AssessmentVersion({ version, defaultExpanded, isOriginal }) {
   const [open, setOpen] = useState(defaultExpanded);
-  const labelType = version.assessment_type === 'ORIGINAL' ? 'Original' : 'Update';
-  const dateStr   = version.created_at ? formatDate(version.created_at, true) : '—';
-  const sc        = scoreColor(version.score);
-  const exits     = version.exit_levels ?? {};
+  const dateStr = version.created_at ? formatDate(version.created_at, true) : '—';
+  const sc      = scoreColor(version.score);
+  const exits   = version.exit_levels ?? {};
 
   return (
     <div className="av-version">
-      {/* Version header */}
-      <div className="av-header" onClick={() => setOpen(o => !o)}>
+      {/* Header row */}
+      <div className="av-header" onClick={() => setOpen(o => !o)} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span className="av-chevron">{open ? '▼' : '▶'}</span>
         <VerdictBadge verdict={version.verdict} />
-        <span style={{ fontSize: 13, fontWeight: 700, color: sc, marginLeft: 6 }}>
-          {Number(version.score).toFixed(2)}
-        </span>
-        <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 10 }}>
-          {labelType}: {dateStr}
+        <span style={{ fontSize: 11, fontWeight: 700, color: sc }}>
+          {Number(version.score ?? 0).toFixed(2)}
         </span>
         {version.synopsis && (
-          <span style={{ fontSize: 10, color: 'var(--text-muted)', fontStyle: 'italic', marginLeft: 10 }}>
-            Synopsis: {version.synopsis}
+          <span style={{
+            display: 'inline-block',
+            fontSize: 9, fontWeight: 700,
+            padding: '3px 10px', borderRadius: 3,
+            background: 'rgba(255,255,255,0.06)',
+            border: '1px solid rgba(255,255,255,0.35)',
+            color: '#e6edf3',
+          }}>
+            {version.synopsis}
           </span>
         )}
+        <span style={{ fontSize: 9, color: 'var(--muted, #8b949e)', marginLeft: 'auto', display: 'flex', gap: 8 }}>
+          {isOriginal && <span>Original</span>}
+          <span>{dateStr}</span>
+        </span>
       </div>
 
       {/* Expanded body */}
       {open && (
         <div className="av-body">
-          <div className="av-content">
-            {/* 2/3 — Claude's Read */}
-            <div className="av-col-read">
-              <div className="av-section-label">Claude's Read</div>
-              {(version.claude_read ?? '').split('\n\n').map((para, i) => (
-                <p key={i} className="av-read-text">{para}</p>
-              ))}
-            </div>
+          {/* Claude's Read */}
+          <div style={{
+            borderLeft: '2px solid var(--border, #30363d)',
+            padding: '8px 12px',
+            margin: '6px 0 6px 20px',
+            fontSize: 10,
+            color: '#c9d1d9',
+            lineHeight: 1.6,
+          }}>
+            {(version.claude_read ?? '').split('\n\n').map((para, i) => (
+              <p key={i} style={{ margin: '0 0 6px' }}>{para}</p>
+            ))}
+          </div>
 
-            {/* 1/3 — Exit Plan */}
-            <div className="av-col-exit">
-              <div className="av-section-label">Exit Plan</div>
+          {/* Exit plan */}
+          {(exits.take_profit != null || exits.hard_stop != null) && (
+            <div style={{ display: 'flex', gap: 20, fontSize: 10, marginTop: 6, paddingLeft: 20 }}>
               {exits.take_profit != null && (
-                <ExitPlanRow
-                  label="Take Profit"
-                  sublabel="underlying price — full profit exit"
-                  price={exits.take_profit}
-                  color="#4ade80"
-                />
-              )}
-              {exits.warning != null && (
-                <ExitPlanRow
-                  label="Warning Level"
-                  sublabel="underlying price — early warning"
-                  price={exits.warning}
-                  color="#f59e0b"
-                />
+                <span>
+                  <span style={{ color: 'var(--muted, #8b949e)' }}>Take Profit: </span>
+                  <span style={{ color: 'var(--green, #4ade80)', fontWeight: 700 }}>
+                    {Number(exits.take_profit).toFixed(2)}
+                  </span>
+                </span>
               )}
               {exits.hard_stop != null && (
-                <ExitPlanRow
-                  label="Hard Stop"
-                  sublabel="underlying price — cut the loss"
-                  price={exits.hard_stop}
-                  color="#f87171"
-                />
-              )}
-              {exits.calendar_exit != null && (
-                <ExitPlanRow
-                  label="Calendar Exit"
-                  sublabel="date — exit regardless of price"
-                  price={exits.calendar_exit}
-                  color="#c084fc"
-                  isDate
-                />
+                <span>
+                  <span style={{ color: 'var(--muted, #8b949e)' }}>Hard Stop: </span>
+                  <span style={{ color: 'var(--red, #f87171)', fontWeight: 700 }}>
+                    {Number(exits.hard_stop).toFixed(2)}
+                  </span>
+                </span>
               )}
             </div>
-          </div>
+          )}
         </div>
       )}
     </div>
@@ -281,7 +270,10 @@ function AssessmentVersionStack({ positionId, assessmentsCache, isLoading }) {
     );
   }
 
-  const assessments = assessmentsCache?.[positionId] ?? [];
+  const raw = assessmentsCache?.[positionId] ?? [];
+  const assessments = [...raw].sort(
+    (a, b) => new Date(b.created_at) - new Date(a.created_at)
+  );
 
   if (!assessments.length) {
     return (
@@ -298,6 +290,7 @@ function AssessmentVersionStack({ positionId, assessmentsCache, isLoading }) {
           key={v.assessment_id}
           version={v}
           defaultExpanded={idx === 0}
+          isOriginal={idx === assessments.length - 1}
         />
       ))}
     </div>
@@ -425,11 +418,11 @@ function PositionGroup({ name, count, collapsed, onToggle, children }) {
         onClick={onToggle}
         style={{ cursor: 'pointer' }}
       >
-        <span style={{ color: 'var(--text-muted)', fontSize: 9, marginRight: 4 }}>
+        <span style={{ color: 'var(--muted, #8b949e)', fontSize: 9, marginRight: 4 }}>
           {collapsed ? '▶' : '▼'}
         </span>
-        <span className="pos-group-title">{name}</span>
-        <span className="pos-group-count">{count}</span>
+        <span style={{ color: 'var(--teal, #2dd4bf)', fontSize: 12, fontWeight: 700 }}>{name}</span>
+        <span style={{ color: 'var(--muted, #8b949e)', fontSize: 10, marginLeft: 6 }}>{count}</span>
       </div>
       {!collapsed && children}
     </div>
@@ -438,9 +431,7 @@ function PositionGroup({ name, count, collapsed, onToggle, children }) {
 
 // ─── FilterBar ────────────────────────────────────────────────────────────────
 
-const GROUP_BY_OPTIONS = [
-  'Strategy', 'Symbol', 'Position Type', 'Structure', 'Type', 'DTE', 'Performance',
-];
+const GROUP_BY_OPTIONS = ['Strategy', 'Symbol', 'Health'];
 
 const STRATEGY_FILTER_OPTIONS = [
   { value: 'steady-paycheck', label: 'Steady Paycheck' },
@@ -449,7 +440,7 @@ const STRATEGY_FILTER_OPTIONS = [
   { value: 'lottery-ticket',  label: 'Lottery Ticket' },
 ];
 
-function FilterBar({ filters, onChange }) {
+function FilterBar({ filters, onChange, onRefreshAll, refreshingAll, filteredCount }) {
   return (
     <div className="pos-filter-bar">
       <div className="pos-filter-group">
@@ -460,7 +451,8 @@ function FilterBar({ filters, onChange }) {
           onChange={e => onChange('status', e.target.value)}
         >
           <option value="Active">Active</option>
-          <option value="Archived">Archived</option>
+          <option value="All">All</option>
+          <option value="Closed">Closed</option>
         </select>
       </div>
 
@@ -516,6 +508,20 @@ function FilterBar({ filters, onChange }) {
           ))}
         </select>
       </div>
+
+      <button
+        disabled={refreshingAll || filteredCount === 0}
+        onClick={onRefreshAll}
+        style={{
+          padding: '4px 10px', fontSize: 10, fontFamily: 'monospace',
+          background: 'rgba(45,212,191,0.1)', border: '1px solid rgba(45,212,191,0.4)',
+          color: '#2dd4bf', borderRadius: 4, cursor: 'pointer',
+          opacity: (refreshingAll || filteredCount === 0) ? 0.35 : 1,
+          alignSelf: 'flex-end',
+        }}
+      >
+        {refreshingAll ? '…' : '↻ Refresh all'}
+      </button>
     </div>
   );
 }
@@ -549,6 +555,8 @@ export default function PositionsPage() {
   const [expandedRowIds, setExpandedRowIds]         = useState(new Set());
   const [toast, setToast]                           = useState(null);
   const [collapsedGroups, setCollapsedGroups]       = useState({});
+  const [showRefreshConfirm, setShowRefreshConfirm] = useState(false);
+  const [refreshingAll, setRefreshingAll]           = useState(false);
   const [filters, setFilters]                       = useState({
     status:   'Active',
     source:   'all',
@@ -705,14 +713,32 @@ export default function PositionsPage() {
       .catch(err => setToast(`Archive failed: ${err.message}`));
   }
 
+  function handleRefreshAllClick() {
+    if (filtered.length > 1) {
+      setShowRefreshConfirm(true);
+    } else if (filtered.length === 1) {
+      handleRefresh(filtered[0]);
+    }
+  }
+
+  async function confirmRefreshAll() {
+    setShowRefreshConfirm(false);
+    setRefreshingAll(true);
+    for (const pos of filtered) {
+      await handleRefresh(pos);
+    }
+    setRefreshingAll(false);
+  }
+
   // ── Filter positions ───────────────────────────────────────────────────────
   const filtered = useMemo(() => {
     return positions.filter(pos => {
-      if (filters.status === 'Archived') {
-        if (!_inactive(pos.status)) return false;
-      } else {
+      if (filters.status === 'Active') {
         if (_inactive(pos.status)) return false;
+      } else if (filters.status === 'Closed') {
+        if (!_inactive(pos.status)) return false;
       }
+      // 'All' shows everything
       if (filters.source !== 'all' && pos.source !== filters.source) return false;
       if (filters.strategy !== 'all' && pos.strategy_key !== filters.strategy) return false;
       if (filters.symbol.trim()) {
@@ -773,14 +799,64 @@ export default function PositionsPage() {
     <div className="page-card">
       {toast && <Toast message={toast} onDismiss={() => setToast(null)} />}
 
+      {showRefreshConfirm && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+        }}>
+          <div style={{
+            border: '1px solid var(--border, #30363d)', borderRadius: 6, padding: 20,
+            maxWidth: 400, background: 'var(--bg2, #161b22)',
+          }}>
+            <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 10, color: 'var(--text, #e6edf3)' }}>
+              Refresh {filtered.length} positions?
+            </div>
+            <p style={{ fontSize: 10, color: '#c9d1d9', lineHeight: 1.5, margin: '0 0 16px' }}>
+              This will trigger {filtered.length} Claude API calls to update scores, synopses,
+              and exit levels for all positions matching your current filter.
+            </p>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                onClick={confirmRefreshAll}
+                style={{
+                  padding: '7px 16px', fontSize: 11, fontFamily: 'monospace',
+                  background: 'rgba(45,212,191,0.1)', border: '1px solid rgba(45,212,191,0.4)',
+                  color: '#2dd4bf', borderRadius: 4, cursor: 'pointer',
+                }}
+              >
+                Confirm refresh
+              </button>
+              <button
+                onClick={() => setShowRefreshConfirm(false)}
+                style={{
+                  padding: '7px 14px', fontSize: 11, fontFamily: 'monospace',
+                  background: 'transparent', border: '1px solid #30363d',
+                  color: '#8b949e', borderRadius: 4, cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="pos-page-header">
         <h2 className="page-title">
           <span className="icon">◈</span> Positions
         </h2>
-        <span className="pos-header-count">{activeCount} active</span>
+        <span className="pos-header-count" style={{ fontSize: 11, color: 'var(--muted, #8b949e)' }}>
+          {activeCount} active
+        </span>
       </div>
 
-      <FilterBar filters={filters} onChange={setFilter} />
+      <FilterBar
+        filters={filters}
+        onChange={setFilter}
+        onRefreshAll={handleRefreshAllClick}
+        refreshingAll={refreshingAll}
+        filteredCount={filtered.length}
+      />
 
       {loading && (
         <div className="empty-state">

@@ -1,65 +1,42 @@
 /**
- * Positions Column Configuration — for use with PositionsTable.
+ * Positions Column Configuration — v3 redesign.
  *
- * Columns: _chevron · symbol · pos_type · strategy_key · structure · trade_type
- *          · analysis_date · strike_spread · expiration · entry_price
- *          · current_premium · pnl · dte · perf_status · _actions
+ * Column order: chevron · score · symbol · pos_type · strategy_key
+ *               · strike_spread · expiration · entry_price · current_premium
+ *               · pnl · dte · health · _actions
  *
- * Default sort: perf_status descending (green → amber → red).
+ * OTA-362
  */
 
+import StrategyPill from '../components/StrategyPill';
+import ScoreCell from '../components/ScoreCell';
+import { PositionHealthBadge } from '../components/PositionHealthBadge';
 import { formatDate } from '../utils/formatDate';
 
-function PerfDot({ status }) {
-  const colorMap = {
-    green: { bg: '#4ade80', shadow: 'rgba(74,222,128,0.4)' },
-    amber: { bg: '#f59e0b', shadow: 'rgba(245,158,11,0.4)' },
-    red:   { bg: '#f87171', shadow: 'rgba(248,113,113,0.4)' },
-  };
-  const c = colorMap[status] ?? colorMap.red;
-  return (
-    <div style={{
-      width: 10, height: 10, borderRadius: '50%',
-      backgroundColor: c.bg,
-      boxShadow: `0 0 4px ${c.shadow}`,
-      display: 'inline-block',
-      margin: '0 auto',
-    }} />
-  );
-}
-
-function Pill({ label, color, bg }) {
+function PositionTypeBadge({ source }) {
+  const isLive = source === 'LIVE';
   return (
     <span style={{
-      display: 'inline-block', padding: '2px 7px', borderRadius: 3,
-      fontSize: 10, fontWeight: 600, letterSpacing: '0.2px',
-      color, backgroundColor: bg,
-      border: `1px solid ${color}40`,
+      display: 'inline-block',
+      fontSize: 9, fontWeight: 700,
+      padding: '2px 6px', borderRadius: 3,
+      backgroundColor: isLive ? 'rgba(74,222,128,0.12)' : 'rgba(96,165,250,0.12)',
+      color: isLive ? 'var(--green, #4ade80)' : 'var(--blue, #60a5fa)',
+      fontFamily: 'monospace',
     }}>
-      {label}
+      {isLive ? 'Live' : 'Paper'}
     </span>
   );
 }
 
-const TRADE_TYPE_MAP = {
-  bear_put:  { label: 'Bear Put',  color: '#f87171', bg: 'rgba(248,113,113,0.10)' },
-  bear_call: { label: 'Bear Call', color: '#f87171', bg: 'rgba(248,113,113,0.10)' },
-  bull_put:  { label: 'Bull Put',  color: '#4ade80', bg: 'rgba(74,222,128,0.10)' },
-  bull_call: { label: 'Bull Call', color: '#4ade80', bg: 'rgba(74,222,128,0.10)' },
-};
+// strategy_key uses hyphens; StrategyPill expects underscores
+function toUnderscoreKey(key) {
+  return (key || '').replace(/-/g, '_');
+}
 
-const STRATEGY_LABELS = {
-  'steady-paycheck': 'Steady Paycheck',
-  'weekly-grind':    'Weekly Grind',
-  'trend-rider':     'Trend Rider',
-  'lottery-ticket':  'Lottery Ticket',
-  'verticals':       'Vertical Spreads',
-  'long-calls':      'Long Calls',
-};
-
-// Numeric sort weight for perf_status: green=2, amber=1, red=0
-function perfWeight(status) {
-  return status === 'green' ? 2 : status === 'amber' ? 1 : 0;
+// Numeric sort weight for health grade (A=best)
+function healthSortWeight(grade) {
+  return { A: 5, B: 4, C: 3, D: 2, F: 1 }[grade] ?? 0;
 }
 
 export const positionsColumns = [
@@ -70,10 +47,19 @@ export const positionsColumns = [
     align: 'left',
     sortable: false,
     render: (pos, ctx) => (
-      <span style={{ color: 'var(--text-muted)', fontSize: 9, lineHeight: 1 }}>
+      <span style={{ color: 'var(--muted, #8b949e)', fontSize: 9, lineHeight: 1 }}>
         {ctx?.isExpanded ? '▼' : '▶'}
       </span>
     ),
+  },
+  {
+    key: 'score',
+    label: 'Score',
+    width: 100,
+    align: 'left',
+    sortable: true,
+    sortValue: (pos) => pos.score ?? 0,
+    render: (pos) => <ScoreCell score={pos.score ?? 0} />,
   },
   {
     key: 'symbol',
@@ -82,73 +68,30 @@ export const positionsColumns = [
     align: 'left',
     sortable: true,
     render: (pos) => (
-      <span style={{ color: '#2dd4bf', fontWeight: 600 }}>{pos.symbol}</span>
+      <span style={{ color: '#2dd4bf', fontWeight: 700 }}>{pos.symbol}</span>
     ),
   },
   {
     key: 'pos_type',
-    label: 'Pos Type',
-    width: 80,
+    label: 'Type',
+    width: 70,
     align: 'center',
     sortable: true,
-    render: (pos) => {
-      const isLive = pos.source === 'LIVE';
-      return (
-        <Pill
-          label={isLive ? 'Live' : 'Paper'}
-          color={isLive ? '#4ade80' : '#60a5fa'}
-          bg={isLive ? 'rgba(74,222,128,0.12)' : 'rgba(96,165,250,0.12)'}
-        />
-      );
-    },
     sortKey: 'source',
+    render: (pos) => <PositionTypeBadge source={pos.source} />,
   },
   {
     key: 'strategy_key',
     label: 'Strategy',
-    width: 120,
+    width: 60,
     align: 'center',
     sortable: true,
-    render: (pos) => (
-      <Pill
-        label={STRATEGY_LABELS[pos.strategy_key] ?? pos.strategy_key}
-        color="#2dd4bf"
-        bg="rgba(45,212,191,0.08)"
-      />
-    ),
-  },
-  {
-    key: 'structure',
-    label: 'Structure',
-    width: 80,
-    align: 'center',
-    sortable: true,
-    render: (pos) => pos.structure ?? '—',
-  },
-  {
-    key: 'trade_type',
-    label: 'Type',
-    width: 90,
-    align: 'center',
-    sortable: true,
-    render: (pos) => {
-      const t = TRADE_TYPE_MAP[pos.trade_type];
-      if (!t) return <span style={{ color: 'var(--text-muted)' }}>{pos.trade_type ?? '—'}</span>;
-      return <Pill label={t.label} color={t.color} bg={t.bg} />;
-    },
-  },
-  {
-    key: 'analysis_date',
-    label: 'Analysis Date',
-    width: 130,
-    align: 'center',
-    sortable: true,
-    render: (pos) => pos.analysis_date ? formatDate(pos.analysis_date, true) : '—',
+    render: (pos) => <StrategyPill strategy={toUnderscoreKey(pos.strategy_key)} />,
   },
   {
     key: 'strike_spread',
     label: 'Strike/Spread',
-    width: 90,
+    width: 100,
     align: 'center',
     sortable: false,
     render: (pos) => {
@@ -184,23 +127,20 @@ export const positionsColumns = [
   {
     key: 'pnl',
     label: 'P&L',
-    width: 100,
+    width: 130,
     align: 'right',
     sortable: true,
+    sortValue: (pos) => pos.pnl_amount ?? -Infinity,
     render: (pos) => {
       const amt = pos.pnl_amount;
       const pct = pos.pnl_pct;
       if (amt == null) return '—';
-      const color = amt >= 0 ? '#4ade80' : '#f87171';
+      const color = amt >= 0 ? 'var(--green, #4ade80)' : 'var(--red, #f87171)';
       const sign  = amt >= 0 ? '+' : '';
       return (
-        <span style={{ color }}>
-          {sign}{Number(amt).toFixed(0)}{' '}
-          {pct != null && (
-            <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>
-              ({sign}{Number(pct).toFixed(1)}%)
-            </span>
-          )}
+        <span style={{ color, fontFamily: 'monospace' }}>
+          {sign}{Number(amt).toFixed(2)}
+          {pct != null && ` (${sign}${Number(pct).toFixed(2)}%)`}
         </span>
       );
     },
@@ -214,13 +154,13 @@ export const positionsColumns = [
     render: (pos) => pos.dte != null ? String(pos.dte) : '—',
   },
   {
-    key: 'perf_status',
-    label: 'Perf',
-    width: 50,
+    key: 'health',
+    label: 'Health',
+    width: 60,
     align: 'center',
     sortable: true,
-    sortValue: (pos) => perfWeight(pos.perf_status),
-    render: (pos) => <PerfDot status={pos.perf_status ?? 'red'} />,
+    sortValue: (pos) => healthSortWeight(pos.health_grade),
+    render: (pos) => <PositionHealthBadge grade={pos.health_grade} />,
   },
   {
     key: '_actions',
@@ -251,4 +191,4 @@ export const positionsColumns = [
   },
 ];
 
-export const POSITIONS_DEFAULT_SORT = { key: 'perf_status', dir: 'desc' };
+export const POSITIONS_DEFAULT_SORT = { key: 'score', dir: 'desc' };
