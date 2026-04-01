@@ -1,4 +1,4 @@
-# Options Analyzer — Project Hierarchy (Updated 2026-03-31 18:00)
+# Options Analyzer — Project Hierarchy (Updated 2026-03-31 20:00)
 
 ```
 Options Analyzer/                          ← VS Code workspace root
@@ -90,6 +90,7 @@ Options Analyzer/                          ← VS Code workspace root
         │   ├── TradeEvaluationCard.jsx    ← Phase 2.11 structured evaluation result card
         │   ├── ProbabilityMatrix.jsx      ← Phase 2.11 Black-Scholes heatmap visualization
         │   ├── PositionHealthBadge.jsx    ← Phase 2.10 A-F health grade badge
+        │   ├── RefreshConfirmDialog.jsx   ← Reusable batch-refresh confirmation dialog — used by PositionsPage and StrategyPage
         │   └── TradeDetail/               ← Sections A-E of inline trade detail expansion
         │       ├── index.js               ← Re-exports SectionA…SectionE
         │       ├── SectionA.jsx           ← Trade header (type badge, strikes, key metrics)
@@ -104,9 +105,9 @@ Options Analyzer/                          ← VS Code workspace root
         │
         └── pages/
             ├── TradesPage.jsx             ← Trades screen — search, QuoteBar, chart, 3 sections
-            ├── StrategyPage.jsx           ← /strategies/:key placeholder (full build in later session)
+            ├── StrategyPage.jsx           ← /strategies/:key — header, parameters, scoring weights, "Find trades →", strategy-filtered positions table
             ├── SecurityStrategiesPage.jsx ← Scan screen — card grid with 4-strategy score bars
-            ├── PositionsPage.jsx          ← Phase 2.10 positions list with health grades
+            ├── PositionsPage.jsx          ← v3: StrategyPill badges, health grade letters, versioned re-reads, group by strategy/symbol/health
             ├── DashboardPage.jsx          ← Dashboard with insight feed
             ├── VerticalsPage.jsx          ← (deprecated — migrated to TradesPage)
             └── LongCallsPage.jsx          ← (deprecated — migrated to TradesPage)

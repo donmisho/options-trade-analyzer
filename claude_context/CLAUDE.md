@@ -1,4 +1,4 @@
-﻿# Options Analyzer — CLAUDE.md (Updated 2026-03-31 18:00)
+﻿# Options Analyzer — CLAUDE.md (Updated 2026-03-31 20:00)
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -651,6 +651,10 @@ Key decisions summarized (v3.1 — 03-31-2026):
 - Strategy filtering MUST use trade_structure field, never hardcoded strategy names
 - Shared components: StrategyPill (SP/WG/TR/LT pills with tooltip), TradeTypeBadge (directional color, title case), ScoreCell (bar + number with threshold color)
 - Claude summary advice badge: white outlined (rgba(255,255,255,0.06) bg, rgba(255,255,255,0.35) border) — not purple
+- StrategyPage.jsx — full strategy page with header, editable parameters, read-only scoring weights, "Find trades →" navigation, and strategy-filtered positions table with Refresh all cost guardrail.
+- RefreshConfirmDialog.jsx — reusable confirmation dialog for multi-position Claude API refresh. Used on both PositionsPage and StrategyPage.
+- PositionsPage.jsx — v3 design with StrategyPill (abbreviated 2-letter pills), health grade letter badges (A-F), versioned re-reads with white outlined Claude advice badge, exit plan levels, group by strategy/symbol/health.
+- Claude API cost guardrail: Refresh all shows confirmation dialog when >1 position. Single position refresh runs without confirmation. One daily auto-refresh per position after market close. Never on page load or timers.
 
 ---
 
