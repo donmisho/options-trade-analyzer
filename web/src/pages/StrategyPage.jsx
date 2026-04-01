@@ -521,11 +521,6 @@ export default function StrategyPage() {
 
         <div style={{ marginLeft: 'auto' }}>
           <button
-            style={{
-              background: 'rgba(45,212,191,0.1)', border: '1px solid rgba(45,212,191,0.4)',
-              color: '#2dd4bf', padding: '4px 10px', borderRadius: 4, fontSize: 10,
-              fontFamily: 'monospace', cursor: 'pointer',
-            }}
             onClick={handleRefreshAll}
             disabled={refreshingAll}
             style={{

@@ -18,6 +18,7 @@ import {
   archivePosition,
   getPositionCurrentPrices,
 } from '../api/client';
+import RefreshConfirmDialog from '../components/RefreshConfirmDialog';
 import './PageShared.css';
 import './PositionsPage.css';
 
@@ -197,9 +198,8 @@ function AssessmentVersion({ version, defaultExpanded, isOriginal }) {
             {version.synopsis}
           </span>
         )}
-        <span style={{ fontSize: 9, color: 'var(--muted, #8b949e)', marginLeft: 'auto', display: 'flex', gap: 8 }}>
-          {isOriginal && <span>Original</span>}
-          <span>{dateStr}</span>
+        <span style={{ fontSize: 9, color: 'var(--muted, #8b949e)', marginLeft: 'auto' }}>
+          {dateStr}{isOriginal ? ' · Original' : ''}
         </span>
       </div>
 
@@ -477,7 +477,7 @@ function FilterBar({ filters, onChange, onRefreshAll, refreshingAll, filteredCou
           placeholder="e.g. META"
           value={filters.symbol}
           onChange={e => onChange('symbol', e.target.value)}
-          style={{ minWidth: 160 }}
+          style={{ width: 60 }}
         />
       </div>
 
@@ -793,48 +793,6 @@ export default function PositionsPage() {
     <div className="page-card">
       {toast && <Toast message={toast} onDismiss={() => setToast(null)} />}
 
-      {showRefreshConfirm && (
-        <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
-        }}>
-          <div style={{
-            border: '1px solid var(--border, #30363d)', borderRadius: 6, padding: 20,
-            maxWidth: 400, background: 'var(--bg2, #161b22)',
-          }}>
-            <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 10, color: 'var(--text, #e6edf3)' }}>
-              Refresh {pendingRefreshPositions?.length ?? 0} positions?
-            </div>
-            <p style={{ fontSize: 10, color: '#c9d1d9', lineHeight: 1.5, margin: '0 0 16px' }}>
-              This will trigger {pendingRefreshPositions?.length ?? 0} Claude API calls to update scores,
-              synopses, and exit levels for all positions matching your current filter.
-            </p>
-            <div style={{ display: 'flex', gap: 10 }}>
-              <button
-                onClick={confirmRefreshAll}
-                style={{
-                  padding: '7px 16px', fontSize: 11, fontFamily: 'monospace',
-                  background: 'rgba(45,212,191,0.1)', border: '1px solid rgba(45,212,191,0.4)',
-                  color: '#2dd4bf', borderRadius: 4, cursor: 'pointer',
-                }}
-              >
-                Confirm refresh
-              </button>
-              <button
-                onClick={() => setShowRefreshConfirm(false)}
-                style={{
-                  padding: '7px 14px', fontSize: 11, fontFamily: 'monospace',
-                  background: 'transparent', border: '1px solid #30363d',
-                  color: '#8b949e', borderRadius: 4, cursor: 'pointer',
-                }}
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       <div className="pos-page-header">
         <h2 className="page-title">
           <span className="icon">◈</span> Positions
@@ -850,6 +808,13 @@ export default function PositionsPage() {
         onRefreshAll={handleRefreshAllClick}
         refreshingAll={refreshingAll}
         filteredCount={filtered.length}
+      />
+
+      <RefreshConfirmDialog
+        positionCount={pendingRefreshPositions?.length ?? 0}
+        onConfirm={confirmRefreshAll}
+        onCancel={() => setShowRefreshConfirm(false)}
+        isOpen={showRefreshConfirm}
       />
 
       {loading && (
