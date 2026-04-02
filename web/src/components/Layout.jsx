@@ -14,7 +14,7 @@
  * so OptionsTerminal receives the correct config.
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import Logo from '../assets/Logo';
 import Watchlist from './Watchlist';
@@ -69,6 +69,7 @@ export default function Layout() {
 
   // ── Schwab status (moved from Header.jsx) ────────────────────────────────
   const [schwabConnected, setSchwabConnected] = useState(null);
+  const schwabPopupRef = useRef(null);
 
   const checkSchwabStatus = useCallback(async () => {
     try {
@@ -87,13 +88,30 @@ export default function Layout() {
 
   const handleSchwabClick = async () => {
     if (schwabConnected) return;
+
+    // Fix 5: Focus existing popup if still open
+    if (schwabPopupRef.current && !schwabPopupRef.current.closed) {
+      schwabPopupRef.current.focus();
+      return;
+    }
+
     try {
       const authUrl = await getSchwabAuthUrl();
       const popup   = window.open(authUrl, 'schwab-login', 'width=600,height=700,menubar=no,toolbar=no');
+
+      // Fix 4: Detect popup blocker
+      if (!popup || popup.closed) {
+        alert('Popup was blocked by your browser. Please allow popups for this site and try again.');
+        return;
+      }
+
+      schwabPopupRef.current = popup;
+
       const pollInterval = setInterval(async () => {
         try {
           if (popup?.closed) {
             clearInterval(pollInterval);
+            schwabPopupRef.current = null;
             await checkSchwabStatus();
             return;
           }
@@ -101,12 +119,16 @@ export default function Layout() {
           if (status.connected) {
             setSchwabConnected(true);
             clearInterval(pollInterval);
+            schwabPopupRef.current = null;
             if (popup && !popup.closed) popup.close();
             fetchPrices();
           }
         } catch { /* keep polling */ }
       }, 2000);
-      setTimeout(() => clearInterval(pollInterval), 5 * 60 * 1000);
+      setTimeout(() => {
+        clearInterval(pollInterval);
+        schwabPopupRef.current = null;
+      }, 5 * 60 * 1000);
     } catch (e) {
       console.error('Schwab auth initiation failed:', e);
     }

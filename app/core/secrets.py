@@ -15,6 +15,7 @@ HOW IT WORKS:
 """
 
 import os
+import pathlib
 import logging
 from typing import Optional
 
@@ -22,6 +23,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+
+_DEV_TOKEN_FILE = pathlib.Path(".schwab_tokens.json")
 
 
 
@@ -93,6 +96,15 @@ class SecretsManager:
             env_name = full_name.replace("-", "_").upper()
             value = os.getenv(env_name)
 
+        # Dev-mode file fallback for Schwab tokens (survives uvicorn --reload restarts)
+        if value is None and not self._client and name == "schwab-token-data" and _DEV_TOKEN_FILE.exists():
+            try:
+                file_value = _DEV_TOKEN_FILE.read_text().strip()
+                if file_value:
+                    value = file_value
+            except Exception:
+                pass
+
         if value is not None:
             self._cache[full_name] = value
 
@@ -117,8 +129,13 @@ class SecretsManager:
                 logger.error(f"SecretsManager: Key Vault set({full_name}) failed: {e}")
                 return False
         else:
-            # Dev mode: cache only (no persistent storage)
+            # Dev mode: cache + file persistence for Schwab tokens
             self._cache[full_name] = value
+            if name == "schwab-token-data":
+                try:
+                    _DEV_TOKEN_FILE.write_text(value)
+                except Exception:
+                    pass  # Fire-and-forget — don't block the main flow
             logger.info(f"SecretsManager: Updated {full_name} in memory cache (dev mode)")
             return True
 

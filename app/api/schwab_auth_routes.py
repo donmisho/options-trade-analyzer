@@ -26,7 +26,7 @@ import logging
 from urllib.parse import unquote
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import RedirectResponse, HTMLResponse
+from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse
 
 from app.auth.dependencies import require_read, require_write
 
@@ -169,6 +169,7 @@ async def schwab_callback(request: Request):
                 <br>
                 <p>You can close this window and return to the app.</p>
                 <p><em>The app will now use Schwab for market data.</em></p>
+                <script>setTimeout(function() {{ window.close(); }}, 500);</script>
             </body></html>
             """,
             status_code=200,
@@ -231,7 +232,10 @@ async def schwab_status(user: dict = Depends(require_read)):
     status in the UI and prompt for re-auth when needed.
     """
     manager = _get_token_manager()
-    return manager.get_status()
+    return JSONResponse(
+        content=manager.get_status(),
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
+    )
 
 
 # ------------------------------------------------------------------
