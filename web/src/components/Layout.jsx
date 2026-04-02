@@ -21,11 +21,22 @@ import Watchlist from './Watchlist';
 import Toast from './Toast';
 import TradeAgentPanel from './TradeAgentPanel';
 import SystemVarsPanel from './SystemVarsPanel';
+import StartupProgress from './StartupProgress';
 import { useApp } from '../context/AppContext';
 import { SCORECARD_STRATEGIES } from '../strategy-configs/index';
 import { getSchwabStatus, getSchwabAuthUrl } from '../api/client';
 import { msalInstance } from '../auth/msalConfig';
 import './Layout.css';
+
+// Base URL for the backend (strips the /api/v1 suffix from the API client base)
+const BACKEND_ORIGIN = import.meta.env.VITE_API_BASE_URL || '';
+
+const INITIAL_STEPS = [
+  { id: 'backend', label: 'Connecting to backend',   status: 'pending', hint: null },
+  { id: 'auth',    label: 'Checking authentication', status: 'pending', hint: null },
+  { id: 'schwab',  label: 'Checking Schwab connection', status: 'pending', hint: null },
+  { id: 'ready',   label: 'Ready',                   status: 'pending', hint: null },
+];
 
 // ─── Spec-exact colors ────────────────────────────────────────────────────────
 const RAIL_W = 200;
@@ -67,6 +78,16 @@ export default function Layout() {
   const location = useLocation();
   const navigate  = useNavigate();
 
+  // ── Startup progress state ────────────────────────────────────────────────
+  const [startupSteps, setStartupSteps] = useState(INITIAL_STEPS);
+  const [startupVisible, setStartupVisible] = useState(true);
+  const [startupComplete, setStartupComplete] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
+
+  const updateStep = useCallback((id, status, hint = null) => {
+    setStartupSteps(prev => prev.map(s => s.id === id ? { ...s, status, hint } : s));
+  }, []);
+
   // ── Schwab status (moved from Header.jsx) ────────────────────────────────
   const [schwabConnected, setSchwabConnected] = useState(null);
   const schwabPopupRef = useRef(null);
@@ -80,11 +101,91 @@ export default function Layout() {
     }
   }, []);
 
+  // Background 5-minute poll — only after startup completes
   useEffect(() => {
-    checkSchwabStatus();
+    if (!startupComplete) return;
     const interval = setInterval(checkSchwabStatus, 5 * 60 * 1000);
     return () => clearInterval(interval);
-  }, [checkSchwabStatus]);
+  }, [startupComplete, checkSchwabStatus]);
+
+  // ── Startup sequence ──────────────────────────────────────────────────────
+  useEffect(() => {
+    let cancelled = false;
+    // Reset steps on retry
+    setStartupSteps(INITIAL_STEPS);
+
+    const minDelay = (ms) => new Promise(r => setTimeout(r, ms));
+
+    const runStartup = async () => {
+      // Step 1: Backend health check
+      updateStep('backend', 'active');
+      try {
+        const [resp] = await Promise.all([
+          fetch(`${BACKEND_ORIGIN}/health`, { signal: AbortSignal.timeout(30000) }),
+          minDelay(400),
+        ]);
+        if (cancelled) return;
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        updateStep('backend', 'success');
+      } catch {
+        if (cancelled) return;
+        updateStep('backend', 'error', 'Backend unavailable. Is the server running?');
+        return;
+      }
+
+      // Step 2: Authentication check
+      updateStep('auth', 'active');
+      try {
+        const accounts = msalInstance.getAllAccounts();
+        if (accounts.length > 0) {
+          await Promise.all([
+            msalInstance.acquireTokenSilent({ scopes: ['openid'], account: accounts[0] }),
+            minDelay(400),
+          ]);
+        } else {
+          await minDelay(400);
+        }
+        if (cancelled) return;
+        updateStep('auth', 'success');
+      } catch {
+        if (cancelled) return;
+        // Auth errors handled by route guards — don't block startup
+        updateStep('auth', 'success');
+      }
+
+      // Step 3: Schwab connection check
+      updateStep('schwab', 'active');
+      try {
+        const [status] = await Promise.all([getSchwabStatus(), minDelay(400)]);
+        if (cancelled) return;
+        const connected = status?.connected === true;
+        setSchwabConnected(connected);
+        if (connected) {
+          updateStep('schwab', 'success');
+        } else {
+          updateStep('schwab', 'warning', 'Click "Schwab Disconnected" in the sidebar to connect.');
+        }
+      } catch {
+        if (cancelled) return;
+        setSchwabConnected(false);
+        updateStep('schwab', 'warning', 'Could not reach Schwab. Connect when ready.');
+      }
+
+      // Step 4: Ready
+      if (cancelled) return;
+      updateStep('ready', 'success');
+      await minDelay(600);
+      if (cancelled) return;
+
+      // Fade out then unmount widget
+      setStartupVisible(false);
+      setTimeout(() => { if (!cancelled) setStartupComplete(true); }, 310);
+    };
+
+    runStartup();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [retryCount]);
 
   const handleSchwabClick = async () => {
     if (schwabConnected) return;
@@ -308,9 +409,10 @@ export default function Layout() {
           >
             <div style={{
               width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
-              backgroundColor: schwabConnected === null ? '#888'
+              backgroundColor: schwabConnected === null ? '#fbbf24'
                 : schwabConnected ? '#4ade80' : '#f87171',
               boxShadow: schwabConnected ? '0 0 4px rgba(74,222,128,0.5)' : 'none',
+              animation: schwabConnected === null ? 'ota-pulse 1.2s ease-in-out infinite' : 'none',
             }} />
             <span style={{ fontSize: 10, color: MUTED }}>
               {schwabConnected === null ? 'Checking…'
@@ -344,7 +446,7 @@ export default function Layout() {
               localStorage.removeItem('ota_token');
               // Clear MSAL session state so the next sign-in doesn't find a
               // stale cached account and silently fail.
-              try { msalInstance.clearCache(); } catch {}
+              try { msalInstance.clearCache(); } catch { /* best-effort */ }
               window.location.href = '/login';
             }}
             style={{
@@ -399,7 +501,15 @@ export default function Layout() {
         )}
 
         <main className="main-content">
-          <Outlet />
+          {!startupComplete ? (
+            <StartupProgress
+              steps={startupSteps}
+              visible={startupVisible}
+              onRetry={() => { setStartupVisible(true); setRetryCount(c => c + 1); }}
+            />
+          ) : (
+            <Outlet />
+          )}
         </main>
       </div>
 

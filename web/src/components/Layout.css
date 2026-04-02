@@ -3,6 +3,11 @@
  * The left rail is fully inline-styled in Layout.jsx (per spec).
  */
 
+@keyframes ota-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
 .main-content {
   padding: 24px;
   min-height: 100vh;
