@@ -1,4 +1,4 @@
-# OTA Agentic Architecture Plan
+# Options Analyzer — architecture-plan.md (Updated 2026-04-02 12:00)
 ## Options Trade Analyzer — Phase 2.6 and Forward
 
 ---
@@ -601,15 +601,16 @@ New SQL tables by phase:
 - **Phase 0**: Security & Authentication ✅
 - **Phase 1**: Configuration & Market Data ✅
 - **Phase 2.1-2.4**: Analysis Engines + AI Evaluation ✅
-- **Phase 2.5**: Frontend Completion (partial) 🔶
-- **Phase 2.6**: Claude Trade Agent Redesign 🔶
+- **Phase 2.5**: Frontend Completion (partial) ✅
+- **Phase 2.6**: Claude Trade Agent Redesign ✅
 - **Phase 2.7**: Options Decision Terminal ✅
 - **Phase 2.8**: Configurable System Variables, Dashboard, Schwab Routing ✅
-- **Phase 2.9**: Security Dashboard + Strategy Scorecard 🔲
-- **Phase 2.10**: Positions Page + Follow/Take Position 🔲
-- **Phase 2.11**: Claude Structured Evaluation + Probability Matrix 🔲
-- **Phase 3**: Azure Deployment 🔲
-- **Phase 3.5**: Market Intelligence Aggregator + Position Monitor Agent 🔲
-- **Phase 3.6**: Insight Engine (Generic) + Options Domain 🔲
+- **Phase 2.9**: Security Dashboard + Strategy Scorecard ✅
+- **Phase 2.10**: Positions Page + Follow/Take Position ✅
+- **Phase 2.11**: Claude Structured Evaluation + Probability Matrix ✅
+- **Phase 3**: Azure Deployment ✅ (live 2026-03-04 — App Service + Static Web App)
+- **Phase 3.5**: Market Intelligence Aggregator + Position Monitor Agent ✅
+- **Phase 3.6**: Insight Engine (Generic) + Options Domain ✅
+- **Sprint 4**: Trades page unification — TradesPage.jsx replaces VerticalsPage + LongCallsPage, Sections A-E fully wired, Puts & calls live, per-section Config drawers, SecurityStrategiesPage v3 ✅
 - **Phase 4**: MCP Integration 🔲
-- **Phase 5**: Live Trading Execution 🔲
+- **Phase 5**: Live Trading Execution 🔲 (positions/take records intent only — Schwab order entry not yet wired)

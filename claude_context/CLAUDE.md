@@ -1,4 +1,4 @@
-﻿# Options Analyzer — CLAUDE.md (Updated 2026-03-31 20:00)
+﻿# Options Analyzer — CLAUDE.md (Updated 2026-04-02 12:00)
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -439,14 +439,14 @@ web/src/
 │   ├── AskClaudePanel.jsx               # DEPRECATED — remove after 2.11 ships
 │   └── ...
 └── pages/
-    ├── OptionsTerminal.jsx              # PRIMARY: 4-stage analysis shell
-    ├── SecurityDashboard.jsx            # [NEW 2.9] Per-symbol strategy scorecard
-    ├── PositionsPage.jsx                # [NEW 2.10] Replaces FavoritesPage
+    ├── TradesPage.jsx                   # [NEW Sprint 4] Unified trades terminal — Sections A-E fully wired
+    ├── SecurityStrategiesPage.jsx       # [NEW Sprint 4] Scan screen — no Config drawer
+    ├── StrategyPage.jsx                 # Per-strategy detail — parameters, weights, positions, Find trades
+    ├── PositionsPage.jsx                # [NEW 2.10] Positions with health grades, versioned re-reads
     ├── DashboardPage.jsx                # [UPDATED 3.6] Adds insight feed
-    ├── VerticalsPage.jsx                # DEPRECATED
-    ├── NakedOptionsPage.jsx             # DEPRECATED
-    ├── DirectionalPage.jsx
-    └── FavoritesPage.jsx                # DEPRECATED — replaced by PositionsPage
+    ├── OptionsTerminal.jsx              # RETIRED — replaced by TradesPage.jsx (file kept, not routed)
+    ├── SecurityDashboard.jsx            # RETIRED — replaced by SecurityStrategiesPage.jsx (file kept, not routed)
+    └── DirectionalPage.jsx              # LEGACY — redirects to /dashboard
 ```
 
 ---
@@ -642,12 +642,12 @@ All finalized UI decisions live in `UI-GUIDANCE.md` in `claude_context/`.
 Before building or modifying ANY frontend component, read that file.
 It is the visual contract. When it conflicts with other sources, it wins.
 
-Key decisions summarized (v3.1 — 03-31-2026):
+Key decisions summarized (v3.2 — 04-02-2026):
 - Nav: Left rail (200px fixed). Items: Dashboard · Security Strategies · Trades · Positions. Strategy sub-nav: Steady Paycheck / Weekly Grind / Trend Rider / Lottery Ticket.
-- Verticals and Puts & Calls merged into the Trades page per UI-GUIDANCE.md v3.1
+- Verticals and Puts & Calls merged into TradesPage.jsx (Sprint 4). VerticalsPage.jsx and LongCallsPage.jsx deleted.
 - QuoteBar is ONE shared component used identically on every page
 - Watchlist click navigates to Security Strategies for that symbol
-- Trades page has 3 collapsible sections: Vertical spreads · Puts & calls · Iron condors (coming soon)
+- Trades page has 3 collapsible sections: Vertical spreads (live) · Puts & calls (live) · Iron condors (coming soon). Each section has its own ⚙ Config drawer (SectionConfigDrawer).
 - Strategy filtering MUST use trade_structure field, never hardcoded strategy names
 - Shared components: StrategyPill (SP/WG/TR/LT pills with tooltip), TradeTypeBadge (directional color, title case), ScoreCell (bar + number with threshold color)
 - Claude summary advice badge: white outlined (rgba(255,255,255,0.06) bg, rgba(255,255,255,0.35) border) — not purple
@@ -655,6 +655,8 @@ Key decisions summarized (v3.1 — 03-31-2026):
 - RefreshConfirmDialog.jsx — reusable confirmation dialog for multi-position Claude API refresh. Used on both PositionsPage and StrategyPage.
 - PositionsPage.jsx — v3 design with StrategyPill (abbreviated 2-letter pills), health grade letter badges (A-F), versioned re-reads with white outlined Claude advice badge, exit plan levels, group by strategy/symbol/health.
 - Claude API cost guardrail: Refresh all shows confirmation dialog when >1 position. Single position refresh runs without confirmation. One daily auto-refresh per position after market close. Never on page load or timers.
+- Trade detail Sections A-E fully wired in TradesPage (Sprint 4): Section D uses live B-S probability matrix; Section E fully wired evaluate → verdict → Follow/Take Position → follow-up.
+- Security Strategies page: Config drawer removed (Part 11). SMA periods fixed at 8/21/50.
 
 ---
 
@@ -675,6 +677,8 @@ Key decisions summarized (v3.1 — 03-31-2026):
 
 - No backend tests yet (validation via Swagger UI)
 - MCP integration (Phase 4) not started
-- Live trading execution (Phase 5) not started
+- Live trading execution (Phase 5) not started — /positions/take records intent only, not wired to Schwab order entry
 - Social sentiment, fundamentals providers not yet built
 - Watchlist/favorites not yet synced to backend (localStorage only)
+- Iron condors section in TradesPage not yet built (coming soon placeholder)
+- OptionsTerminal.jsx and SecurityDashboard.jsx are retired but not yet deleted from the codebase

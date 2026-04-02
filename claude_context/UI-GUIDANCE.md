@@ -1,8 +1,8 @@
-# UI-GUIDANCE.md
+# Options Analyzer — UI-GUIDANCE.md (Updated 2026-04-02 12:00)
 
 ## Options Trade Analyzer — Experience & Visual Contract
 
-_Version 3.1 — 03-31-2026_
+_Version 3.2 — 04-02-2026_
 _Replaces: UI-DECISIONS.md (all prior content superseded)_
 _Reference mockups: `ota-experience-mockups-v3.html` in project root_
 
@@ -347,12 +347,13 @@ strategy names inside advice badges all use the same color per strategy.
 
 ### Screen 2: Trades
 **Route:** /trades, /trades?symbol=XXX, /trades?strategy=XXX
+**File:** `TradesPage.jsx` — Sprint 4 unified terminal (VerticalsPage.jsx and LongCallsPage.jsx deleted)
 
 - Symbol search, QuoteBar, SMA chart (configurable)
-- Collapsible sections per trade structure, each with own Config
+- Collapsible sections per trade structure, each with own ⚙ Config drawer (functional — Verticals→SP+WG, Puts & calls→TR+LT)
 - Row: chevron → score → spread/strike → type badge → data → pills (no row numbers)
 - Type badges use clean display names with bull=green / bear=red coloring
-- Sections: Vertical spreads, Puts & calls, Iron condors (coming soon)
+- Sections: Vertical spreads (live — POST /api/v1/analyze/verticals), Puts & calls (live — POST /api/v1/analyze/long-calls), Iron condors (coming soon)
 - Click row → trade detail expansion (Sections A-E)
 
 ### Trade Detail Expansion
@@ -365,9 +366,9 @@ strikes, expiry, DTE, entry, max P/L, breakeven, R:R, triggers, time exit
 
 **C — Outcome summary:** P(max profit), P(breakeven+), P(partial), P(max loss), EV, EV % risk. Badge: POSITIVE/NEGATIVE EV.
 
-**D — Probability matrix:** Color zones, cumulative prob, highlighted rows.
+**D — Probability matrix:** Color zones, cumulative prob, highlighted rows. Live — ProbabilityMatrix component, B-S data from POST /api/v1/analyze/probability-matrix.
 
-**E — Claude's Read:** Verdict badge + summary advice (white badge, strategy name in color) + detailed analysis + key level + actions (Follow / Take Position / follow-up / Discard).
+**E — Claude's Read:** Verdict badge + summary advice (white badge, strategy name in color) + detailed analysis + key level + actions (Follow / Take Position / follow-up / Discard). Fully wired — evaluate → structured verdict → Follow/Take Position records to positions table → follow-up Q&A loop.
 
 ### Screen 3: Strategy Page
 **Route:** /strategies/{key}
@@ -393,8 +394,8 @@ strikes, expiry, DTE, entry, max P/L, breakeven, R:R, triggers, time exit
 
 | Retired | Replaced by |
 |---------|------------|
-| Verticals page | Trades "Vertical spreads" section |
-| Puts & Calls page | Trades "Puts & calls" section |
+| VerticalsPage.jsx | Deleted — Trades "Vertical spreads" section |
+| LongCallsPage.jsx / NakedOptionsPage.jsx | Deleted — Trades "Puts & calls" section |
 | 4-column expansion panel | Trade detail Sections A-E |
 | Generic composite score | Strategy-specific scores |
 | Scoring weight sliders on Scan | Backend strategy definitions |

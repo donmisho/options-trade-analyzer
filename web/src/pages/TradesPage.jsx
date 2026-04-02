@@ -37,9 +37,9 @@ const ABBR_TO_KEY = {
   LT: 'lottery-ticket',
 };
 
-// Strategy keys shown in each section's Config drawer
-const VERT_STRATEGY_KEYS  = ['steady-paycheck', 'weekly-grind'];
-const CALLS_STRATEGY_KEYS = ['trend-rider', 'lottery-ticket'];
+// Strategy keys shown in each section's Config drawer — derived from registry
+const VERT_STRATEGY_KEYS  = SCORECARD_STRATEGIES.filter(cfg => cfg.trade_structure === 'credit_spread').map(cfg => cfg.key);
+const CALLS_STRATEGY_KEYS = SCORECARD_STRATEGIES.filter(cfg => cfg.trade_structure === 'long_option').map(cfg => cfg.key);
 
 // ─── Normal CDF (Abramowitz & Stegun approximation, max error 1.5×10⁻⁷) ──────
 function normCdf(z) {
@@ -406,8 +406,7 @@ function SectionConfigDrawer({ open, onClose, strategyKeys = [], onApply }) {
 
   const [draft, setDraft] = useState(() => loadDraft(strategyKeys[0]));
 
-  useEffect(() => { if (activeKey) setDraft(loadDraft(activeKey)); }, [activeKey]); // eslint-disable-line react-hooks/set-state-in-effect
-  useEffect(() => { if (open && activeKey) setDraft(loadDraft(activeKey)); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps,react-hooks/set-state-in-effect
+  useEffect(() => { if (open && activeKey) setDraft(loadDraft(activeKey)); }, [open, activeKey]); // eslint-disable-line react-hooks/set-state-in-effect
 
   function handleApply() {
     try {
