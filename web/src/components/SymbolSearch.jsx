@@ -47,14 +47,10 @@ export default function SymbolSearch({
   const containerRef = useRef(null);
 
   // Reset query when parent signals a new initialValue (e.g. page navigation)
-  const prevInitial = useRef(initialValue);
-  if (prevInitial.current !== initialValue) {
-    prevInitial.current = initialValue;
-    // Synchronous update during render — avoids cascading effects
-    if (query !== (initialValue || '')) {
-      // Will be corrected on next render tick via state
-    }
-  }
+  useEffect(() => {
+    setQuery(initialValue || '');
+    dispatch({ type: 'CLOSE' });
+  }, [initialValue]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Run searchFn whenever query changes
   useEffect(() => {

@@ -17,7 +17,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import Logo from '../assets/Logo';
-import Watchlist from './Watchlist';
 import Toast from './Toast';
 import TradeAgentPanel from './TradeAgentPanel';
 import SystemVarsPanel from './SystemVarsPanel';
@@ -234,16 +233,6 @@ export default function Layout() {
       console.error('Schwab auth initiation failed:', e);
     }
   };
-
-  // ── Watchlist toggle ──────────────────────────────────────────────────────
-  const [watchlistOpen, setWatchlistOpen] = useState(() => {
-    const saved = localStorage.getItem('watchlist_open');
-    return saved === null ? true : saved === 'true';
-  });
-
-  useEffect(() => {
-    localStorage.setItem('watchlist_open', String(watchlistOpen));
-  }, [watchlistOpen]);
 
   // ── Nav click handler ─────────────────────────────────────────────────────
   const handleNavClick = (item) => {
@@ -473,33 +462,6 @@ export default function Layout() {
         position: 'relative',
       }}>
 
-        {/* Watchlist toggle — visible only on analysis pages, fixed so it always shows */}
-        {/\/(trades|security-strategies)/.test(location.pathname) && (
-          <button
-            onClick={() => setWatchlistOpen(o => !o)}
-            style={{
-              position: 'fixed',
-              top: 8,
-              right: watchlistOpen ? 220 : 0,
-              zIndex: 95,
-              background: '#161b22',
-              border: `1px solid ${BORD}`,
-              borderRight: watchlistOpen ? `1px solid ${BORD}` : 'none',
-              color: MUTED,
-              padding: '8px 6px',
-              borderRadius: watchlistOpen ? '4px 0 0 4px' : '4px 0 0 4px',
-              fontSize: 10,
-              fontFamily: 'monospace',
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-              transition: 'right 0.15s ease',
-            }}
-            title={watchlistOpen ? 'Hide Watchlist' : 'Show Watchlist'}
-          >
-            {watchlistOpen ? '◀' : '▶'}
-          </button>
-        )}
-
         <main className="main-content">
           {!startupComplete ? (
             <StartupProgress
@@ -512,24 +474,6 @@ export default function Layout() {
           )}
         </main>
       </div>
-
-      {/* Watchlist panel — fixed right edge overlay, only on analysis pages */}
-      {watchlistOpen && /\/(trades|security-strategies)/.test(location.pathname) && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          right: 0,
-          width: 220,
-          height: '100vh',
-          backgroundColor: '#161b22',
-          borderLeft: `1px solid ${BORD}`,
-          zIndex: 90,
-          overflowY: 'auto',
-          paddingTop: 16,
-        }}>
-          <Watchlist />
-        </div>
-      )}
 
       <Toast />
       <TradeAgentPanel />

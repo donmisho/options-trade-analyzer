@@ -15,7 +15,7 @@ function normalize(strategy) {
   if (!strategy) return null;
   const upper = strategy.toUpperCase();
   if (ABBR_TO_STRATEGY_KEY[upper]) return ABBR_TO_STRATEGY_KEY[upper];
-  const lower = strategy.toLowerCase();
+  const lower = strategy.toLowerCase().replace(/-/g, '_');
   if (STRATEGY_COLORS[lower]) return lower;
   return null;
 }

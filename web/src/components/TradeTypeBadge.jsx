@@ -17,7 +17,14 @@ function toTitleCase(str) {
 }
 
 function getColor(type) {
-  const first = (type || '').toUpperCase().split(/[_ ]/)[0];
+  const upper = (type || '').toUpperCase();
+  if (upper === 'LONG_PUT') {
+    return { bg: 'rgba(248,113,113,0.15)', text: 'var(--red, #f87171)' };
+  }
+  if (upper === 'LONG_CALL') {
+    return { bg: 'rgba(96,165,250,0.15)', text: 'var(--blue, #60a5fa)' };
+  }
+  const first = upper.split(/[_ ]/)[0];
   if (first === 'BULL' || first === 'LONG') {
     return { bg: 'rgba(74,222,128,0.15)', text: 'var(--green, #4ade80)' };
   }

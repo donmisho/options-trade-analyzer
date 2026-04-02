@@ -70,7 +70,13 @@ function ExitSignalBadge({ signal }) {
   );
 }
 
+import { useState } from 'react';
+
 export default function SectionB({ scenarios = [], totalEV }) {
+  const [showFullTable, setShowFullTable] = useState(false);
+  const keyRows = scenarios.filter(r => r.exitSignal);
+  const displayRows = showFullTable ? scenarios : keyRows;
+
   return (
     <div>
       <div style={sectionLabelStyle}>EXIT SCENARIO ANALYSIS</div>
@@ -87,7 +93,7 @@ export default function SectionB({ scenarios = [], totalEV }) {
           </tr>
         </thead>
         <tbody>
-          {scenarios.map((row, i) => {
+          {displayRows.map((row, i) => {
             const pnl = Number(row.pnl ?? 0);
             const ev = Number(row.expectedValue ?? 0);
             const isLoss = pnl < 0;
@@ -145,6 +151,24 @@ export default function SectionB({ scenarios = [], totalEV }) {
           </tr>
         </tfoot>
       </table>
+      {scenarios.length > keyRows.length && (
+        <button
+          onClick={() => setShowFullTable(p => !p)}
+          style={{
+            marginTop: 6,
+            background: 'transparent',
+            border: '1px solid #30363d',
+            color: '#8b949e',
+            padding: '4px 10px',
+            borderRadius: 4,
+            fontSize: 10,
+            fontFamily: 'monospace',
+            cursor: 'pointer',
+          }}
+        >
+          {showFullTable ? 'Show key exits ▲' : 'Show full analysis ▼'}
+        </button>
+      )}
     </div>
   );
 }

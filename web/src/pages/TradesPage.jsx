@@ -692,7 +692,7 @@ function TradeDetailExpansion({
 // ─── Main component ───────────────────────────────────────────────────────────
 export default function TradesPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const { positionSymbols } = useApp();
+  const { positionSymbols, addToWatchlist } = useApp();
   const { showToast } = useToast();
 
   const symbol        = searchParams.get('symbol')   || '';
@@ -806,6 +806,7 @@ export default function TradesPage() {
 
   // ── Symbol select ────────────────────────────────────────────────────────
   async function handleSymbolSelect(sym) {
+    addToWatchlist(sym);
     const next = new URLSearchParams(searchParams);
     next.set('symbol', sym);
     setSearchParams(next, { replace: true });
@@ -870,6 +871,7 @@ export default function TradesPage() {
           symbol,
           current_price: underlying,
           iv: trade.iv || trade.mid_iv || 0.25,
+          sma_alignment: { sma_8: 'N/A', sma_21: 'N/A', sma_50: 'N/A', alignment: 'mixed' },
           strategy_keys: strategyKeys,
           trade,
         });
