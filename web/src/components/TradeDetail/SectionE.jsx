@@ -3,10 +3,8 @@ import { STRATEGY_COLORS, ABBR_TO_STRATEGY_KEY } from '../../utils/strategyColor
 
 function getStrategyColor(strategyKey) {
   if (!strategyKey) return 'var(--text)';
-  // Try abbr lookup first (SP/WG/TR/LT)
   const abbrKey = ABBR_TO_STRATEGY_KEY[strategyKey.toUpperCase()];
   if (abbrKey) return STRATEGY_COLORS[abbrKey]?.text || 'var(--text)';
-  // Try normalized key (steady_paycheck, steady-paycheck, etc.)
   const normalized = strategyKey.toLowerCase().replace(/[-\s]+/g, '_');
   return STRATEGY_COLORS[normalized]?.text || 'var(--text)';
 }
@@ -16,22 +14,20 @@ function VerdictBadge({ verdict }) {
   const upper = verdict.toUpperCase();
   const styles = {
     EXECUTE: { bg: 'rgba(74,222,128,0.15)', color: 'var(--green)' },
-    WAIT: { bg: 'rgba(245,158,11,0.15)', color: 'var(--amber)' },
-    PASS: { bg: 'rgba(248,113,113,0.15)', color: 'var(--red)' },
+    WAIT:    { bg: 'rgba(245,158,11,0.15)',  color: 'var(--amber)' },
+    PASS:    { bg: 'rgba(248,113,113,0.15)', color: 'var(--red)'   },
   };
   const s = styles[upper] || { bg: 'rgba(255,255,255,0.06)', color: 'var(--muted)' };
   return (
-    <span
-      style={{
-        fontSize: 10,
-        fontWeight: 700,
-        padding: '3px 10px',
-        borderRadius: 3,
-        background: s.bg,
-        color: s.color,
-        fontFamily: 'monospace',
-      }}
-    >
+    <span style={{
+      fontSize: 10,
+      fontWeight: 700,
+      padding: '3px 10px',
+      borderRadius: 3,
+      background: s.bg,
+      color: s.color,
+      fontFamily: 'monospace',
+    }}>
       {upper}
     </span>
   );
@@ -44,21 +40,19 @@ function SummaryAdviceBadge({ bestStrategy }) {
     .replace(/-/g, ' ')
     .replace(/\b\w/g, c => c.toUpperCase());
   return (
-    <span
-      style={{
-        background: 'rgba(255,255,255,0.06)',
-        border: '1px solid rgba(255,255,255,0.35)',
-        color: '#e6edf3',
-        fontSize: 9,
-        fontWeight: 700,
-        padding: '3px 10px',
-        borderRadius: 3,
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 4,
-        fontFamily: 'monospace',
-      }}
-    >
+    <span style={{
+      background: 'rgba(255,255,255,0.06)',
+      border: '1px solid rgba(255,255,255,0.35)',
+      color: '#e6edf3',
+      fontSize: 9,
+      fontWeight: 700,
+      padding: '3px 10px',
+      borderRadius: 3,
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 4,
+      fontFamily: 'monospace',
+    }}>
       <span style={{ color: '#e6edf3' }}>Best fit:&nbsp;</span>
       <span style={{ color: stratColor }}>{displayName}</span>
     </span>
@@ -111,26 +105,77 @@ const neutralOutlined = {
 export default function SectionE({
   evaluation,
   tradeContext,
-  onEvaluate,
-  onFollow,
-  onTakePosition,
-  onFollowUp,
+  onEvaluate,      // async () => void — parent handles API call + state update
+  onFollow,        // async () => void
+  onTakePosition,  // async () => void
+  onFollowUp,      // async (question, evaluation) => { answer }
   onDiscard,
 }) {
-  const [followUpText, setFollowUpText] = useState('');
+  const [isEvalLoading, setIsEvalLoading] = useState(false);
+  const [followUps, setFollowUps] = useState([]);
+  const [followUpInput, setFollowUpInput] = useState('');
+  const [isFollowUpLoading, setIsFollowUpLoading] = useState(false);
+
+  async function handleEvaluate() {
+    if (isEvalLoading) return;
+    setFollowUps([]);
+    setIsEvalLoading(true);
+    try {
+      await onEvaluate?.();
+    } finally {
+      setIsEvalLoading(false);
+    }
+  }
+
+  async function handleFollowUpSubmit() {
+    const q = followUpInput.trim();
+    if (!q || isFollowUpLoading) return;
+    setFollowUpInput('');
+    const idx = followUps.length;
+    setFollowUps(prev => [...prev, { question: q, answer: null }]);
+    setIsFollowUpLoading(true);
+    try {
+      const resp = await onFollowUp?.(q, evaluation);
+      const answer = resp?.answer || resp?.claude_read || resp?.response || 'No response received';
+      setFollowUps(prev => prev.map((fu, i) => i === idx ? { ...fu, answer } : fu));
+    } catch (err) {
+      setFollowUps(prev => prev.map((fu, i) => i === idx ? { ...fu, answer: `Error: ${err.message}` } : fu));
+    } finally {
+      setIsFollowUpLoading(false);
+    }
+  }
 
   function handleFollowUpKey(e) {
-    if (e.key === 'Enter' && followUpText.trim()) {
-      onFollowUp?.(followUpText.trim());
-      setFollowUpText('');
-    }
+    if (e.key === 'Enter') handleFollowUpSubmit();
+  }
+
+  function handleDiscard() {
+    setFollowUps([]);
+    setFollowUpInput('');
+    onDiscard?.();
+  }
+
+  // Loading state (evaluate in flight)
+  if (isEvalLoading) {
+    return (
+      <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
+        <button style={{ ...tealOutlined, opacity: 0.5, cursor: 'default' }} disabled>
+          Evaluating…
+        </button>
+        {tradeContext && (
+          <span style={{ fontSize: 9, color: 'var(--muted)', fontFamily: 'monospace' }}>
+            {tradeContext} · Evaluating…
+          </span>
+        )}
+      </div>
+    );
   }
 
   // Pre-evaluation state
   if (!evaluation) {
     return (
       <div style={{ marginTop: 12 }}>
-        <button style={tealOutlined} onClick={onEvaluate}>
+        <button style={tealOutlined} onClick={handleEvaluate}>
           Evaluate
         </button>
       </div>
@@ -144,6 +189,7 @@ export default function SectionE({
     analysis,
     keyLevelPrice,
     keyLevelExplanation,
+    score,
   } = evaluation;
 
   const analysisBlocks = Array.isArray(analysis)
@@ -153,86 +199,77 @@ export default function SectionE({
     : [];
 
   return (
-    <div
-      style={{
-        border: '1px solid var(--border)',
-        borderRadius: 4,
-        padding: '14px 16px',
-        marginTop: 12,
-        fontFamily: 'monospace',
-      }}
-    >
+    <div style={{
+      border: '1px solid var(--border)',
+      borderRadius: 4,
+      padding: '14px 16px',
+      marginTop: 12,
+      fontFamily: 'monospace',
+    }}>
       {/* Header row */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-          flexWrap: 'wrap',
-          marginBottom: 10,
-        }}
-      >
-        <span
-          style={{
-            fontSize: 9,
-            textTransform: 'uppercase',
-            letterSpacing: '0.6px',
-            color: 'var(--muted)',
-          }}
-        >
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        flexWrap: 'wrap',
+        marginBottom: 10,
+      }}>
+        <span style={{
+          fontSize: 9,
+          textTransform: 'uppercase',
+          letterSpacing: '0.6px',
+          color: 'var(--muted)',
+        }}>
           CLAUDE'S READ
         </span>
 
         <VerdictBadge verdict={verdict} />
-
         <SummaryAdviceBadge bestStrategy={bestStrategy} />
 
+        {score != null && (
+          <span style={{
+            fontSize: 11,
+            fontWeight: 700,
+            color: score >= 70 ? 'var(--green)' : score >= 40 ? 'var(--amber)' : 'var(--red)',
+          }}>
+            {Number(score).toFixed(2)}
+          </span>
+        )}
+
         {tradeContext && (
-          <span
-            style={{
-              fontSize: 9,
-              color: 'var(--muted)',
-              marginLeft: 'auto',
-            }}
-          >
+          <span style={{ fontSize: 9, color: 'var(--muted)', marginLeft: 'auto' }}>
             {tradeContext}
           </span>
         )}
 
-        <button style={tealOutlinedSmall} onClick={onEvaluate}>
+        <button style={tealOutlinedSmall} onClick={handleEvaluate}>
           Evaluate
         </button>
       </div>
 
       {/* Analysis text */}
       {analysisBlocks.map((para, i) => (
-        <p
-          key={i}
-          style={{
-            fontSize: 10,
-            color: '#c9d1d9',
-            lineHeight: 1.65,
-            marginBottom: 8,
-            margin: i < analysisBlocks.length - 1 ? '0 0 8px 0' : '0',
-            fontStyle: 'normal',
-          }}
-        >
+        <p key={i} style={{
+          fontSize: 10,
+          color: '#c9d1d9',
+          lineHeight: 1.65,
+          margin: i < analysisBlocks.length - 1 ? '0 0 8px 0' : '0',
+          fontStyle: 'normal',
+        }}>
           {para}
         </p>
       ))}
 
       {/* Key level callout */}
       {(keyLevelPrice != null || keyLevelExplanation) && (
-        <div
-          style={{
-            background: 'var(--bg2)',
-            borderLeft: '2px solid var(--amber)',
-            padding: '6px 10px',
-            fontSize: 10,
-            margin: '8px 0',
-            borderRadius: '0 4px 4px 0',
-          }}
-        >
+        <div style={{
+          background: 'var(--bg2)',
+          borderLeft: '2px solid var(--amber)',
+          padding: '6px 10px',
+          fontSize: 10,
+          margin: '8px 0',
+          borderRadius: '0 4px 4px 0',
+        }}>
           {keyLevelPrice != null && (
             <span style={{ color: 'var(--amber)', fontWeight: 700 }}>
               {Number(keyLevelPrice).toFixed(2)}&nbsp;
@@ -244,31 +281,50 @@ export default function SectionE({
         </div>
       )}
 
+      {/* Follow-up responses */}
+      {followUps.map((fu, i) => (
+        <div key={i} style={{
+          borderLeft: '2px solid var(--border)',
+          paddingLeft: 10,
+          margin: '8px 0',
+        }}>
+          <div style={{ fontSize: 9, color: 'var(--muted)', fontStyle: 'italic', marginBottom: 4 }}>
+            {fu.question}
+          </div>
+          {fu.answer == null ? (
+            <span style={{ fontSize: 10, color: 'var(--muted)' }}>●●●</span>
+          ) : (
+            <span style={{ fontSize: 10, color: '#c9d1d9', lineHeight: 1.65 }}>{fu.answer}</span>
+          )}
+        </div>
+      ))}
+
       {/* Actions row */}
-      <div
-        style={{
-          display: 'flex',
-          gap: 10,
-          marginTop: 12,
-          alignItems: 'center',
-        }}
-      >
-        <button style={tealOutlined} onClick={onFollow}>
+      <div style={{
+        display: 'flex',
+        gap: 10,
+        marginTop: 12,
+        alignItems: 'center',
+        flexWrap: 'wrap',
+      }}>
+        <button style={tealOutlined} onClick={() => onFollow?.()}>
           Follow (Paper)
         </button>
 
-        <button style={greenFilled} onClick={onTakePosition}>
+        <button style={greenFilled} onClick={() => onTakePosition?.()}>
           Take Position (Live)
         </button>
 
         <input
           type="text"
-          value={followUpText}
-          onChange={e => setFollowUpText(e.target.value)}
+          value={followUpInput}
+          onChange={e => setFollowUpInput(e.target.value)}
           onKeyDown={handleFollowUpKey}
           placeholder="Ask a follow-up about this trade..."
+          disabled={isFollowUpLoading}
           style={{
             flex: 1,
+            minWidth: 0,
             background: 'var(--bg)',
             border: '1px solid var(--border)',
             color: 'var(--text)',
@@ -277,10 +333,15 @@ export default function SectionE({
             padding: '7px 12px',
             borderRadius: 4,
             outline: 'none',
+            opacity: isFollowUpLoading ? 0.5 : 1,
           }}
         />
 
-        <button style={neutralOutlined} onClick={onDiscard}>
+        {isFollowUpLoading && (
+          <span style={{ fontSize: 10, color: 'var(--muted)' }}>●●●</span>
+        )}
+
+        <button style={neutralOutlined} onClick={handleDiscard}>
           Discard ✕
         </button>
       </div>

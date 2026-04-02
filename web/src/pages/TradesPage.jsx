@@ -22,11 +22,19 @@ import ResultsTable from '../components/ResultsTable';
 import { SectionA, SectionB, SectionC, SectionD, SectionE } from '../components/TradeDetail';
 import { verticalsColumns } from '../config/verticals-columns';
 import { longOptionsColumns } from '../config/long-options-columns';
-import { analyzeVerticals, analyzeLongCalls, searchSymbolsStatic, getQuote } from '../api/client';
+import { analyzeVerticals, analyzeLongCalls, searchSymbolsStatic, getQuote, evaluateStructured, followTrade, takeTrade, evaluateFollowUp } from '../api/client';
+import { useToast } from '../components/Toast';
 
 const MUTED  = '#8b949e';
 const TEXT   = '#e6edf3';
 const BORDER = '#30363d';
+
+const ABBR_TO_KEY = {
+  SP: 'steady-paycheck',
+  WG: 'weekly-grind',
+  TR: 'trend-rider',
+  LT: 'lottery-ticket',
+};
 
 // ─── Normal CDF (Abramowitz & Stegun approximation, max error 1.5×10⁻⁷) ──────
 function normCdf(z) {
@@ -297,7 +305,8 @@ function SectionHeader({ title, count, expanded, onToggle, showConfig, comingSoo
 
 // ─── Trade detail expansion panel ────────────────────────────────────────────
 function TradeDetailExpansion({
-  detailProps, tradeContext, evaluation, onEvaluate, onDiscard,
+  detailProps, rawTrade, symbol, underlying, tradeContext, evaluation,
+  onEvaluate, onFollow, onTakePosition, onFollowUp, onDiscard,
   scenarios, totalEV, outcome,
 }) {
   return (
@@ -309,14 +318,19 @@ function TradeDetailExpansion({
       <SectionA trade={detailProps} />
       <SectionB scenarios={scenarios || []} totalEV={totalEV ?? null} />
       <SectionC outcome={outcome || null} />
-      <SectionD />
+      <SectionD
+        trade={rawTrade || null}
+        symbol={symbol || ''}
+        currentPrice={underlying || 0}
+        breakeven={detailProps?.breakeven ?? null}
+      />
       <SectionE
         evaluation={evaluation || null}
         tradeContext={tradeContext}
         onEvaluate={onEvaluate}
-        onFollow={() => {}}
-        onTakePosition={() => {}}
-        onFollowUp={() => {}}
+        onFollow={onFollow}
+        onTakePosition={onTakePosition}
+        onFollowUp={onFollowUp}
         onDiscard={onDiscard}
       />
     </div>
@@ -327,6 +341,7 @@ function TradeDetailExpansion({
 export default function TradesPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { positionSymbols } = useApp();
+  const { showToast } = useToast();
 
   const symbol = searchParams.get('symbol') || '';
 
@@ -471,6 +486,26 @@ export default function TradesPage() {
     }));
   }, [callResults, callsUnderlying]);
 
+  // ── Normalize evaluate API response to SectionE evaluation shape ─────────
+  function normalizeEvalResponse(result, fallbackStrategyKey) {
+    const evals = result?.evaluations;
+    const e = Array.isArray(evals) && evals.length > 0
+      ? evals[0]
+      : (result?.verdict ? result : null);
+    if (!e) return null;
+    return {
+      verdict: e.verdict,
+      bestStrategy: e.strategy || fallbackStrategyKey,
+      analysis: e.claude_read,
+      score: e.score ?? null,
+      keyLevelPrice: e.key_level?.price ?? null,
+      keyLevelExplanation: typeof e.key_level === 'string'
+        ? e.key_level
+        : (e.key_level?.explanation ?? null),
+      _raw: e,
+    };
+  }
+
   // ── Expansion row renderers ──────────────────────────────────────────────
   function renderVertExpansion(trade) {
     const rowId = `vert-${vertSpreads.indexOf(trade)}`;
@@ -478,12 +513,89 @@ export default function TradesPage() {
     const ctx = `${symbol} · ${detailProps.strikes} · ${detailProps.type} · ${detailProps.expiry || ''}`;
     const { scenarios, totalEV } = buildExitScenarios(trade, vertUnderlying);
     const outcome = buildOutcome(trade, vertUnderlying, totalEV);
+    const strategyKeys = (trade.strategies || ['SP']).map(a => ABBR_TO_KEY[a] || a);
+
+    async function handleEvaluate() {
+      try {
+        const result = await evaluateStructured({
+          symbol,
+          current_price: vertUnderlying,
+          iv: trade.iv || 0.25,
+          strategy_keys: strategyKeys,
+          trade,
+        });
+        const normalized = normalizeEvalResponse(result, strategyKeys[0]);
+        if (normalized) {
+          setEvaluations(prev => ({ ...prev, [rowId]: normalized }));
+        }
+      } catch (err) {
+        showToast(`Evaluation failed: ${err.message}`);
+      }
+    }
+
+    async function handleFollow() {
+      try {
+        await followTrade({
+          symbol,
+          strategy_key: strategyKeys[0] || 'steady-paycheck',
+          source: 'PAPER',
+          trade_structure: JSON.stringify(trade),
+          entry_price: Math.abs(trade.net_debit || 0),
+          entry_date: new Date().toISOString(),
+        });
+        showToast({
+          message: `Position followed (Paper) — ${symbol} ${trade.long_strike}/${trade.short_strike}`,
+          linkLabel: 'View Positions',
+          href: '/positions',
+          duration: 4000,
+        });
+      } catch (err) {
+        showToast(`Follow failed: ${err.message}`);
+      }
+    }
+
+    async function handleTakePosition() {
+      try {
+        await takeTrade({
+          symbol,
+          strategy_key: strategyKeys[0] || 'steady-paycheck',
+          source: 'LIVE',
+          trade_structure: JSON.stringify(trade),
+          entry_price: Math.abs(trade.net_debit || 0),
+          entry_date: new Date().toISOString(),
+        });
+        showToast({
+          message: `Position taken (Live) — ${symbol} ${trade.long_strike}/${trade.short_strike}`,
+          linkLabel: 'View Positions',
+          href: '/positions',
+          duration: 4000,
+        });
+      } catch (err) {
+        showToast(`Take position failed: ${err.message}`);
+      }
+    }
+
+    async function handleFollowUp(question, evaluation) {
+      return evaluateFollowUp({
+        symbol,
+        trade_data: trade,
+        original_evaluation: evaluation?._raw || evaluation,
+        question,
+      });
+    }
+
     return (
       <TradeDetailExpansion
         detailProps={detailProps}
+        rawTrade={trade}
+        symbol={symbol}
+        underlying={vertUnderlying}
         tradeContext={ctx}
         evaluation={evaluations[rowId] || null}
-        onEvaluate={() => console.log('Evaluate', trade)}
+        onEvaluate={handleEvaluate}
+        onFollow={handleFollow}
+        onTakePosition={handleTakePosition}
+        onFollowUp={handleFollowUp}
         onDiscard={() => setExpandedRowId(null)}
         scenarios={scenarios}
         totalEV={totalEV}
@@ -493,15 +605,92 @@ export default function TradesPage() {
   }
 
   function renderCallExpansion(trade) {
+    const rowId = `calls-${callResults.indexOf(trade)}`;
     const detailProps = mapCallToDetail(trade);
     const ctx = `${symbol} · ${trade.option_type} · ${trade.strike} · ${trade.expiration || ''}`;
-    const rowId = `calls-${callResults.indexOf(trade)}`;
+    const strategyKeys = (trade.strategies || ['TR']).map(a => ABBR_TO_KEY[a] || a);
+
+    async function handleEvaluate() {
+      try {
+        const result = await evaluateStructured({
+          symbol,
+          current_price: callsUnderlying,
+          iv: trade.iv || trade.mid_iv || 0.25,
+          strategy_keys: strategyKeys,
+          trade,
+        });
+        const normalized = normalizeEvalResponse(result, strategyKeys[0]);
+        if (normalized) {
+          setEvaluations(prev => ({ ...prev, [rowId]: normalized }));
+        }
+      } catch (err) {
+        showToast(`Evaluation failed: ${err.message}`);
+      }
+    }
+
+    async function handleFollow() {
+      try {
+        await followTrade({
+          symbol,
+          strategy_key: strategyKeys[0] || 'trend-rider',
+          source: 'PAPER',
+          trade_structure: JSON.stringify(trade),
+          entry_price: trade.mid_price || 0,
+          entry_date: new Date().toISOString(),
+        });
+        showToast({
+          message: `Position followed (Paper) — ${symbol} ${trade.option_type} ${trade.strike}`,
+          linkLabel: 'View Positions',
+          href: '/positions',
+          duration: 4000,
+        });
+      } catch (err) {
+        showToast(`Follow failed: ${err.message}`);
+      }
+    }
+
+    async function handleTakePosition() {
+      try {
+        await takeTrade({
+          symbol,
+          strategy_key: strategyKeys[0] || 'trend-rider',
+          source: 'LIVE',
+          trade_structure: JSON.stringify(trade),
+          entry_price: trade.mid_price || 0,
+          entry_date: new Date().toISOString(),
+        });
+        showToast({
+          message: `Position taken (Live) — ${symbol} ${trade.option_type} ${trade.strike}`,
+          linkLabel: 'View Positions',
+          href: '/positions',
+          duration: 4000,
+        });
+      } catch (err) {
+        showToast(`Take position failed: ${err.message}`);
+      }
+    }
+
+    async function handleFollowUp(question, evaluation) {
+      return evaluateFollowUp({
+        symbol,
+        trade_data: trade,
+        original_evaluation: evaluation?._raw || evaluation,
+        question,
+      });
+    }
+
     return (
       <TradeDetailExpansion
         detailProps={detailProps}
+        rawTrade={trade}
+        symbol={symbol}
+        underlying={callsUnderlying}
         tradeContext={ctx}
         evaluation={evaluations[rowId] || null}
-        onEvaluate={() => console.log('Evaluate', trade)}
+        onEvaluate={handleEvaluate}
+        onFollow={handleFollow}
+        onTakePosition={handleTakePosition}
+        onFollowUp={handleFollowUp}
         onDiscard={() => setExpandedRowId(null)}
         scenarios={[]}
         totalEV={null}

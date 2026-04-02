@@ -602,6 +602,23 @@ export async function refreshPosition(positionId) {
   return apiFetch(`/positions/${encodeURIComponent(positionId)}/refresh`, { method: 'POST' });
 }
 
+/** Alias for followTrade — POST /api/v1/positions/follow (source=PAPER) */
+export const followPosition = followTrade;
+
+/** Alias for takeTrade — POST /api/v1/positions/take (source=LIVE) */
+export const takePosition = takeTrade;
+
+/**
+ * Ask a follow-up question about a specific trade evaluation.
+ * @param {Object} payload — { symbol, trade_data, original_evaluation, question }
+ */
+export async function evaluateFollowUp(payload) {
+  return apiFetch('/evaluate/follow-up', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
 /**
  * Archive a position (status → ARCHIVED). No P&L recorded.
  * @param {string} positionId — UUID
