@@ -19,13 +19,14 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { getQuote, getStrategyScorecard, evaluateStructured, searchSymbolsStatic } from '../api/client';
 import SymbolSearch from '../components/SymbolSearch';
-import { STRATEGY_CONFIGS } from '../strategy-configs/index';
 import QuoteBar from '../components/QuoteBar';
 import StrategyScorecard from '../components/StrategyScorecard';
 import TradeEvaluationCard from '../components/TradeEvaluationCard';
 import { C, mono } from '../styles/tokens';
 
 // ─── Chart helpers ──────────────────────────────────────────────────────────
+
+const SMA_PERIODS = { short: 8, mid: 21, long: 50 };
 
 const GREEN = C.candleGreen;
 const RED   = C.red;
@@ -179,8 +180,7 @@ export default function SecurityStrategiesPage() {
   const [chartStartDate, setChartStartDate] = useState(() => tradingDaysAgo(90));
   const chartStartDateRef = useRef(chartStartDate);
 
-  // ── SMA periods for chart ──────────────────────────────────────────────────
-  const smaPeriods = { short: 8, mid: 21, long: 50 };
+  const smaPeriods = SMA_PERIODS;
 
   // ── Fetch quote + generate candles ─────────────────────────────────────
   const fetchQuote = useCallback(async (sym) => {

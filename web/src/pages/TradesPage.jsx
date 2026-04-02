@@ -378,7 +378,7 @@ function SectionConfigDrawer({ open, onClose, strategyKeys = [], onApply }) {
   const keysStr = strategyKeys.join(',');
   useEffect(() => {
     if (strategyKeys.length && !strategyKeys.includes(activeKey)) {
-      setActiveKey(strategyKeys[0]);
+      setActiveKey(strategyKeys[0]); // eslint-disable-line react-hooks/set-state-in-effect
     }
   }, [keysStr]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -406,8 +406,8 @@ function SectionConfigDrawer({ open, onClose, strategyKeys = [], onApply }) {
 
   const [draft, setDraft] = useState(() => loadDraft(strategyKeys[0]));
 
-  useEffect(() => { if (activeKey) setDraft(loadDraft(activeKey)); }, [activeKey]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (open && activeKey) setDraft(loadDraft(activeKey)); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (activeKey) setDraft(loadDraft(activeKey)); }, [activeKey]); // eslint-disable-line react-hooks/set-state-in-effect
+  useEffect(() => { if (open && activeKey) setDraft(loadDraft(activeKey)); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps,react-hooks/set-state-in-effect
 
   function handleApply() {
     try {

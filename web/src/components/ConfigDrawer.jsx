@@ -189,7 +189,7 @@ export default function ConfigDrawer({ mode = "verticals", open, onClose, config
   useEffect(() => {
     if (!open) return;
     if (hasConfigSchema) {
-      setStrategyDraft(loadStrategyDraft());
+      setStrategyDraft(loadStrategyDraft()); // eslint-disable-line react-hooks/set-state-in-effect
     } else {
       setDraft(config || {});
     }
