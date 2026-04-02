@@ -1,565 +1,389 @@
 /**
- * SecurityStrategiesPage — Primary landing page for a symbol.
- * Accessed via /security-strategies/:symbol or /security-strategies
+ * SecurityStrategiesPage — Screen 1: Scan
  *
- * Layout (top to bottom):
- *   Symbol input + Analyze button
- *   QuoteBar — shared header with all fields
- *   CandlestickChart — price history with SMA lines + SMA config panel
- *   StrategyScorecard — all 4 strategies scored
- *   TradeEvaluationCards — rendered after evaluate
+ * Route: /security-strategies
+ * Purpose: Scan watchlist / positions for interesting symbols.
+ * No Config drawer. No QuoteBar. No single-symbol analysis.
+ *
+ * Layout:
+ *   Page title
+ *   Filter bar: Source · Signal · Min score · Sort · "Scan now"
+ *   Progress indicator (while scanning)
+ *   Card grid: ScanCard per symbol (progressive render)
+ *   Empty states
  */
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import {
-  ComposedChart, Bar, Line, ReferenceLine, XAxis, YAxis,
-  CartesianGrid, Tooltip, ResponsiveContainer,
-} from 'recharts';
-import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
-import { getQuote, getStrategyScorecard, evaluateStructured, searchSymbolsStatic } from '../api/client';
-import SymbolSearch from '../components/SymbolSearch';
-import QuoteBar from '../components/QuoteBar';
-import StrategyScorecard from '../components/StrategyScorecard';
-import TradeEvaluationCard from '../components/TradeEvaluationCard';
+import { getWatchlist, getPositions, getStrategyScorecard } from '../api/client';
+import ScanCard from '../components/ScanCard';
+import { useToast } from '../components/Toast';
 import { C, mono } from '../styles/tokens';
 
-// ─── Chart helpers ──────────────────────────────────────────────────────────
-
-const SMA_PERIODS = { short: 8, mid: 21, long: 50 };
-
-const GREEN = C.candleGreen;
-const RED   = C.red;
-const SMA8_COLOR  = C.smaCyan;
-const SMA21_COLOR = C.smaOrange;
-const SMA50_COLOR = C.smaRed;
-
-function tradingDaysAgo(n) {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  let count = 0;
-  while (count < n) {
-    d.setDate(d.getDate() - 1);
-    const dow = d.getDay();
-    if (dow !== 0 && dow !== 6) count++;
-  }
-  return d.toISOString().slice(0, 10);
-}
-
-function countTradingDays(startDateStr) {
-  const today = new Date();
-  today.setHours(23, 59, 59, 0);
-  const d = new Date(startDateStr + 'T12:00:00');
-  let count = 0;
-  while (d <= today) {
-    const dow = d.getDay();
-    if (dow !== 0 && dow !== 6) count++;
-    d.setDate(d.getDate() + 1);
-  }
-  return Math.max(count, 10);
-}
-
-function generateCandles(price, count = 90) {
-  const dates = [];
-  const cursor = new Date();
-  cursor.setHours(0, 0, 0, 0);
-  while (dates.length < count) {
-    const dow = cursor.getDay();
-    if (dow !== 0 && dow !== 6) {
-      const mm = String(cursor.getMonth() + 1).padStart(2, '0');
-      const dd = String(cursor.getDate()).padStart(2, '0');
-      dates.unshift(`${mm}/${dd}`);
-    }
-    cursor.setDate(cursor.getDate() - 1);
-  }
-  const candles = [];
-  let p = price * 0.95;
-  for (let i = 0; i < count; i++) {
-    const change = (Math.random() - 0.48) * price * 0.012;
-    const open = p; const close = p + change;
-    const high = Math.max(open, close) + Math.random() * price * 0.005;
-    const low  = Math.min(open, close) - Math.random() * price * 0.005;
-    candles.push({ open, high, low, close, day: dates[i] }); p = close;
-  }
-  const scale = price / candles[candles.length - 1].close;
-  return candles.map(c => ({
-    open: c.open * scale, high: c.high * scale,
-    low: c.low * scale, close: c.close * scale, day: c.day,
-  }));
-}
-
-function CandleShape({ x, y, width, height, payload }) {
-  if (!payload || !height || height <= 0) return null;
-  const domainMin = payload.chartLow;
-  if (payload.high <= domainMin) return null;
-  const pixPerUnit = height / (payload.high - domainMin);
-  const yFor = (price) => y + (payload.high - price) * pixPerUnit;
-  const isGreen = payload.close >= payload.open;
-  const color = isGreen ? GREEN : RED;
-  const cx = x + width / 2;
-  const yHigh  = y;
-  const yLow   = yFor(payload.low);
-  const yBody1 = yFor(Math.max(payload.open, payload.close));
-  const yBody2 = yFor(Math.min(payload.open, payload.close));
-  return (
-    <g>
-      <rect x={cx - 0.5} y={yHigh} width={1} height={Math.max(0, yLow - yHigh)} fill={color} />
-      <rect x={cx - 3} y={yBody1} width={6} height={Math.max(1, yBody2 - yBody1)}
-        fill={color + '50'} stroke={color} strokeWidth={1} />
-    </g>
-  );
-}
-
-function CandleTooltip({ active, payload }) {
-  if (!active || !payload?.[0]) return null;
-  const d = payload[0].payload;
+// ─── Skeleton card (loading placeholder) ──────────────────────────────────
+function SkeletonCard() {
   return (
     <div style={{
-      background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6,
-      padding: '6px 10px', fontSize: 11, fontFamily: mono, color: C.text,
+      border: `1px solid ${C.border}`,
+      borderRadius: 6,
+      padding: '12px',
+      backgroundColor: C.card,
     }}>
-      <div>O: {d.open?.toFixed(2)}</div>
-      <div>H: {d.high?.toFixed(2)}</div>
-      <div>L: {d.low?.toFixed(2)}</div>
-      <div>C: {d.close?.toFixed(2)}</div>
+      <div style={{ color: '#8b949e', fontSize: 10, fontFamily: mono, marginBottom: 10 }}>
+        Loading...
+      </div>
+      {[0, 1, 2, 3].map(i => (
+        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+          <div style={{ width: 90, height: 8, borderRadius: 2, background: C.border }} />
+          <div style={{ flex: 1, height: 3, borderRadius: 2, background: C.border }} />
+          <div style={{ width: 38, height: 8, borderRadius: 2, background: C.border }} />
+        </div>
+      ))}
     </div>
   );
 }
 
-// ─── Skeleton eval card ────────────────────────────────────────────────────
-
-function EvalSkeleton({ label }) {
+// ─── Failed card ───────────────────────────────────────────────────────────
+function FailedCard({ symbol }) {
   return (
-    <div style={{ borderRadius: 8, border: `1px solid ${C.border}`, backgroundColor: C.card, overflow: 'hidden' }}>
-      <div style={{ height: 36, backgroundColor: C.border, opacity: 0.4 }} />
-      <div style={{ padding: '10px 16px', borderBottom: `1px solid ${C.border}` }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: C.textDim, marginBottom: 6 }}>{label}</div>
-        <div style={{ height: 3, borderRadius: 2, backgroundColor: C.border }} />
-      </div>
-      <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <div style={{ height: 14, width: '55%', borderRadius: 3, backgroundColor: C.border }} />
-        <div style={{ height: 12, width: '80%', borderRadius: 3, backgroundColor: C.border, opacity: 0.6 }} />
+    <div style={{
+      border: '1px solid rgba(248,113,113,0.4)',
+      borderRadius: 6,
+      padding: '12px',
+      backgroundColor: C.card,
+    }}>
+      <span style={{ fontSize: 13, fontWeight: 700, color: '#e6edf3', fontFamily: mono }}>
+        {symbol}
+      </span>
+      <div style={{ fontSize: 10, color: '#f87171', fontFamily: mono, marginTop: 6 }}>
+        Failed to load
       </div>
     </div>
   );
 }
 
-// ─── Mock scores for before-load state ────────────────────────────────────
+// ─── Shared input styles ───────────────────────────────────────────────────
+const selectStyle = {
+  background: C.bg,
+  border: `1px solid ${C.border}`,
+  color: '#e6edf3',
+  padding: '5px 8px',
+  borderRadius: 4,
+  fontSize: 11,
+  fontFamily: mono,
+  cursor: 'pointer',
+};
 
-const MOCK_SCORES = [
-  { key: 'steady-paycheck', label: 'Steady Paycheck', score: 84, signal_summary: '30-45 DTE credit spread' },
-  { key: 'weekly-grind',    label: 'Weekly Grind',    score: 71, signal_summary: '7-14 DTE credit spread' },
-  { key: 'trend-rider',     label: 'Trend Rider',     score: 91, signal_summary: '30-60 DTE long call' },
-  { key: 'lottery-ticket',  label: 'Lottery Ticket',  score: 23, signal_summary: '1-7 DTE deep OTM' },
-];
+const numInputStyle = {
+  background: C.bg,
+  border: `1px solid ${C.border}`,
+  color: '#e6edf3',
+  padding: '5px 8px',
+  borderRadius: 4,
+  fontSize: 11,
+  fontFamily: mono,
+  width: 60,
+  textAlign: 'right',
+};
 
 // ─── Main component ────────────────────────────────────────────────────────
-
 export default function SecurityStrategiesPage() {
-  const { symbol: symbolParam } = useParams();
-  const { activeSymbol, setActiveSymbol, prices, positionSymbols } = useApp();
+  const { watchlist } = useApp();
   const navigate = useNavigate();
-  const location = useLocation();
+  const { showToast } = useToast();
 
-  const initSymbol = (symbolParam || activeSymbol || 'SPY').toUpperCase();
+  const [filterSource,   setFilterSource]   = useState('watchlist');
+  const [filterSignal,   setFilterSignal]   = useState('all');
+  const [filterMinScore, setFilterMinScore] = useState(0);
+  const [filterSort,     setFilterSort]     = useState('score');
+  const [scanning,       setScanning]       = useState(false);
+  const [results,        setResults]        = useState([]);
+  const [errors,         setErrors]         = useState([]);
+  const [progress,       setProgress]       = useState({ completed: 0, total: 0 });
+  const [hasScanned,     setHasScanned]     = useState(false);
 
-  // ── State ──────────────────────────────────────────────────────────────────
-  const [symbol,         setSymbol]         = useState(initSymbol);
-  const [quote,          setQuote]          = useState(null);
-  const [candles,        setCandles]        = useState([]);
-  const [scores,         setScores]         = useState(null);
-  const [smaSignal,      setSmaSignal]      = useState(null);
-  const [loading,        setLoading]        = useState(false);
-  const [error,          setError]          = useState(null);
-  const [selectedKeys,   setSelectedKeys]   = useState([]);
-  const [evalLoading,    setEvalLoading]    = useState(false);
-  const [evalError,      setEvalError]      = useState(null);
-  const [evaluations,    setEvaluations]    = useState([]);
-  const [lastAnalyzed,   setLastAnalyzed]   = useState(null);
-  const [chartRange,     setChartRange]     = useState(90);
-  const [chartStartDate, setChartStartDate] = useState(() => tradingDaysAgo(90));
-  const chartStartDateRef = useRef(chartStartDate);
+  // ── Scan orchestration ─────────────────────────────────────────────────
+  const handleScan = async () => {
+    setScanning(true);
+    setResults([]);
+    setErrors([]);
+    setProgress({ completed: 0, total: 0 });
+    setHasScanned(true);
 
-  const smaPeriods = SMA_PERIODS;
-
-  // ── Fetch quote + generate candles ─────────────────────────────────────
-  const fetchQuote = useCallback(async (sym) => {
-    const target = sym || symbol;
-    if (!target) return;
+    // Gather symbols from selected source
+    let symbols = [];
     try {
-      const data = await getQuote(target);
-      setQuote(data);
-      if (data?.price > 0) {
-        const count = countTradingDays(chartStartDateRef.current);
-        setCandles(generateCandles(data.price, count));
+      if (filterSource === 'watchlist' || filterSource === 'all') {
+        const wl = await getWatchlist().catch(() => []);
+        const wlSymbols = (wl || [])
+          .map(w => (typeof w === 'string' ? w : w.symbol))
+          .filter(Boolean);
+        symbols.push(...wlSymbols);
       }
-    } catch { /* quote fetch is best-effort */ }
-  }, [symbol]);
-
-  // ── Fetch scorecard ─────────────────────────────────────────────────────
-  const fetchScorecard = useCallback(async (sym) => {
-    const target = sym || symbol;
-    if (!target) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await getStrategyScorecard(target);
-      setScores(data.strategies || []);
-      setSmaSignal(data.sma_signal || null);
-      setLastAnalyzed(new Date());
-      const sorted = [...(data.strategies || [])].sort((a, b) => b.score - a.score);
-      if (sorted.length > 0) {
-        const topKey = sorted[0].key ?? sorted[0].strategy_key;
-        setSelectedKeys([topKey]);
+      if (filterSource === 'positions' || filterSource === 'all') {
+        const resp = await getPositions({ status: 'all' }).catch(() => ({ positions: [] }));
+        const posSymbols = [...new Set((resp?.positions || []).map(p => p.symbol))];
+        symbols.push(...posSymbols);
       }
+      // Deduplicate, preserve order
+      symbols = [...new Set(symbols)];
     } catch (err) {
-      setError(err.message || 'Failed to load scorecard');
-    } finally {
-      setLoading(false);
+      setScanning(false);
+      showToast({ type: 'error', message: `Scan failed: ${err.message || 'Could not load symbols'}` });
+      return;
     }
-  }, [symbol]);
 
-  // ── Initial mount: auto-fetch when no URL param drives the fetch ─────────
-  // When the page loads at /security-strategies (no param), the symbolParam
-  // effect returns early, so nothing fetches. This fills that gap.
-  useEffect(() => {
-    if (!symbolParam) {
-      fetchQuote(initSymbol);
-      fetchScorecard(initSymbol);
+    if (symbols.length === 0) {
+      setScanning(false);
+      showToast({ type: 'info', message: 'No symbols found for the selected source' });
+      return;
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Watchlist click: URL param changes with fromWatchlist state ──────────
-  // Fires on mount (when URL has a param) and on subsequent param changes.
-  const prevSymbolParam = useRef(null);
-  useEffect(() => {
-    if (!symbolParam) return;
-    const sym = symbolParam.toUpperCase();
-    setSymbol(sym);
-    if (sym !== activeSymbol) setActiveSymbol(sym);
+    const total = symbols.length;
+    setProgress({ completed: 0, total });
 
-    const isWatchlistNav = location.state?.fromWatchlist === true;
-    const symbolChanged  = symbolParam !== prevSymbolParam.current;
-    prevSymbolParam.current = symbolParam;
+    // Fan out with max 5 concurrent using chunked Promise.allSettled
+    let completed = 0;
+    for (let i = 0; i < symbols.length; i += 5) {
+      const chunk = symbols.slice(i, i + 5);
+      const settled = await Promise.allSettled(
+        chunk.map(sym => getStrategyScorecard(sym))
+      );
 
-    if (isWatchlistNav || symbolChanged) {
-      // Reset stale data for new symbol
-      setScores(null); setSmaSignal(null); setError(null);
-      setSelectedKeys([]); setEvaluations([]); setEvalError(null);
-      setQuote(null); setCandles([]); setLastAnalyzed(null);
-      fetchQuote(sym);
-      fetchScorecard(sym);
+      // Append results progressively as each chunk resolves
+      settled.forEach((result, idx) => {
+        const sym = chunk[idx];
+        completed++;
+        if (result.status === 'fulfilled') {
+          const data = result.value;
+          const strats = data.strategies || [];
+          const ivRaw = strats[0]?.best_trade?.iv_rank ?? strats[0]?.best_trade?.iv;
+          setResults(prev => [...prev, {
+            symbol:        sym,
+            price:         data.quote?.price,
+            change:        data.quote?.change,
+            changePercent: data.quote?.change_pct,
+            volume:        data.quote?.volume,
+            relVolume:     data.quote?.rel_volume,
+            signal:        data.sma_signal?.alignment || 'NEUTRAL',
+            strategies:    strats,
+            signalSummary: data.sma_signal?.summary || '',
+            ivRank:        ivRaw,
+          }]);
+        } else {
+          setErrors(prev => [...prev, { symbol: sym }]);
+        }
+      });
+
+      setProgress({ completed, total });
     }
-  }, [symbolParam, location.state]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Regenerate candles when chart start date changes ─────────────────────
-  useEffect(() => {
-    chartStartDateRef.current = chartStartDate;
-    if (quote?.price > 0) {
-      const count = countTradingDays(chartStartDate);
-      setCandles(generateCandles(quote.price, count));
-    }
-  }, [chartStartDate]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ── Symbol select — fires immediately on SymbolSearch selection ─────────
-  const handleSymbolSelect = (sym) => {
-    if (!sym) return;
-    setSymbol(sym);
-    setActiveSymbol(sym);
-    // Reset stale data
-    setScores(null); setSmaSignal(null); setError(null);
-    setSelectedKeys([]); setEvaluations([]); setEvalError(null);
-    setQuote(null); setCandles([]); setLastAnalyzed(null);
-    // Update URL
-    prevSymbolParam.current = sym.toLowerCase();
-    navigate(`/security-strategies/${sym}`);
-    fetchQuote(sym);
-    fetchScorecard(sym);
+    setScanning(false);
+    showToast({ type: 'info', message: `Scanned ${total} symbol${total !== 1 ? 's' : ''}` });
   };
 
-  // ── SMA computation from candles ───────────────────────────────────────
-  const smaData = useMemo(() => {
-    if (!candles.length) return null;
-    const sma = (period) => {
-      const slice = candles.slice(-period);
-      return slice.reduce((s, c) => s + c.close, 0) / slice.length;
-    };
-    return { smaShort: sma(smaPeriods.short), smaMid: sma(smaPeriods.mid), smaLong: sma(smaPeriods.long) };
-  }, [candles, smaPeriods]);
-
-  const smaSignalStr = smaSignal?.alignment || (
-    smaData && candles.length
-      ? (candles[candles.length - 1]?.close > (smaData.smaShort || 0) &&
-         smaData.smaShort > (smaData.smaMid || 0) ? 'BULLISH' : 'MIXED')
-      : undefined
-  );
-
-  // ── Chart data with SMA values ─────────────────────────────────────────
-  const chartData = useMemo(() => {
-    return candles.map((c, i) => {
-      const sma = (period) => {
-        if (i < period - 1) return null;
-        const slice = candles.slice(i - period + 1, i + 1);
-        return slice.reduce((s, c) => s + c.close, 0) / slice.length;
-      };
-      return { ...c, sma8: sma(smaPeriods.short), sma21: sma(smaPeriods.mid), sma50: sma(smaPeriods.long) };
+  // ── Apply client-side filters + sort ──────────────────────────────────
+  const filtered = results
+    .filter(r => {
+      if (filterSignal === 'all') return true;
+      return (r.signal || '').toUpperCase() === filterSignal.toUpperCase();
+    })
+    .filter(r => {
+      const top = r.strategies.length > 0
+        ? Math.max(...r.strategies.map(s => s.score ?? 0))
+        : 0;
+      return top >= filterMinScore;
+    })
+    .sort((a, b) => {
+      if (filterSort === 'score') {
+        const aTop = a.strategies.length > 0 ? Math.max(...a.strategies.map(s => s.score ?? 0)) : 0;
+        const bTop = b.strategies.length > 0 ? Math.max(...b.strategies.map(s => s.score ?? 0)) : 0;
+        return bTop - aTop;
+      }
+      if (filterSort === 'symbol') return a.symbol.localeCompare(b.symbol);
+      if (filterSort === 'signal') return (a.signal || '').localeCompare(b.signal || '');
+      return 0;
     });
-  }, [candles, smaPeriods]);
 
-  const chartBounds = useMemo(() => {
-    if (!chartData.length) return { low: 0, high: 100 };
-    const lows  = chartData.map(c => c.low);
-    const highs = chartData.map(c => c.high);
-    const low   = Math.min(...lows);
-    const high  = Math.max(...highs);
-    const pad   = (high - low) * 0.03;
-    return { low: low - pad, high: high + pad };
-  }, [chartData]);
+  // ── Empty state flags ──────────────────────────────────────────────────
+  const showNoWatchlist = !hasScanned
+    && (filterSource === 'watchlist' || filterSource === 'all')
+    && watchlist.length === 0;
 
-  const chartDataWithMeta = useMemo(() => {
-    return chartData.map(c => ({ ...c, chartLow: chartBounds.low }));
-  }, [chartData, chartBounds]);
+  const showPreScan  = !hasScanned && !showNoWatchlist;
+  const showNoMatch  = hasScanned && !scanning && results.length > 0 && filtered.length === 0;
+  const showEmpty    = hasScanned && !scanning && results.length === 0 && errors.length === 0;
 
-  // ── Evaluate ────────────────────────────────────────────────────────────
-  const handleEvaluate = useCallback(async (keys) => {
-    if (!keys.length || !symbol) return;
-    setEvalLoading(true);
-    setEvalError(null);
-    setEvaluations([]);
-    const currentScores = scores || [];
-    const ivSource = keys
-      .map(k => currentScores.find(s => (s.strategy_key ?? s.key) === k))
-      .find(s => s?.best_trade?.iv != null);
-    const iv = ivSource?.best_trade?.iv ?? 0.25;
-    const currentPrice = quote?.price || prices[symbol]?.price || 0;
-    try {
-      const data = await evaluateStructured({
-        symbol,
-        current_price: currentPrice,
-        iv,
-        sma_alignment: smaData
-          ? { sma_8: smaData.smaShort, sma_21: smaData.smaMid, sma_50: smaData.smaLong }
-          : {},
-        strategy_keys: keys,
-        trade:         null,
-      });
-      setEvaluations([...(data.evaluations ?? [])].sort((a, b) => b.score - a.score));
-    } catch (err) {
-      setEvalError(err.message || 'Evaluation failed');
-    } finally {
-      setEvalLoading(false);
-    }
-  }, [symbol, scores, smaData, quote, prices]);
-
-  const displayScores = scores || MOCK_SCORES;
-  const usingMock = !scores && !loading;
-  const currentPrice = quote?.price || prices[symbol]?.price || 0;
-
-  const smaForCards = smaData
-    ? { smaShort: smaData.smaShort, smaMid: smaData.smaMid, smaLong: smaData.smaLong }
-    : null;
+  // Show 3 skeleton cards while scanning (visual placeholder for in-flight items)
+  const showSkeletons = scanning;
 
   return (
     <div style={{ backgroundColor: C.bg, minHeight: '100%', paddingBottom: 32 }}>
 
-      {/* ── Symbol search ── */}
-      <div style={{ padding: '10px 16px 10px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <SymbolSearch
-            onSelect={handleSymbolSelect}
-            placeholder="Search symbol..."
-            searchFn={searchSymbolsStatic}
-            positionSymbols={positionSymbols}
-            initialValue={null}
-          />
-          {loading && (
-            <div style={{
-              width: 16, height: 16, border: `2px solid ${C.border}`,
-              borderTopColor: C.accent, borderRadius: '50%',
-              animation: 'spin 0.7s linear infinite',
-              flexShrink: 0,
-            }} />
-          )}
-        </div>
+      {/* ── Page title ── */}
+      <div style={{ padding: '12px 16px 10px', borderBottom: `1px solid ${C.border}` }}>
+        <span style={{ fontSize: 16, fontWeight: 700, color: '#e6edf3', fontFamily: mono }}>
+          Security Strategies
+        </span>
       </div>
 
-      {/* ── QuoteBar ── */}
-      <QuoteBar
-        symbol={symbol || undefined}
-        quote={quote}
-        smaSignal={smaSignalStr}
-        lastAnalyzed={lastAnalyzed}
-      />
+      {/* ── Filter bar ── */}
+      <div style={{
+        background: C.surface,
+        padding: '12px 16px',
+        borderBottom: `1px solid ${C.border}`,
+        display: 'flex',
+        gap: 12,
+        alignItems: 'center',
+        flexWrap: 'wrap',
+      }}>
+        {/* Source */}
+        <select
+          value={filterSource}
+          onChange={e => setFilterSource(e.target.value)}
+          style={selectStyle}
+        >
+          <option value="watchlist">Watchlist</option>
+          <option value="positions">Positions</option>
+          <option value="all">All</option>
+        </select>
 
-      {/* ── Candlestick Chart ── */}
-      {candles.length > 0 && (
-        <div style={{ borderBottom: `1px solid ${C.border}`, backgroundColor: C.bg, position: 'relative' }}>
-          {/* SMA + Date config panel — right side overlay */}
-          <div style={{
-            position: 'absolute', top: 0, right: 0, bottom: 0, zIndex: 10,
-            width: 130,
-            display: 'flex', flexDirection: 'column', justifyContent: 'center',
-            padding: '8px 10px',
-            borderLeft: `1px solid ${C.border}`,
-            background: `linear-gradient(135deg, ${C.surfaceAlt} 0%, ${C.card} 100%)`,
-            borderRadius: '0 4px 4px 0',
+        {/* Signal */}
+        <select
+          value={filterSignal}
+          onChange={e => setFilterSignal(e.target.value)}
+          style={selectStyle}
+        >
+          <option value="all">All Signals</option>
+          <option value="bullish">Bullish</option>
+          <option value="bearish">Bearish</option>
+          <option value="mixed">Mixed</option>
+        </select>
+
+        {/* Min score */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{
+            fontSize: 10, color: '#8b949e', fontFamily: mono,
+            letterSpacing: '0.04em', textTransform: 'uppercase',
           }}>
-            <div style={{
-              fontSize: 8, fontWeight: 700, color: C.textMuted,
-              letterSpacing: '0.07em', textTransform: 'uppercase',
-              marginBottom: 7, textAlign: 'center',
-              borderBottom: `1px solid ${C.border}`, paddingBottom: 5,
-            }}>
-              SMA Configuration
-            </div>
-            {[
-              { period: smaPeriods.short, color: SMA8_COLOR  },
-              { period: smaPeriods.mid,   color: SMA21_COLOR },
-              { period: smaPeriods.long,  color: SMA50_COLOR },
-            ].map(({ period, color }) => (
-              <div key={period} style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 5 }}>
-                <div style={{ width: 12, height: 12, backgroundColor: color, borderRadius: 2, flexShrink: 0 }} />
-                <span style={{ fontSize: 11, fontFamily: mono, color, fontWeight: 700 }}>{period}-day</span>
-              </div>
-            ))}
-
-            <div style={{
-              fontSize: 8, fontWeight: 700, color: C.textMuted,
-              letterSpacing: '0.07em', textTransform: 'uppercase',
-              marginTop: 10, marginBottom: 6, textAlign: 'center',
-              borderTop: `1px solid ${C.border}`, paddingTop: 8,
-            }}>
-              Chart Range
-            </div>
-            {[30, 90, 180].map(n => (
-              <button
-                key={n}
-                onClick={() => { setChartRange(n); setChartStartDate(tradingDaysAgo(n)); }}
-                style={{
-                  display: 'block', width: '100%', marginBottom: 4,
-                  padding: '3px 0', borderRadius: 4, fontSize: 10,
-                  fontFamily: mono, cursor: 'pointer',
-                  border: `1px solid ${chartRange === n ? C.accent : C.border}`,
-                  background: chartRange === n ? C.accent + '20' : 'none',
-                  color: chartRange === n ? C.accent : C.textDim,
-                }}
-              >
-                {n}d
-              </button>
-            ))}
-          </div>
-
-          <ResponsiveContainer width="100%" height={215}>
-            <ComposedChart data={chartDataWithMeta} margin={{ top: 8, right: 138, bottom: 4, left: 0 }}>
-              <CartesianGrid vertical={false} stroke={C.borderSubtle} />
-              <XAxis
-                dataKey="day" interval={13}
-                tick={{ fill: C.textDim, fontSize: 10, fontFamily: 'monospace' }}
-                axisLine={{ stroke: C.textDim }} tickLine={{ stroke: C.textDim }}
-                height={22} minTickGap={40}
-              />
-              <YAxis
-                orientation="right" width={55}
-                domain={[chartBounds.low, chartBounds.high]}
-                tick={{ fill: C.textDim, fontSize: 10 }}
-                axisLine={{ stroke: C.textDim }} tickLine={{ stroke: C.textDim }}
-                tickFormatter={v => v.toFixed(0)}
-              />
-              <Tooltip content={<CandleTooltip />} />
-              <Bar dataKey="high" baseValue={chartBounds.low} shape={<CandleShape />}
-                isAnimationActive={false} fill="transparent" />
-              <Line type="monotone" dataKey="sma8"  stroke={SMA8_COLOR}  strokeWidth={1.5} dot={false} isAnimationActive={false} />
-              <Line type="monotone" dataKey="sma21" stroke={SMA21_COLOR} strokeWidth={1.5} dot={false} isAnimationActive={false} />
-              <Line type="monotone" dataKey="sma50" stroke={SMA50_COLOR} strokeWidth={1.5} dot={false} isAnimationActive={false} />
-              {currentPrice > 0 && (
-                <ReferenceLine y={currentPrice} stroke={C.accent + '90'} strokeDasharray="4 4" />
-              )}
-            </ComposedChart>
-          </ResponsiveContainer>
+            Min Score
+          </span>
+          <input
+            type="number"
+            min={0} max={100}
+            value={filterMinScore}
+            onChange={e => setFilterMinScore(Number(e.target.value))}
+            style={numInputStyle}
+          />
         </div>
-      )}
 
-      {/* ── Scorecard section ── */}
-      <div style={{ padding: '16px 16px 0' }}>
+        {/* Sort */}
+        <select
+          value={filterSort}
+          onChange={e => setFilterSort(e.target.value)}
+          style={selectStyle}
+        >
+          <option value="score">Score ↓</option>
+          <option value="symbol">Symbol A-Z</option>
+          <option value="signal">Signal</option>
+        </select>
 
-        {/* Mock data notice */}
-        {usingMock && !error && (
-          <div style={{ marginBottom: 12, padding: '7px 12px', borderRadius: 6, border: `1px solid ${C.border}`, backgroundColor: C.surfaceAlt, color: C.textDim, fontSize: 11 }}>
-            Showing sample data — connect Schwab and click ⟳ for live scores
-          </div>
-        )}
-
-        {/* Error */}
-        {error && !loading && (
-          <div style={{ marginBottom: 12, padding: '8px 12px', borderRadius: 6, border: `1px solid ${C.red}40`, backgroundColor: C.redDim, color: C.red, fontSize: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span>{error}</span>
-            <button onClick={() => fetchScorecard()} style={{ background: 'none', border: 'none', color: C.red, fontSize: 11, cursor: 'pointer', textDecoration: 'underline', padding: 0 }}>Retry</button>
-          </div>
-        )}
-
-        {/* Scorecard */}
-        <StrategyScorecard
-          scores={loading ? [] : displayScores}
-          selectedKeys={selectedKeys}
-          onSelectionChange={setSelectedKeys}
-          onEvaluate={handleEvaluate}
-          loading={loading}
-        />
+        {/* Scan now */}
+        <button
+          onClick={handleScan}
+          disabled={scanning}
+          style={{
+            background: 'rgba(45,212,191,0.1)',
+            border: '1px solid rgba(45,212,191,0.4)',
+            color: '#2dd4bf',
+            padding: '7px 16px',
+            borderRadius: 4,
+            fontSize: 11,
+            fontFamily: mono,
+            cursor: scanning ? 'default' : 'pointer',
+            opacity: scanning ? 0.5 : 1,
+          }}
+        >
+          {scanning ? 'Scanning...' : 'Scan now'}
+        </button>
       </div>
 
-      {/* ── Evaluation results ── */}
-      {(evalLoading || evalError || evaluations.length > 0) && (
-        <div style={{ padding: '16px 16px 0' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-            <span style={{ fontSize: 10.5, color: C.textMuted, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-              Evaluation Results
-            </span>
-            {evaluations.length > 0 && !evalLoading && (
-              <button
-                onClick={() => { setEvaluations([]); setEvalError(null); }}
-                style={{ background: 'none', border: 'none', color: C.textMuted, fontSize: 11, cursor: 'pointer', padding: 0, textDecoration: 'underline' }}
-              >
-                Clear
-              </button>
-            )}
-          </div>
-
-          {evalError && !evalLoading && (
-            <div style={{ marginBottom: 16, padding: '8px 12px', borderRadius: 6, border: `1px solid ${C.red}40`, backgroundColor: C.redDim, color: C.red, fontSize: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span>{evalError}</span>
-              <button onClick={() => handleEvaluate(selectedKeys)} style={{ background: 'none', border: 'none', color: C.red, fontSize: 11, cursor: 'pointer', textDecoration: 'underline', padding: 0 }}>Retry</button>
-            </div>
-          )}
-
-          {evalLoading && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              {selectedKeys.map(k => (
-                <EvalSkeleton key={k} label={(scores || MOCK_SCORES).find(s => (s.strategy_key ?? s.key) === k)?.label ?? k} />
-              ))}
-            </div>
-          )}
-
-          {!evalLoading && evaluations.length > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              {evaluations.map(card => {
-                const matchingScore = (scores || MOCK_SCORES).find(s => (s.strategy_key ?? s.key) === card.strategy_key);
-                return (
-                  <TradeEvaluationCard
-                    key={card.strategy_key}
-                    card={card}
-                    symbol={symbol}
-                    currentPrice={currentPrice}
-                    smaData={smaForCards}
-                    tradeData={matchingScore?.best_trade ?? null}
-                    activeStrategy={card.strategy_key}
-                  />
-                );
-              })}
-            </div>
-          )}
+      {/* ── Progress ── */}
+      {scanning && progress.total > 0 && (
+        <div style={{ padding: '8px 16px', fontSize: 10, color: '#8b949e', fontFamily: mono }}>
+          Scanning {progress.completed} of {progress.total} symbols...
         </div>
       )}
 
+      {/* ── Content ── */}
+      <div style={{ padding: '16px' }}>
+
+        {/* Empty: no watchlist symbols yet */}
+        {showNoWatchlist && (
+          <div style={{
+            textAlign: 'center', padding: '64px 16px',
+            color: '#8b949e', fontSize: 12, fontFamily: mono,
+          }}>
+            Add symbols to your watchlist to scan
+          </div>
+        )}
+
+        {/* Pre-scan default message */}
+        {showPreScan && (
+          <div style={{
+            textAlign: 'center', padding: '64px 16px',
+            color: '#8b949e', fontSize: 12, fontFamily: mono,
+          }}>
+            Select a source and click "Scan now" to analyze symbols
+          </div>
+        )}
+
+        {/* Post-scan, all results filtered out */}
+        {showNoMatch && (
+          <div style={{
+            textAlign: 'center', padding: '32px 16px',
+            color: '#8b949e', fontSize: 12, fontFamily: mono,
+          }}>
+            No results match the current filters
+          </div>
+        )}
+
+        {/* Post-scan, no data at all */}
+        {showEmpty && (
+          <div style={{
+            textAlign: 'center', padding: '32px 16px',
+            color: '#8b949e', fontSize: 12, fontFamily: mono,
+          }}>
+            No symbols found for the selected source
+          </div>
+        )}
+
+        {/* Card grid */}
+        {(filtered.length > 0 || showSkeletons || errors.length > 0) && (
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+            gap: 12,
+          }}>
+            {filtered.map(r => (
+              <ScanCard
+                key={r.symbol}
+                {...r}
+                onClick={() => navigate(`/trades?symbol=${r.symbol}`)}
+              />
+            ))}
+
+            {showSkeletons && [0, 1, 2].map(i => (
+              <SkeletonCard key={`sk-${i}`} />
+            ))}
+
+            {errors.map(e => (
+              <FailedCard key={`err-${e.symbol}`} symbol={e.symbol} />
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

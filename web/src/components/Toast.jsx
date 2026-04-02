@@ -2,19 +2,25 @@
  * Toast — Shared notification system.
  *
  * Exports:
- *   ToastProvider  — wraps the app, renders the fixed toast container
+ *   ToastProvider  — wraps the app (inside BrowserRouter), renders the fixed toast container
  *   useToast       — hook returning { showToast }
  *   default Toast  — no-op kept for Layout.jsx backward compat
  *
  * API:
  *   showToast('simple message')
+ *   showToast({ type, message, link: { text, to }, duration })
  *   showToast({ message, actionText, onAction, href, linkLabel, duration })
+ *
+ * type variants: 'success' | 'error' | 'info'  (left border color)
+ * link.to: React Router navigate path (useNavigate — requires BrowserRouter ancestor)
+ * href: plain anchor fallback (legacy)
  *
  * Toasts auto-dismiss after 4 seconds (or custom duration).
  * Multiple toasts stack vertically (gap: 8px), newest at top.
  */
 
 import { createContext, useContext, useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import './Toast.css';
 
 // ─── Context ──────────────────────────────────────────────────────────────────
@@ -58,7 +64,7 @@ export function ToastProvider({ children }) {
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
-
+// eslint-disable-next-line react-refresh/only-export-components
 export function useToast() {
   return useContext(ToastContext);
 }
@@ -66,28 +72,46 @@ export function useToast() {
 // ─── Toast item ───────────────────────────────────────────────────────────────
 
 function ToastItem({ toast, onDismiss }) {
-  const handleAction = (e) => {
+  const navigate = useNavigate();
+
+  const typeClass = toast.type ? `toast-${toast.type}` : '';
+
+  // Normalize link from both formats:
+  //   link: { text, to }   ← new format (React Router navigation)
+  //   linkLabel + href      ← legacy format (plain anchor)
+  //   actionText + onAction ← legacy format (callback)
+  const linkText = toast.link?.text ?? toast.linkLabel ?? null;
+  const linkTo   = toast.link?.to   ?? null;
+  const linkHref = toast.href ?? null;
+  const hasLink  = linkText && (linkTo || linkHref || toast.onAction);
+
+  function handleLinkClick(e) {
     e.stopPropagation();
-    toast.onAction?.();
+    if (toast.onAction) {
+      toast.onAction();
+    } else if (linkTo) {
+      navigate(linkTo);
+    }
     onDismiss();
-  };
+  }
 
   return (
-    <div className="toast show" onClick={onDismiss}>
+    <div className={`toast show ${typeClass}`} onClick={onDismiss}>
       <span className="toast-msg">{toast.message}</span>
-      {toast.actionText && toast.onAction && (
-        <button className="toast-action" onClick={handleAction}>
-          {toast.actionText}
-        </button>
-      )}
-      {!toast.onAction && toast.href && toast.linkLabel && (
-        <a
-          href={toast.href}
-          className="toast-action"
-          onClick={e => e.stopPropagation()}
-        >
-          {toast.linkLabel}
-        </a>
+      {hasLink && (
+        linkHref && !linkTo && !toast.onAction ? (
+          <a
+            href={linkHref}
+            className="toast-action"
+            onClick={e => e.stopPropagation()}
+          >
+            {linkText}
+          </a>
+        ) : (
+          <button className="toast-action" onClick={handleLinkClick}>
+            {linkText}
+          </button>
+        )
       )}
     </div>
   );

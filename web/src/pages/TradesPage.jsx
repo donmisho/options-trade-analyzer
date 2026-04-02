@@ -19,7 +19,7 @@ import SymbolSearch from '../components/SymbolSearch';
 import QuoteBar from '../components/QuoteBar';
 import SmaPanel from '../components/SmaPanel';
 import ResultsTable from '../components/ResultsTable';
-import { SectionA, SectionB, SectionC, SectionD, SectionE } from '../components/TradeDetail';
+import { SectionA, SectionB, SectionC, SectionE } from '../components/TradeDetail';
 import { verticalsColumns } from '../config/verticals-columns';
 import { longOptionsColumns } from '../config/long-options-columns';
 import { analyzeVerticals, analyzeLongCalls, searchSymbolsStatic, getQuote, evaluateStructured, followTrade, takeTrade, evaluateFollowUp } from '../api/client';
@@ -676,12 +676,6 @@ function TradeDetailExpansion({
       <SectionA trade={detailProps} />
       <SectionB scenarios={scenarios || []} totalEV={totalEV ?? null} />
       <SectionC outcome={outcome || null} />
-      <SectionD
-        trade={rawTrade || null}
-        symbol={symbol || ''}
-        currentPrice={underlying || 0}
-        breakeven={detailProps?.breakeven ?? null}
-      />
       <SectionE
         evaluation={evaluation || null}
         tradeContext={tradeContext}
@@ -701,21 +695,29 @@ export default function TradesPage() {
   const { positionSymbols } = useApp();
   const { showToast } = useToast();
 
-  const symbol = searchParams.get('symbol') || '';
+  const symbol        = searchParams.get('symbol')   || '';
+  const strategyParam = searchParams.get('strategy') || '';
+
+  // Derive initial section expansion from ?strategy= param
+  const _stratCfg         = STRATEGY_CONFIGS[strategyParam];
+  const _isLongOptStrat   = _stratCfg?.trade_structure === 'long_option';
+  const _isCreditSpread   = _stratCfg?.trade_structure === 'credit_spread';
 
   // ── SMA chart state ──────────────────────────────────────────────────────
   const [smaPeriods, setSmaPeriods] = useState({ short: 8, mid: 21, long: 50 });
   const [candles, setCandles] = useState([]);
 
   // ── Vertical spreads state ───────────────────────────────────────────────
-  const [vertExpanded, setVertExpanded]     = useState(true);
+  // Default: expanded unless a long_option strategy is specified
+  const [vertExpanded, setVertExpanded]     = useState(!_isLongOptStrat);
   const [vertSpreads, setVertSpreads]       = useState([]);
   const [vertLoading, setVertLoading]       = useState(false);
   const [vertError, setVertError]           = useState(null);
   const [vertUnderlying, setVertUnderlying] = useState(0);
 
   // ── Puts & calls state ───────────────────────────────────────────────────
-  const [callsExpanded, setCallsExpanded]     = useState(false);
+  // Default: collapsed unless a long_option strategy is specified
+  const [callsExpanded, setCallsExpanded]     = useState(_isLongOptStrat);
   const [callResults, setCallResults]         = useState([]);
   const [callsLoading, setCallsLoading]       = useState(false);
   const [callsError, setCallsError]           = useState(null);
@@ -728,6 +730,15 @@ export default function TradesPage() {
   // ── Config drawer state ──────────────────────────────────────────────────
   const [vertConfigOpen, setVertConfigOpen]   = useState(false);
   const [callsConfigOpen, setCallsConfigOpen] = useState(false);
+
+  // ── Auto-fetch on mount when symbol is pre-set from URL ──────────────────
+  // Handles /trades?symbol=X (from scan card click) and /trades?strategy=X
+  useEffect(() => {
+    if (!symbol) return;
+    if (!_isLongOptStrat) fetchVerticals(symbol);
+    if (_isLongOptStrat)  fetchCalls(symbol);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── Fetch verticals ──────────────────────────────────────────────────────
   async function fetchVerticals(sym) {
@@ -865,7 +876,7 @@ export default function TradesPage() {
         const normalized = normalizeEvalResponse(result, strategyKeys[0]);
         if (normalized) setEvaluations(prev => ({ ...prev, [rowId]: normalized }));
       } catch (err) {
-        showToast(`Evaluation failed: ${err.message}`);
+        showToast({ type: 'error', message: `Evaluation failed: ${err.message}` });
       }
     }
 
@@ -879,9 +890,9 @@ export default function TradesPage() {
           entry_price: getEntryPrice(trade),
           entry_date: new Date().toISOString(),
         });
-        showToast({ message: `Position followed (Paper) — ${symbol} ${tradeLabel(trade)}`, linkLabel: 'View Positions', href: '/positions', duration: 4000 });
+        showToast({ type: 'success', message: `Position followed (Paper) — ${symbol} ${tradeLabel(trade)}`, link: { text: 'View Positions', to: '/positions' }, duration: 4000 });
       } catch (err) {
-        showToast(`Follow failed: ${err.message}`);
+        showToast({ type: 'error', message: `Follow failed: ${err.message}` });
       }
     }
 
@@ -895,9 +906,9 @@ export default function TradesPage() {
           entry_price: getEntryPrice(trade),
           entry_date: new Date().toISOString(),
         });
-        showToast({ message: `Position taken (Live) — ${symbol} ${tradeLabel(trade)}`, linkLabel: 'View Positions', href: '/positions', duration: 4000 });
+        showToast({ type: 'success', message: `Position taken (Live) — ${symbol} ${tradeLabel(trade)}`, link: { text: 'View Positions', to: '/positions' }, duration: 4000 });
       } catch (err) {
-        showToast(`Take position failed: ${err.message}`);
+        showToast({ type: 'error', message: `Take position failed: ${err.message}` });
       }
     }
 

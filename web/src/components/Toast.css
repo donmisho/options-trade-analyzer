@@ -42,6 +42,11 @@
   flex: 1;
 }
 
+/* Type variants — left border color only */
+.toast.toast-success { border-left: 3px solid #4ade80; padding-left: 13px; }
+.toast.toast-error   { border-left: 3px solid #f87171; padding-left: 13px; }
+.toast.toast-info    { border-left: 3px solid #2dd4bf; padding-left: 13px; }
+
 .toast-action {
   color: #2dd4bf;
   font-size: 10px;

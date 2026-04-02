@@ -16,6 +16,7 @@ import { STRATEGY_COLORS } from '../utils/strategyColors';
 import { PositionHealthBadge } from '../components/PositionHealthBadge';
 import { getPositions, refreshPosition } from '../api/client';
 import { formatDate } from '../utils/formatDate';
+import { useToast } from '../components/Toast';
 import './PageShared.css';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -206,6 +207,7 @@ function RefreshConfirmDialog({ count, onConfirm, onCancel }) {
 export default function StrategyPage() {
   const { key }    = useParams();
   const navigate   = useNavigate();
+  const { showToast } = useToast();
 
   // Config + color lookup
   const config   = STRATEGY_CONFIGS[key] ?? null;
@@ -223,9 +225,31 @@ export default function StrategyPage() {
   const [showConfirm,    setShowConfirm]    = useState(false);
   const [refreshingAll,  setRefreshingAll]  = useState(false);
 
+  // Editable parameters state (OTA-408)
+  const [editedParams,   setEditedParams]   = useState({});
+
   useEffect(() => {
     if (key) loadPositions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+
+  // Initialize editedParams from configSchema defaults (or saved overrides)
+  useEffect(() => {
+    const schema = STRATEGY_CONFIGS[key]?.configSchema ?? [];
+    if (!schema.length) return;
+    try {
+      const stored    = JSON.parse(localStorage.getItem('analysisConfig') || '{}');
+      const overrides = stored.strategyOverrides?.[key] || {};
+      const initial   = {};
+      for (const p of schema) {
+        initial[p.key] = p.key in overrides ? overrides[p.key] : p.default;
+      }
+      setEditedParams(initial);
+    } catch {
+      const initial = {};
+      for (const p of schema) initial[p.key] = p.default;
+      setEditedParams(initial);
+    }
   }, [key]);
 
   async function loadPositions() {
@@ -245,6 +269,8 @@ export default function StrategyPage() {
   async function runRefreshAll() {
     const activePositions = filtered.filter(p => !isInactive(p.status));
     setRefreshingAll(true);
+    let succeeded = 0;
+    let failed    = 0;
     for (const pos of activePositions) {
       try {
         const result = await refreshPosition(pos.id);
@@ -257,12 +283,18 @@ export default function StrategyPage() {
             pnl_pct:       result.pnl_pct     != null ? result.pnl_pct     * 100 : p.pnl_pct,
           };
         }));
+        succeeded++;
       } catch {
-        // continue with remaining positions
+        failed++;
       }
     }
     setRefreshingAll(false);
     setLastRefreshed(new Date());
+    if (failed === 0) {
+      showToast({ type: 'success', message: `Refreshed ${succeeded} position${succeeded !== 1 ? 's' : ''}` });
+    } else {
+      showToast({ type: 'error', message: `Refreshed ${succeeded}, failed ${failed}` });
+    }
   }
 
   function handleRefreshAll() {
@@ -374,33 +406,113 @@ export default function StrategyPage() {
         Parameters
       </div>
 
+      {/* Unsaved changes indicator */}
+      {schema.some(p => editedParams[p.key] !== p.default) && (
+        <div style={{
+          fontSize: 10, color: '#f59e0b', fontFamily: 'monospace',
+          marginBottom: 8,
+        }}>
+          ● Unsaved changes
+        </div>
+      )}
+
       <div style={{
         display: 'grid',
         gridTemplateColumns: 'repeat(4, 1fr)',
         gap: 10,
-        marginBottom: 16,
+        marginBottom: 12,
       }}>
-        {schema.map(param => (
-          <div key={param.key} style={{
-            border: '1px solid var(--border, #30363d)',
-            borderRadius: 4,
-            padding: 12,
-            fontFamily: 'monospace',
-          }}>
-            <div style={{
-              fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.4px',
-              color: '#8b949e', marginBottom: 4,
+        {schema.map(param => {
+          const currentVal = editedParams[param.key] ?? param.default;
+          const isModified = currentVal !== param.default;
+          return (
+            <div key={param.key} style={{
+              border: `1px solid ${isModified ? 'rgba(245,158,11,0.4)' : 'var(--border, #30363d)'}`,
+              borderRadius: 4,
+              padding: 12,
+              fontFamily: 'monospace',
             }}>
-              {param.label}
+              <div style={{
+                fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.4px',
+                color: '#8b949e', marginBottom: 6,
+              }}>
+                {param.label}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                <input
+                  type="number"
+                  min={param.min}
+                  max={param.max}
+                  step={param.step}
+                  value={currentVal}
+                  onChange={e => setEditedParams(prev => ({
+                    ...prev,
+                    [param.key]: Number(e.target.value),
+                  }))}
+                  style={{
+                    width: 64,
+                    background: 'var(--bg, #0d1117)',
+                    border: '1px solid var(--border, #30363d)',
+                    color: '#e6edf3',
+                    borderRadius: 3,
+                    padding: '3px 6px',
+                    fontSize: 14,
+                    fontWeight: 700,
+                    fontFamily: 'monospace',
+                  }}
+                />
+                <span style={{ fontSize: 11, color: '#8b949e' }}>
+                  {param.unit === '\xd7' ? '×' : param.unit === '\u0394' ? 'Δ' : param.unit || ''}
+                </span>
+              </div>
+              <div style={{ fontSize: 9, color: '#8b949e' }}>
+                Default: {formatParamValue(param.default, param.unit)}
+              </div>
+              <div style={{ fontSize: 9, color: '#8b949e' }}>
+                {formatRange(param.min, param.max, param.unit)}
+              </div>
             </div>
-            <div style={{ fontSize: 18, fontWeight: 700, color: '#e6edf3' }}>
-              {formatParamValue(param.default, param.unit)}
-            </div>
-            <div style={{ fontSize: 9, color: '#8b949e', marginTop: 2 }}>
-              {formatRange(param.min, param.max, param.unit)}
-            </div>
-          </div>
-        ))}
+          );
+        })}
+      </div>
+
+      {/* Apply / Reset buttons */}
+      <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
+        <button
+          style={{
+            background: 'rgba(45,212,191,0.1)', border: '1px solid rgba(45,212,191,0.4)',
+            color: '#2dd4bf', padding: '7px 16px', borderRadius: 4, fontSize: 11,
+            fontFamily: 'monospace', cursor: 'pointer',
+          }}
+          onClick={() => {
+            try {
+              const stored    = JSON.parse(localStorage.getItem('analysisConfig') || '{}');
+              const overrides = stored.strategyOverrides || {};
+              overrides[key]  = { ...overrides[key], ...editedParams };
+              localStorage.setItem('analysisConfig', JSON.stringify({ ...stored, strategyOverrides: overrides }));
+              showToast({ type: 'success', message: `Parameters saved for ${config.label}` });
+            } catch {
+              showToast({ type: 'error', message: 'Failed to save parameters' });
+            }
+          }}
+        >
+          Apply
+        </button>
+        <button
+          style={{
+            background: 'transparent', border: '1px solid #30363d',
+            color: '#8b949e', padding: '7px 14px', borderRadius: 4, fontSize: 11,
+            fontFamily: 'monospace', cursor: 'pointer',
+          }}
+          onClick={() => {
+            const defaults = {};
+            for (const p of schema) defaults[p.key] = p.default;
+            setEditedParams(defaults);
+            showToast({ type: 'info', message: 'Parameters reset to defaults' });
+          }}
+        >
+          Reset to defaults
+        </button>
       </div>
 
       {/* Scoring Weights */}

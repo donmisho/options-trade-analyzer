@@ -56,8 +56,8 @@ function RequireAuth({ children }) {
 export default function App() {
   return (
     <MsalProvider instance={msalInstance}>
-      <ToastProvider>
       <BrowserRouter>
+      <ToastProvider>
         <Routes>
           {/* Public routes — no auth, no AppContext, no Layout chrome */}
           <Route path="/login" element={<LoginPage />} />
@@ -111,8 +111,8 @@ export default function App() {
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Route>
         </Routes>
-      </BrowserRouter>
       </ToastProvider>
+      </BrowserRouter>
     </MsalProvider>
   );
 }

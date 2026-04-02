@@ -19,6 +19,7 @@ import {
   getPositionCurrentPrices,
 } from '../api/client';
 import RefreshConfirmDialog from '../components/RefreshConfirmDialog';
+import { useToast } from '../components/Toast';
 import './PageShared.css';
 import './PositionsPage.css';
 
@@ -512,26 +513,12 @@ function FilterBar({ filters, onChange, onRefreshAll, refreshingAll, filteredCou
   );
 }
 
-// ─── Toast ────────────────────────────────────────────────────────────────────
-
-function Toast({ message, onDismiss }) {
-  useEffect(() => {
-    const t = setTimeout(onDismiss, 5000);
-    return () => clearTimeout(t);
-  }, [onDismiss]);
-
-  return (
-    <div className="pos-toast" onClick={onDismiss}>
-      {message}
-    </div>
-  );
-}
-
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 const _inactive = (s) => s === 'CLOSED' || s === 'ARCHIVED';
 
 export default function PositionsPage() {
+  const { showToast }                               = useToast();
   const [positions, setPositions]                   = useState([]);
   const [loading, setLoading]                       = useState(true);
   const [error, setError]                           = useState(null);
@@ -539,7 +526,6 @@ export default function PositionsPage() {
   const [loadingAssessmentIds, setLoadingAsmIds]    = useState(new Set());
   const [refreshingId, setRefreshingId]             = useState(null);
   const [expandedRowIds, setExpandedRowIds]         = useState(new Set());
-  const [toast, setToast]                           = useState(null);
   const [collapsedGroups, setCollapsedGroups]       = useState({});
   const [showRefreshConfirm, setShowRefreshConfirm]       = useState(false);
   const [refreshingAll, setRefreshingAll]                 = useState(false);
@@ -625,7 +611,7 @@ export default function PositionsPage() {
       }
     }
     if (count > 0) {
-      setToast(`${count} position${count > 1 ? 's' : ''} archived (expired)`);
+      showToast({ type: 'info', message: `${count} position${count > 1 ? 's' : ''} archived (expired)` });
     }
   }
 
@@ -682,8 +668,9 @@ export default function PositionsPage() {
           perf_status:     result.perf_status,
         };
       }));
+      showToast({ type: 'success', message: `${pos.symbol} refreshed` });
     } catch (err) {
-      setToast(`Refresh failed: ${err.message}`);
+      showToast({ type: 'error', message: `Refresh failed: ${err.message}` });
     } finally {
       setRefreshingId(null);
     }
@@ -695,9 +682,9 @@ export default function PositionsPage() {
       .then(() => {
         setPositions(prev => prev.map(p => p.id === pos.id ? { ...p, status: 'ARCHIVED' } : p));
         setExpandedRowIds(prev => { const next = new Set(prev); next.delete(pos.id); return next; });
-        setToast('Position archived');
+        showToast({ type: 'info', message: 'Position archived' });
       })
-      .catch(err => setToast(`Archive failed: ${err.message}`));
+      .catch(err => showToast({ type: 'error', message: `Archive failed: ${err.message}` }));
   }
 
   function handleRefreshAllClick() {
@@ -719,6 +706,7 @@ export default function PositionsPage() {
       for (const pos of toRefresh) {
         await handleRefresh(pos);
       }
+      showToast({ type: 'success', message: `Refreshed ${toRefresh.length} position${toRefresh.length !== 1 ? 's' : ''}` });
     } finally {
       setRefreshingAll(false);
     }
@@ -791,8 +779,6 @@ export default function PositionsPage() {
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className="page-card">
-      {toast && <Toast message={toast} onDismiss={() => setToast(null)} />}
-
       <div className="pos-page-header">
         <h2 className="page-title">
           <span className="icon">◈</span> Positions
