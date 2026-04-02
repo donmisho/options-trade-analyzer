@@ -12,7 +12,7 @@
  *      Row click → inline Sections A-E trade detail expansion.
  */
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import SymbolSearch from '../components/SymbolSearch';
@@ -24,6 +24,7 @@ import { verticalsColumns } from '../config/verticals-columns';
 import { longOptionsColumns } from '../config/long-options-columns';
 import { analyzeVerticals, analyzeLongCalls, searchSymbolsStatic, getQuote, evaluateStructured, followTrade, takeTrade, evaluateFollowUp } from '../api/client';
 import { useToast } from '../components/Toast';
+import { STRATEGY_CONFIGS, SCORECARD_STRATEGIES } from '../strategy-configs/index';
 
 const MUTED  = '#8b949e';
 const TEXT   = '#e6edf3';
@@ -35,6 +36,10 @@ const ABBR_TO_KEY = {
   TR: 'trend-rider',
   LT: 'lottery-ticket',
 };
+
+// Strategy keys shown in each section's Config drawer
+const VERT_STRATEGY_KEYS  = ['steady-paycheck', 'weekly-grind'];
+const CALLS_STRATEGY_KEYS = ['trend-rider', 'lottery-ticket'];
 
 // ─── Normal CDF (Abramowitz & Stegun approximation, max error 1.5×10⁻⁷) ──────
 function normCdf(z) {
@@ -81,9 +86,13 @@ function inferStrategies(spreadType, dte) {
   return ['TR'];
 }
 
+// Config-driven: returns strategy keys where trade_structure === 'long_option'
+// and DTE falls within the strategy's DTE window.
 function inferLongOptionStrategies(optionType, dte) {
-  if (dte != null && dte < 21) return ['LT'];
-  return ['TR'];
+  return SCORECARD_STRATEGIES
+    .filter(cfg => cfg.trade_structure === 'long_option')
+    .filter(cfg => dte != null ? (dte >= cfg.dte_min && dte <= cfg.dte_max) : true)
+    .map(cfg => cfg.key);
 }
 
 // ─── Exit scenario builder for vertical spreads ──────────────────────────────
@@ -190,6 +199,63 @@ function buildOutcome(spread, underlying, totalEV) {
   return { pMaxProfit, pBreakeven, pPartial, pMaxLoss, expectedValue: totalEV, evPctRisk };
 }
 
+// ─── Exit scenario builder — long options (OTA-385) ──────────────────────────
+// P&L for calls: (price - strike - premium) * 100
+// P&L for puts:  (strike - price - premium) * 100
+function buildLongOptionExitScenarios(option, underlying) {
+  const { strike, mid_price: premium, iv, expiration, option_type: optType } = option;
+  if (!strike || premium == null || !underlying) return { scenarios: [], totalEV: null };
+
+  const isCall  = optType === 'call';
+  const dte     = expiration
+    ? Math.max(1, Math.round((new Date(expiration) - new Date()) / 86400000))
+    : 30;
+  const sigma   = Math.max(1, (iv || 0.25) * underlying * Math.sqrt(dte / 365));
+  const maxLoss = premium * 100;
+  const breakeven = isCall ? strike + premium : strike - premium;
+
+  function intrinsicAt(price) {
+    return isCall ? Math.max(0, price - strike) : Math.max(0, strike - price);
+  }
+
+  function pnlAt(price) {
+    return (intrinsicAt(price) - premium) * 100;
+  }
+
+  function exitSignalFor(pnl, price) {
+    if (Math.abs(price - breakeven) < 0.5) return 'BREAKEVEN';
+    if (pnl <= -maxLoss * 0.95) return 'STOP';
+    return null;
+  }
+
+  const rangeStart = Math.max(1, Math.floor((underlying - 3 * sigma) / 5) * 5);
+  const rangeEnd   = Math.ceil((underlying + 3 * sigma) / 5) * 5;
+
+  const scenarios = [];
+  let totalEV = 0;
+
+  for (let price = rangeStart; price <= rangeEnd; price += 5) {
+    const zLo = (price - 2.5 - underlying) / sigma;
+    const zHi = (price + 2.5 - underlying) / sigma;
+    const probability = (normCdf(zHi) - normCdf(zLo)) * 100;
+    const pnl = pnlAt(price);
+    const pnlPct = maxLoss > 0 ? (pnl / maxLoss) * 100 : 0;
+    const ev = pnl * probability / 100;
+    totalEV += ev;
+    scenarios.push({
+      price,
+      spreadValue: intrinsicAt(price),
+      pnl,
+      pnlPct,
+      probability,
+      expectedValue: ev,
+      exitSignal: exitSignalFor(pnl, price),
+    });
+  }
+
+  return { scenarios, totalEV };
+}
+
 // ─── Map ScoredSpread → SectionA trade object ────────────────────────────────
 function mapSpreadToDetail(spread) {
   const spreadWidth = spread.long_strike != null && spread.short_strike != null
@@ -258,7 +324,7 @@ function mapCallToDetail(call) {
 }
 
 // ─── Collapsible section header ───────────────────────────────────────────────
-function SectionHeader({ title, count, expanded, onToggle, showConfig, comingSoon }) {
+function SectionHeader({ title, count, expanded, onToggle, showConfig, onConfig, comingSoon }) {
   return (
     <div
       onClick={comingSoon ? undefined : onToggle}
@@ -283,7 +349,7 @@ function SectionHeader({ title, count, expanded, onToggle, showConfig, comingSoo
       </span>
       {showConfig && !comingSoon && (
         <button
-          onClick={e => e.stopPropagation()}
+          onClick={e => { e.stopPropagation(); if (onConfig) onConfig(); }}
           style={{
             marginLeft: 'auto',
             background: 'transparent',
@@ -300,6 +366,279 @@ function SectionHeader({ title, count, expanded, onToggle, showConfig, comingSoo
         </button>
       )}
     </div>
+  );
+}
+
+// ─── Section Config Drawer (OTA-387) ─────────────────────────────────────────
+// Slide-out config panel for a section. Shows strategy tabs when multiple
+// strategy keys are provided. Apply saves to localStorage per strategy.
+function SectionConfigDrawer({ open, onClose, strategyKeys = [], onApply }) {
+  const [activeKey, setActiveKey] = useState(strategyKeys[0] || null);
+
+  const keysStr = strategyKeys.join(',');
+  useEffect(() => {
+    if (strategyKeys.length && !strategyKeys.includes(activeKey)) {
+      setActiveKey(strategyKeys[0]);
+    }
+  }, [keysStr]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const cfg    = activeKey ? STRATEGY_CONFIGS[activeKey] : null;
+  const schema = cfg?.configSchema || [];
+
+  function loadDraft(key) {
+    if (!key || !STRATEGY_CONFIGS[key]?.configSchema) return {};
+    try {
+      const stored = JSON.parse(localStorage.getItem('analysisConfig') || '{}');
+      const saved  = stored.strategyOverrides?.[key] || {};
+      const result = {};
+      for (const field of STRATEGY_CONFIGS[key].configSchema) {
+        result[field.key] = field.key in saved ? saved[field.key] : field.default;
+      }
+      return result;
+    } catch {
+      const result = {};
+      for (const field of STRATEGY_CONFIGS[key]?.configSchema || []) {
+        result[field.key] = field.default;
+      }
+      return result;
+    }
+  }
+
+  const [draft, setDraft] = useState(() => loadDraft(strategyKeys[0]));
+
+  useEffect(() => { if (activeKey) setDraft(loadDraft(activeKey)); }, [activeKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (open && activeKey) setDraft(loadDraft(activeKey)); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function handleApply() {
+    try {
+      const stored    = JSON.parse(localStorage.getItem('analysisConfig') || '{}');
+      const overrides = stored.strategyOverrides || {};
+      overrides[activeKey] = draft;
+      localStorage.setItem('analysisConfig', JSON.stringify({ ...stored, strategyOverrides: overrides }));
+    } catch { /* ignore storage errors */ }
+    if (onApply) onApply(activeKey, draft);
+    onClose();
+  }
+
+  function handleReset() {
+    const result = {};
+    for (const field of schema) result[field.key] = field.default;
+    setDraft(result);
+  }
+
+  return (
+    <>
+      {open && (
+        <div
+          onClick={onClose}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 90 }}
+        />
+      )}
+      <div style={{
+        position: 'fixed', top: 0, right: 0, bottom: 0, width: 380,
+        background: '#161b22', borderLeft: `1px solid ${BORDER}`,
+        zIndex: 100,
+        transform: open ? 'translateX(0)' : 'translateX(100%)',
+        transition: 'transform 0.25s cubic-bezier(0.4,0,0.2,1)',
+        display: 'flex', flexDirection: 'column',
+        boxShadow: open ? '-8px 0 30px rgba(0,0,0,0.4)' : 'none',
+        fontFamily: 'monospace',
+      }}>
+        {/* Header */}
+        <div style={{
+          padding: '14px 18px', borderBottom: `1px solid ${BORDER}`,
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          flexShrink: 0,
+        }}>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: TEXT }}>Configuration</div>
+            <div style={{ fontSize: 11, color: MUTED, marginTop: 2 }}>
+              {cfg?.label ? `${cfg.label} Parameters` : 'Strategy Parameters'}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            style={{ background: 'none', border: 'none', color: MUTED, fontSize: 20, cursor: 'pointer', padding: 4 }}
+          >
+            &times;
+          </button>
+        </div>
+
+        {/* Strategy tabs — only shown when multiple strategies apply */}
+        {strategyKeys.length > 1 && (
+          <div style={{
+            display: 'flex', gap: 6, padding: '10px 18px',
+            borderBottom: `1px solid ${BORDER}`, flexShrink: 0,
+          }}>
+            {strategyKeys.map(key => {
+              const s = STRATEGY_CONFIGS[key];
+              if (!s) return null;
+              const isActive = key === activeKey;
+              return (
+                <button
+                  key={key}
+                  onClick={() => setActiveKey(key)}
+                  style={{
+                    padding: '4px 12px', borderRadius: 4,
+                    border: `1px solid ${isActive ? 'rgba(45,212,191,0.4)' : BORDER}`,
+                    background: isActive ? 'rgba(45,212,191,0.1)' : 'transparent',
+                    color: isActive ? '#2dd4bf' : MUTED,
+                    fontSize: 11, cursor: 'pointer', fontFamily: 'monospace',
+                  }}
+                >
+                  {s.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Body */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '14px 18px' }}>
+          {cfg && (
+            <div style={{
+              marginBottom: 16, padding: '10px 14px', borderRadius: 6,
+              background: '#21262d', border: `1px solid ${BORDER}`,
+            }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: '#2dd4bf', marginBottom: 2 }}>
+                {cfg.label}
+              </div>
+              <div style={{ fontSize: 11, color: MUTED, lineHeight: 1.4 }}>{cfg.description}</div>
+            </div>
+          )}
+
+          {schema.map(field => {
+            const value  = draft[field.key] ?? field.default;
+            const update = (v) => setDraft(prev => ({ ...prev, [field.key]: v }));
+            const unit   = field.unit || '';
+
+            if (field.type === 'slider') {
+              return (
+                <div key={field.key} style={{ marginBottom: 16 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
+                    <span style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.4px', color: MUTED }}>
+                      {field.label}
+                    </span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: TEXT }}>
+                      {unit === '\u0394' ? value.toFixed(2) : `${value}${unit}`}
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={field.min} max={field.max} step={field.step || 1} value={value}
+                    onChange={e => update(parseFloat(e.target.value))}
+                    style={{ width: '100%', cursor: 'pointer' }}
+                  />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2 }}>
+                    <span style={{ fontSize: 9, color: MUTED }}>{field.min}{unit}</span>
+                    <span style={{ fontSize: 9, color: MUTED }}>{field.max}{unit}</span>
+                  </div>
+                </div>
+              );
+            }
+
+            if (field.type === 'number') {
+              return (
+                <div key={field.key} style={{ marginBottom: 16 }}>
+                  <label style={{
+                    display: 'block', fontSize: 10,
+                    textTransform: 'uppercase', letterSpacing: '0.4px',
+                    color: MUTED, marginBottom: 5,
+                  }}>
+                    {field.label}
+                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <input
+                      type="number"
+                      value={value} min={field.min} max={field.max} step={field.step || 1}
+                      onChange={e => {
+                        let v = parseFloat(e.target.value);
+                        if (!isNaN(v)) {
+                          if (field.min != null) v = Math.max(field.min, v);
+                          if (field.max != null) v = Math.min(field.max, v);
+                          update(v);
+                        }
+                      }}
+                      style={{
+                        width: 80, padding: '5px 8px', borderRadius: 4,
+                        border: `1px solid ${BORDER}`, background: '#0d1117',
+                        color: TEXT, fontSize: 12, fontFamily: 'monospace',
+                        outline: 'none', textAlign: 'right',
+                      }}
+                    />
+                    {unit && <span style={{ fontSize: 11, color: MUTED }}>{unit}</span>}
+                  </div>
+                </div>
+              );
+            }
+
+            if (field.type === 'toggle') {
+              return (
+                <div key={field.key} style={{
+                  marginBottom: 16, display: 'flex', alignItems: 'center',
+                  justifyContent: 'space-between',
+                }}>
+                  <span style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.4px', color: MUTED }}>
+                    {field.label}
+                  </span>
+                  <button
+                    onClick={() => update(value ? 0 : 1)}
+                    style={{
+                      padding: '4px 12px', borderRadius: 4, fontSize: 11, cursor: 'pointer',
+                      border: `1px solid ${value ? 'rgba(45,212,191,0.4)' : BORDER}`,
+                      background: value ? 'rgba(45,212,191,0.1)' : 'transparent',
+                      color: value ? '#2dd4bf' : MUTED,
+                      fontFamily: 'monospace',
+                    }}
+                  >
+                    {value ? 'On' : 'Off'}
+                  </button>
+                </div>
+              );
+            }
+
+            return null;
+          })}
+        </div>
+
+        {/* Footer */}
+        <div style={{
+          padding: '12px 18px', borderTop: `1px solid ${BORDER}`,
+          display: 'flex', gap: 8, flexShrink: 0,
+        }}>
+          <button
+            onClick={handleApply}
+            style={{
+              flex: 1, padding: '9px 0', borderRadius: 4, border: 'none',
+              background: '#2dd4bf', color: '#0d1117',
+              fontWeight: 700, fontSize: 12, cursor: 'pointer', fontFamily: 'monospace',
+            }}
+          >
+            Apply
+          </button>
+          <button
+            onClick={handleReset}
+            style={{
+              padding: '9px 14px', borderRadius: 4,
+              border: `1px solid ${BORDER}`, background: 'transparent',
+              color: MUTED, fontSize: 12, cursor: 'pointer', fontFamily: 'monospace',
+            }}
+          >
+            Reset
+          </button>
+          <button
+            onClick={onClose}
+            style={{
+              padding: '9px 14px', borderRadius: 4,
+              border: `1px solid ${BORDER}`, background: 'transparent',
+              color: MUTED, fontSize: 12, cursor: 'pointer', fontFamily: 'monospace',
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -386,6 +725,10 @@ export default function TradesPage() {
   // ── Expansion state — one row expanded at a time across both sections ────
   const [expandedRowId, setExpandedRowId] = useState(null);
   const [evaluations, setEvaluations]     = useState({}); // rowId → evaluation object
+
+  // ── Config drawer state ──────────────────────────────────────────────────
+  const [vertConfigOpen, setVertConfigOpen]   = useState(false);
+  const [callsConfigOpen, setCallsConfigOpen] = useState(false);
 
   // ── Fetch verticals ──────────────────────────────────────────────────────
   async function fetchVerticals(sym) {
@@ -609,6 +952,7 @@ export default function TradesPage() {
     const rowId = `calls-${callResults.indexOf(trade)}`;
     const detailProps = mapCallToDetail(trade);
     const ctx = `${symbol} · ${trade.option_type} · ${trade.strike} · ${trade.expiration || ''}`;
+    const { scenarios, totalEV } = buildLongOptionExitScenarios(trade, callsUnderlying);
     const { handleEvaluate, handleFollow, handleTakePosition, handleFollowUp } = makeTradeHandlers(
       trade, rowId, callsUnderlying, {
         defaultStrategy: 'trend-rider',
@@ -629,8 +973,8 @@ export default function TradesPage() {
         onTakePosition={handleTakePosition}
         onFollowUp={handleFollowUp}
         onDiscard={() => setExpandedRowId(null)}
-        scenarios={[]}
-        totalEV={null}
+        scenarios={scenarios}
+        totalEV={totalEV}
         outcome={null}
       />
     );
@@ -653,138 +997,156 @@ export default function TradesPage() {
   }
 
   return (
-    <div style={{ padding: '16px 20px', fontFamily: 'monospace' }}>
+    <>
+      <div style={{ padding: '16px 20px', fontFamily: 'monospace' }}>
 
-      {/* Symbol search */}
-      <div style={{ marginBottom: 10 }}>
-        <SymbolSearch
-          onSelect={handleSymbolSelect}
-          searchFn={searchSymbolsStatic}
-          positionSymbols={positionSymbols}
-          initialValue={symbol || null}
-          placeholder="Search symbol…"
-        />
-      </div>
-
-      {/* QuoteBar */}
-      <div style={{ marginBottom: 12 }}>
-        <QuoteBar symbol={symbol || undefined} />
-      </div>
-
-      {/* SMA chart */}
-      <div style={{ marginBottom: 16 }}>
-        {candles.length > 0 ? (
-          <SmaPanel
-            candles={candles}
-            smaPeriods={smaPeriods}
-            onPeriodsChange={setSmaPeriods}
-            symbol={symbol}
+        {/* Symbol search */}
+        <div style={{ marginBottom: 10 }}>
+          <SymbolSearch
+            onSelect={handleSymbolSelect}
+            searchFn={searchSymbolsStatic}
+            positionSymbols={positionSymbols}
+            initialValue={symbol || null}
+            placeholder="Search symbol…"
           />
-        ) : (
-          <div style={{
-            height: 160,
-            border: `1px solid ${BORDER}`,
-            borderRadius: 4,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            color: MUTED, fontSize: 10,
-          }}>
-            SMA chart — configurable moving averages
-          </div>
-        )}
-      </div>
+        </div>
 
-      {/* Trade structure sections */}
-      <div>
+        {/* QuoteBar */}
+        <div style={{ marginBottom: 12 }}>
+          <QuoteBar symbol={symbol || undefined} />
+        </div>
 
-        {/* Vertical spreads */}
-        <SectionHeader
-          title="Vertical spreads"
-          count={countText(vertLoading, vertError, vertSpreads)}
-          expanded={vertExpanded}
-          onToggle={handleVertToggle}
-          showConfig
-        />
-        {vertExpanded && (
-          <div style={{ paddingTop: 4 }}>
-            {vertLoading && (
-              <div style={{ padding: '12px 0', color: MUTED, fontSize: 11 }}>Loading vertical spreads…</div>
-            )}
-            {vertError && (
-              <div style={{ padding: '12px 0', color: 'var(--red)', fontSize: 11 }}>{vertError}</div>
-            )}
-            {!vertLoading && !vertError && vertSpreads.length > 0 && (
-              <ResultsTable
-                results={vertSpreads}
-                columns={verticalsColumns}
-                context={vertContext}
-                expandedRowId={expandedRowId}
-                onRowClick={handleRowClick}
-                renderExpansionRow={renderVertExpansion}
-                getRowId={getVertRowId}
-                defaultSortKey="composite_score"
-                defaultSortDir="desc"
-              />
-            )}
-            {!vertLoading && !vertError && vertSpreads.length === 0 && symbol && (
-              <div style={{ padding: '12px 0', color: MUTED, fontSize: 11 }}>No vertical spreads found.</div>
-            )}
-            {!symbol && (
-              <div style={{ padding: '12px 0', color: MUTED, fontSize: 11 }}>Enter a symbol above to scan for trades.</div>
-            )}
-          </div>
-        )}
+        {/* SMA chart */}
+        <div style={{ marginBottom: 16 }}>
+          {candles.length > 0 ? (
+            <SmaPanel
+              candles={candles}
+              smaPeriods={smaPeriods}
+              onPeriodsChange={setSmaPeriods}
+              symbol={symbol}
+            />
+          ) : (
+            <div style={{
+              height: 160,
+              border: `1px solid ${BORDER}`,
+              borderRadius: 4,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: MUTED, fontSize: 10,
+            }}>
+              SMA chart — configurable moving averages
+            </div>
+          )}
+        </div>
 
-        {/* Puts & calls */}
-        <div style={{ marginTop: 2 }}>
+        {/* Trade structure sections */}
+        <div>
+
+          {/* Vertical spreads */}
           <SectionHeader
-            title="Puts & calls"
-            count={countText(callsLoading, callsError, callResults)}
-            expanded={callsExpanded}
-            onToggle={handleCallsToggle}
+            title="Vertical spreads"
+            count={countText(vertLoading, vertError, vertSpreads)}
+            expanded={vertExpanded}
+            onToggle={handleVertToggle}
             showConfig
+            onConfig={() => setVertConfigOpen(true)}
           />
-          {callsExpanded && (
+          {vertExpanded && (
             <div style={{ paddingTop: 4 }}>
-              {callsLoading && (
-                <div style={{ padding: '12px 0', color: MUTED, fontSize: 11 }}>Loading puts & calls…</div>
+              {vertLoading && (
+                <div style={{ padding: '12px 0', color: MUTED, fontSize: 11 }}>Loading vertical spreads…</div>
               )}
-              {callsError && (
-                <div style={{ padding: '12px 0', color: 'var(--red)', fontSize: 11 }}>{callsError}</div>
+              {vertError && (
+                <div style={{ padding: '12px 0', color: 'var(--red)', fontSize: 11 }}>{vertError}</div>
               )}
-              {!callsLoading && !callsError && callsDisplay.length > 0 && (
+              {!vertLoading && !vertError && vertSpreads.length > 0 && (
                 <ResultsTable
-                  results={callsDisplay}
-                  columns={longOptionsColumns}
-                  context={callsContext}
+                  results={vertSpreads}
+                  columns={verticalsColumns}
+                  context={vertContext}
                   expandedRowId={expandedRowId}
                   onRowClick={handleRowClick}
-                  renderExpansionRow={renderCallExpansion}
-                  getRowId={getCallRowId}
+                  renderExpansionRow={renderVertExpansion}
+                  getRowId={getVertRowId}
                   defaultSortKey="composite_score"
                   defaultSortDir="desc"
                 />
               )}
-              {!callsLoading && !callsError && callResults.length === 0 && symbol && (
-                <div style={{ padding: '12px 0', color: MUTED, fontSize: 11 }}>No puts & calls found.</div>
+              {!vertLoading && !vertError && vertSpreads.length === 0 && symbol && (
+                <div style={{ padding: '12px 0', color: MUTED, fontSize: 11 }}>No vertical spreads found.</div>
               )}
               {!symbol && (
                 <div style={{ padding: '12px 0', color: MUTED, fontSize: 11 }}>Enter a symbol above to scan for trades.</div>
               )}
             </div>
           )}
-        </div>
 
-        {/* Iron condors — coming soon */}
-        <div style={{ marginTop: 2 }}>
-          <SectionHeader
-            title="Iron condors"
-            count="· coming soon"
-            expanded={false}
-            comingSoon
-          />
-        </div>
+          {/* Puts & calls */}
+          <div style={{ marginTop: 2 }}>
+            <SectionHeader
+              title="Puts & calls"
+              count={countText(callsLoading, callsError, callResults)}
+              expanded={callsExpanded}
+              onToggle={handleCallsToggle}
+              showConfig
+              onConfig={() => setCallsConfigOpen(true)}
+            />
+            {callsExpanded && (
+              <div style={{ paddingTop: 4 }}>
+                {callsLoading && (
+                  <div style={{ padding: '12px 0', color: MUTED, fontSize: 10 }}>Analyzing long options…</div>
+                )}
+                {callsError && (
+                  <div style={{ padding: '12px 0', color: 'var(--red)', fontSize: 11 }}>{callsError}</div>
+                )}
+                {!callsLoading && !callsError && callsDisplay.length > 0 && (
+                  <ResultsTable
+                    results={callsDisplay}
+                    columns={longOptionsColumns}
+                    context={callsContext}
+                    expandedRowId={expandedRowId}
+                    onRowClick={handleRowClick}
+                    renderExpansionRow={renderCallExpansion}
+                    getRowId={getCallRowId}
+                    defaultSortKey="composite_score"
+                    defaultSortDir="desc"
+                  />
+                )}
+                {!callsLoading && !callsError && callResults.length === 0 && symbol && (
+                  <div style={{ padding: '12px 0', color: MUTED, fontSize: 10, textAlign: 'center' }}>
+                    No long option candidates found for {symbol}
+                  </div>
+                )}
+                {!symbol && (
+                  <div style={{ padding: '12px 0', color: MUTED, fontSize: 11 }}>Enter a symbol above to scan for trades.</div>
+                )}
+              </div>
+            )}
+          </div>
 
+          {/* Iron condors — coming soon */}
+          <div style={{ marginTop: 2 }}>
+            <SectionHeader
+              title="Iron condors"
+              count="· coming soon"
+              expanded={false}
+              comingSoon
+            />
+          </div>
+
+        </div>
       </div>
-    </div>
+
+      {/* Section config drawers */}
+      <SectionConfigDrawer
+        open={vertConfigOpen}
+        onClose={() => setVertConfigOpen(false)}
+        strategyKeys={VERT_STRATEGY_KEYS}
+      />
+      <SectionConfigDrawer
+        open={callsConfigOpen}
+        onClose={() => setCallsConfigOpen(false)}
+        strategyKeys={CALLS_STRATEGY_KEYS}
+      />
+    </>
   );
 }

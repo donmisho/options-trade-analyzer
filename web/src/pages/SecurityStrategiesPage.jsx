@@ -20,11 +20,10 @@ import { useApp } from '../context/AppContext';
 import { getQuote, getStrategyScorecard, evaluateStructured, searchSymbolsStatic } from '../api/client';
 import SymbolSearch from '../components/SymbolSearch';
 import { STRATEGY_CONFIGS } from '../strategy-configs/index';
-import ConfigDrawer from '../components/ConfigDrawer';
 import QuoteBar from '../components/QuoteBar';
 import StrategyScorecard from '../components/StrategyScorecard';
 import TradeEvaluationCard from '../components/TradeEvaluationCard';
-import { C, mono, DEFAULT_PRESETS } from '../styles/tokens';
+import { C, mono } from '../styles/tokens';
 
 // ─── Chart helpers ──────────────────────────────────────────────────────────
 
@@ -157,7 +156,7 @@ const MOCK_SCORES = [
 
 export default function SecurityStrategiesPage() {
   const { symbol: symbolParam } = useParams();
-  const { activeSymbol, setActiveSymbol, prices, configOpen, setConfigOpen, positionSymbols } = useApp();
+  const { activeSymbol, setActiveSymbol, prices, positionSymbols } = useApp();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -180,14 +179,8 @@ export default function SecurityStrategiesPage() {
   const [chartStartDate, setChartStartDate] = useState(() => tradingDaysAgo(90));
   const chartStartDateRef = useRef(chartStartDate);
 
-  // ── Analysis config (smaPeriods used by chart legend + ConfigDrawer) ───────
-  const [presets,        setPresets]        = useState(DEFAULT_PRESETS);
-  const [activePresetId, setActivePresetId] = useState('balanced');
-  const [analysisConfig, setAnalysisConfig] = useState(() => {
-    const preset = DEFAULT_PRESETS.find(p => p.id === 'balanced') || DEFAULT_PRESETS[0];
-    return { smaPeriods: { short: 8, mid: 21, long: 50 }, ...preset };
-  });
-  const smaPeriods = analysisConfig.smaPeriods || { short: 8, mid: 21, long: 50 };
+  // ── SMA periods for chart ──────────────────────────────────────────────────
+  const smaPeriods = { short: 8, mid: 21, long: 50 };
 
   // ── Fetch quote + generate candles ─────────────────────────────────────
   const fetchQuote = useCallback(async (sym) => {
@@ -283,12 +276,6 @@ export default function SecurityStrategiesPage() {
     fetchQuote(sym);
     fetchScorecard(sym);
   };
-
-  // ── Config apply ────────────────────────────────────────────────────────
-  const handleConfigApply = useCallback((newConfig) => {
-    setAnalysisConfig(prev => ({ ...prev, ...newConfig }));
-    setConfigOpen(false);
-  }, [setConfigOpen]);
 
   // ── SMA computation from candles ───────────────────────────────────────
   const smaData = useMemo(() => {
@@ -573,43 +560,6 @@ export default function SecurityStrategiesPage() {
         </div>
       )}
 
-      {/* ── Bottom bar with Config button ── */}
-      <div style={{
-        display: 'flex', justifyContent: 'flex-end', alignItems: 'center',
-        padding: '12px 16px 0', gap: 10,
-      }}>
-        <button
-          onClick={() => setConfigOpen(true)}
-          style={{
-            padding: '4px 10px', borderRadius: 5, fontSize: 11,
-            border: `1px solid ${C.border}`, background: 'none',
-            color: C.textDim, cursor: 'pointer',
-          }}
-        >
-          ⚙ Config
-        </button>
-      </div>
-
-      {/* ── Config drawer (opened via ⚙ Config or Header gear) ── */}
-      <ConfigDrawer
-        mode="verticals"
-        open={configOpen}
-        onClose={() => setConfigOpen(false)}
-        config={analysisConfig}
-        onApply={handleConfigApply}
-        presets={presets}
-        activePresetId={activePresetId}
-        onPresetSelect={(id) => {
-          setActivePresetId(id);
-          const preset = presets.find(p => p.id === id);
-          if (preset) setAnalysisConfig(prev => ({ ...prev, ...preset, smaPeriods: preset.smaPeriods || prev.smaPeriods }));
-        }}
-        onSavePreset={(name, cfg) => {
-          const id = name.toLowerCase().replace(/\s+/g, '-');
-          setPresets(prev => [...prev, { id, name, ...cfg }]);
-          setActivePresetId(id);
-        }}
-      />
     </div>
   );
 }
