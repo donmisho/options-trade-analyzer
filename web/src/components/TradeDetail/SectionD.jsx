@@ -41,7 +41,7 @@ export default function SectionD({ trade, symbol, currentPrice, breakeven }) {
     // Already fetched for this exact combination
     if (key === completedKey) return;
 
-    // Cancel any in-flight fetch
+    // Prevent superseded fetch from writing state
     if (cancelRef.current) cancelRef.current();
     let cancelled = false;
     cancelRef.current = () => { cancelled = true; };

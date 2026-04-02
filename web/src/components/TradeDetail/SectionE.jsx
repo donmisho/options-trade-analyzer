@@ -131,15 +131,15 @@ export default function SectionE({
     const q = followUpInput.trim();
     if (!q || isFollowUpLoading) return;
     setFollowUpInput('');
-    const idx = followUps.length;
-    setFollowUps(prev => [...prev, { question: q, answer: null }]);
+    const id = Date.now() + Math.random();
+    setFollowUps(prev => [...prev, { id, question: q, answer: null }]);
     setIsFollowUpLoading(true);
     try {
       const resp = await onFollowUp?.(q, evaluation);
       const answer = resp?.answer || resp?.claude_read || resp?.response || 'No response received';
-      setFollowUps(prev => prev.map((fu, i) => i === idx ? { ...fu, answer } : fu));
+      setFollowUps(prev => prev.map(fu => fu.id === id ? { ...fu, answer } : fu));
     } catch (err) {
-      setFollowUps(prev => prev.map((fu, i) => i === idx ? { ...fu, answer: `Error: ${err.message}` } : fu));
+      setFollowUps(prev => prev.map(fu => fu.id === id ? { ...fu, answer: `Error: ${err.message}` } : fu));
     } finally {
       setIsFollowUpLoading(false);
     }
@@ -282,8 +282,8 @@ export default function SectionE({
       )}
 
       {/* Follow-up responses */}
-      {followUps.map((fu, i) => (
-        <div key={i} style={{
+      {followUps.map(fu => (
+        <div key={fu.id} style={{
           borderLeft: '2px solid var(--border)',
           paddingLeft: 10,
           margin: '8px 0',
