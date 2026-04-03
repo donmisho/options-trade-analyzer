@@ -22,7 +22,7 @@ import ResultsTable from '../components/ResultsTable';
 import { SectionA, SectionB, SectionC, SectionE } from '../components/TradeDetail';
 import { verticalsColumns } from '../config/verticals-columns';
 import { longOptionsColumns } from '../config/long-options-columns';
-import { analyzeVerticals, analyzeLongCalls, searchSymbolsStatic, getQuote, evaluateStructured, followTrade, takeTrade, evaluateFollowUp } from '../api/client';
+import { analyzeVerticals, analyzeLongCalls, searchSymbolsStatic, searchInstruments, getQuote, evaluateStructured, followTrade, takeTrade, evaluateFollowUp } from '../api/client';
 import { useToast } from '../components/Toast';
 import { STRATEGY_CONFIGS, SCORECARD_STRATEGIES } from '../strategy-configs/index';
 
@@ -128,13 +128,6 @@ function buildExitScenarios(spread, underlying) {
   const maxLossAmt = isDebit ? net_debit * 100 : (width - creditAmt) * 100;
   const risk = isDebit ? net_debit * 100 : (width - creditAmt) * 100;
 
-  function exitSignalFor(pnl) {
-    if (pnl >= maxPnl * 0.95) return 'MAX PROFIT';
-    if (Math.abs(pnl) < 0.5) return 'BREAKEVEN';
-    if (maxLossAmt > 0 && pnl <= -maxLossAmt * 0.95) return 'STOP';
-    return null;
-  }
-
   const rangeStart = Math.max(1, Math.floor((underlying - 3 * sigma) / 5) * 5);
   const rangeEnd   = Math.ceil((underlying + 3 * sigma) / 5) * 5;
 
@@ -156,8 +149,44 @@ function buildExitScenarios(spread, underlying) {
       pnlPct,
       probability,
       expectedValue: ev,
-      exitSignal: exitSignalFor(pnl),
+      exitSignal: null,
     });
+  }
+
+  // ── Tag 5 key rows: STOP · MONITOR LOSS · BREAK EVEN · MONITOR PROFIT · MAX PROFIT
+  if (scenarios.length >= 3) {
+    // Returns index of nearest untagged row by score function (lower score = better match)
+    const findIdx = (scoreFn) => {
+      let bi = -1, bestScore = Infinity;
+      for (let i = 0; i < scenarios.length; i++) {
+        if (scenarios[i].exitSignal) continue;
+        const s = scoreFn(scenarios[i]);
+        if (s < bestScore) { bestScore = s; bi = i; }
+      }
+      return bi;
+    };
+
+    const stopIdx = findIdx(r => Math.abs(r.pnl + maxLossAmt));
+    if (stopIdx >= 0) scenarios[stopIdx].exitSignal = 'STOP';
+
+    const mpIdx = findIdx(r => Math.abs(r.pnl - maxPnl));
+    if (mpIdx >= 0) scenarios[mpIdx].exitSignal = 'MAX PROFIT';
+
+    const beIdx = findIdx(r => Math.abs(r.pnl));
+    if (beIdx >= 0) scenarios[beIdx].exitSignal = 'BREAK EVEN';
+
+    const stopPrice = stopIdx >= 0 ? scenarios[stopIdx].price : rangeStart;
+    const bePrice   = beIdx   >= 0 ? scenarios[beIdx].price   : underlying;
+    const mpPrice   = mpIdx   >= 0 ? scenarios[mpIdx].price   : rangeEnd;
+
+    const mlPrice  = Math.round(((stopPrice + bePrice) / 2) / 5) * 5;
+    const mmpPrice = Math.round(((bePrice   + mpPrice) / 2) / 5) * 5;
+
+    const mlIdx = findIdx(r => Math.abs(r.price - mlPrice));
+    if (mlIdx >= 0) scenarios[mlIdx].exitSignal = 'MONITOR LOSS';
+
+    const mmpIdx = findIdx(r => Math.abs(r.price - mmpPrice));
+    if (mmpIdx >= 0) scenarios[mmpIdx].exitSignal = 'MONITOR PROFIT';
   }
 
   return { scenarios, totalEV };
@@ -222,12 +251,6 @@ function buildLongOptionExitScenarios(option, underlying) {
     return (intrinsicAt(price) - premium) * 100;
   }
 
-  function exitSignalFor(pnl, price) {
-    if (Math.abs(price - breakeven) < 0.5) return 'BREAKEVEN';
-    if (pnl <= -maxLoss * 0.95) return 'STOP';
-    return null;
-  }
-
   const rangeStart = Math.max(1, Math.floor((underlying - 3 * sigma) / 5) * 5);
   const rangeEnd   = Math.ceil((underlying + 3 * sigma) / 5) * 5;
 
@@ -249,8 +272,43 @@ function buildLongOptionExitScenarios(option, underlying) {
       pnlPct,
       probability,
       expectedValue: ev,
-      exitSignal: exitSignalFor(pnl, price),
+      exitSignal: null,
     });
+  }
+
+  // ── Tag 5 key rows: STOP · MONITOR LOSS · BREAK EVEN · MONITOR PROFIT · MAX PROFIT
+  if (scenarios.length >= 3) {
+    const findIdx = (scoreFn) => {
+      let bi = -1, bestScore = Infinity;
+      for (let i = 0; i < scenarios.length; i++) {
+        if (scenarios[i].exitSignal) continue;
+        const s = scoreFn(scenarios[i]);
+        if (s < bestScore) { bestScore = s; bi = i; }
+      }
+      return bi;
+    };
+
+    const stopIdx = findIdx(r => Math.abs(r.pnl + maxLoss));
+    if (stopIdx >= 0) scenarios[stopIdx].exitSignal = 'STOP';
+
+    const mpIdx = findIdx(r => -r.pnl);  // maximize pnl (unbounded for long options)
+    if (mpIdx >= 0) scenarios[mpIdx].exitSignal = 'MAX PROFIT';
+
+    const beIdx = findIdx(r => Math.abs(r.pnl));
+    if (beIdx >= 0) scenarios[beIdx].exitSignal = 'BREAK EVEN';
+
+    const stopPrice = stopIdx >= 0 ? scenarios[stopIdx].price : rangeStart;
+    const bePrice   = beIdx   >= 0 ? scenarios[beIdx].price   : breakeven;
+    const mpPrice   = mpIdx   >= 0 ? scenarios[mpIdx].price   : rangeEnd;
+
+    const mlPrice  = Math.round(((stopPrice + bePrice) / 2) / 5) * 5;
+    const mmpPrice = Math.round(((bePrice   + mpPrice) / 2) / 5) * 5;
+
+    const mlIdx = findIdx(r => Math.abs(r.price - mlPrice));
+    if (mlIdx >= 0) scenarios[mlIdx].exitSignal = 'MONITOR LOSS';
+
+    const mmpIdx = findIdx(r => Math.abs(r.price - mmpPrice));
+    if (mmpIdx >= 0) scenarios[mmpIdx].exitSignal = 'MONITOR PROFIT';
   }
 
   return { scenarios, totalEV };
@@ -1039,7 +1097,7 @@ export default function TradesPage() {
         <div style={{ marginBottom: 10 }}>
           <SymbolSearch
             onSelect={handleSymbolSelect}
-            searchFn={searchSymbolsStatic}
+            searchFn={searchInstruments}
             positionSymbols={positionSymbols}
             initialValue={symbol || null}
             placeholder="Search symbol…"

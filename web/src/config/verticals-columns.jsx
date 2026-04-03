@@ -23,6 +23,22 @@ export const verticalsColumns = [
     render: (trade) => <ScoreCell score={trade.composite_score} />,
   },
   {
+    key: 'strategies',
+    label: 'Strategies',
+    width: 90,
+    align: 'left',
+    sortable: false,
+    render: (trade) => {
+      const pills = trade.strategies || trade.strategy_pills || [];
+      if (!pills.length) return null;
+      return (
+        <span>
+          {pills.map((s, i) => <StrategyPill key={i} strategy={s} />)}
+        </span>
+      );
+    },
+  },
+  {
     key: 'long_strike',
     label: 'Spread',
     width: 90,
@@ -101,21 +117,5 @@ export const verticalsColumns = [
     render: (trade) => trade.prob_of_profit != null
       ? `${(trade.prob_of_profit * 100).toFixed(2)}%`
       : '—',
-  },
-  {
-    key: 'strategies',
-    label: 'Strategies',
-    width: 90,
-    align: 'left',
-    sortable: false,
-    render: (trade) => {
-      const pills = trade.strategies || trade.strategy_pills || [];
-      if (!pills.length) return null;
-      return (
-        <span>
-          {pills.map((s, i) => <StrategyPill key={i} strategy={s} />)}
-        </span>
-      );
-    },
   },
 ];

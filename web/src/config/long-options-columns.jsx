@@ -25,6 +25,22 @@ export const longOptionsColumns = [
     render: (trade) => <ScoreCell score={trade.composite_score} />,
   },
   {
+    key: 'strategies',
+    label: 'Strategies',
+    width: 90,
+    align: 'left',
+    sortable: false,
+    render: (trade) => {
+      const pills = trade.strategies || trade.strategy_pills || [];
+      if (!pills.length) return null;
+      return (
+        <span>
+          {pills.map((s, i) => <StrategyPill key={i} strategy={s} />)}
+        </span>
+      );
+    },
+  },
+  {
     key: 'strike',
     label: 'Strike',
     width: 70,
@@ -121,22 +137,6 @@ export const longOptionsColumns = [
       return (
         <span style={{ color, fontFamily: 'monospace' }}>
           {sign}{distance.toFixed(2)} / {sign}{pct.toFixed(1)}%
-        </span>
-      );
-    },
-  },
-  {
-    key: 'strategies',
-    label: 'Strategies',
-    width: 90,
-    align: 'left',
-    sortable: false,
-    render: (trade) => {
-      const pills = trade.strategies || trade.strategy_pills || [];
-      if (!pills.length) return null;
-      return (
-        <span>
-          {pills.map((s, i) => <StrategyPill key={i} strategy={s} />)}
         </span>
       );
     },

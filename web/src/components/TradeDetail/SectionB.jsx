@@ -48,13 +48,14 @@ function formatPnlPct(value) {
 function ExitSignalBadge({ signal }) {
   if (!signal) return null;
   const map = {
-    'MAX PROFIT': 'var(--green)',
-    BREAKEVEN: 'var(--amber)',
-    STOP: 'var(--red)',
-    'TIME EXIT': 'var(--muted)',
+    'MAX PROFIT':     'var(--green, #4ade80)',
+    'MONITOR PROFIT': 'var(--green, #4ade80)',
+    'BREAK EVEN':     'var(--amber, #f59e0b)',
+    'MONITOR LOSS':   'var(--red, #f87171)',
+    'STOP':           'var(--red, #f87171)',
   };
   const upper = signal.toUpperCase();
-  const color = map[upper] || 'var(--muted)';
+  const color = map[upper] || 'var(--muted, #8b949e)';
   return (
     <span
       style={{
@@ -97,12 +98,13 @@ export default function SectionB({ scenarios = [], totalEV }) {
             const pnl = Number(row.pnl ?? 0);
             const ev = Number(row.expectedValue ?? 0);
             const isLoss = pnl < 0;
-            const pnlColor = pnl >= 0 ? 'var(--green)' : 'var(--red)';
-            const evColor = ev >= 0 ? 'var(--green)' : 'var(--red)';
+            const pnlColor = pnl >= 0 ? 'var(--green, #4ade80)' : 'var(--red, #f87171)';
+            const evColor = ev >= 0 ? 'var(--green, #4ade80)' : 'var(--red, #f87171)';
+            const isProfitKey = row.exitSignal === 'MAX PROFIT' || row.exitSignal === 'MONITOR PROFIT';
             return (
               <tr
                 key={i}
-                style={isLoss ? { background: 'rgba(248,113,113,0.03)' } : {}}
+                style={isProfitKey ? { background: 'rgba(74,222,128,0.03)' } : isLoss ? { background: 'rgba(248,113,113,0.03)' } : {}}
               >
                 <td style={tdLeftStyle}>
                   {row.price != null ? Number(row.price).toFixed(2) : '—'}
@@ -141,7 +143,7 @@ export default function SectionB({ scenarios = [], totalEV }) {
               style={{
                 ...tdStyle,
                 fontWeight: 700,
-                color: totalEV != null && Number(totalEV) >= 0 ? 'var(--green)' : 'var(--red)',
+                color: totalEV != null && Number(totalEV) >= 0 ? 'var(--green, #4ade80)' : 'var(--red, #f87171)',
                 borderBottom: 'none',
               }}
             >

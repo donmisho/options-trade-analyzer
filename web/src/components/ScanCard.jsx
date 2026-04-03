@@ -10,10 +10,10 @@ import { useState } from 'react';
 import { C, mono } from '../styles/tokens';
 
 const STRATEGY_META = {
-  'steady-paycheck': { color: '#f59e0b' },
-  'weekly-grind':    { color: '#4ade80' },
-  'trend-rider':     { color: '#60a5fa' },
-  'lottery-ticket':  { color: '#c084fc' },
+  'steady-paycheck': { color: 'var(--strategy-sp)' },
+  'weekly-grind':    { color: 'var(--strategy-wg)' },
+  'trend-rider':     { color: 'var(--strategy-tr)' },
+  'lottery-ticket':  { color: 'var(--strategy-lt)' },
 };
 
 const SIGNAL_BADGE = {

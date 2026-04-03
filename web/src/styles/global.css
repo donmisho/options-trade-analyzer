@@ -19,6 +19,21 @@
   --border:       #30363d;   /* all borders */
   --muted:        #8b949e;   /* muted text */
 
+  /* ── Semantic palette (matches UI-GUIDANCE Part 3) ── */
+  --teal:   #2dd4bf;
+  --green:  #4ade80;
+  --amber:  #f59e0b;
+  --red:    #f87171;
+  --blue:   #60a5fa;
+  --purple: #c084fc;
+  --text:   #e6edf3;
+
+  /* ── Strategy pill colors — canonical source for all strategy color references ── */
+  --strategy-sp: #f59e0b;   /* amber — Steady Paycheck */
+  --strategy-wg: #4ade80;   /* green — Weekly Grind */
+  --strategy-tr: #60a5fa;   /* blue  — Trend Rider */
+  --strategy-lt: #c084fc;   /* purple — Lottery Ticket */
+
   /* ── Legacy aliases — point to canonical values ── */
   --bg-primary:   #0d1117;
   --bg-card:      #161b22;
