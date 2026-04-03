@@ -697,6 +697,35 @@ export async function searchSymbolsStatic(query) {
 }
 
 
+/**
+ * Search instruments via the backend (Schwab-backed), with automatic
+ * fallback to the static TICKER_MAP if the API is unavailable.
+ * Injected as the `searchFn` prop for SymbolSearch on analysis pages.
+ * @param {string} query
+ * @returns Promise<[{ symbol, companyName }]>
+ */
+export async function searchInstruments(query) {
+  const q = query.toUpperCase().trim();
+  if (!q) return [];
+
+  try {
+    const data = await apiFetch(`/market/instruments?symbol=${encodeURIComponent(q)}`);
+    const instruments = data?.instruments || [];
+    if (instruments.length > 0) {
+      return instruments.map(inst => ({ symbol: inst.symbol, companyName: inst.name }));
+    }
+  } catch (_) {
+    // fall through to static
+  }
+
+  // Fallback: static list
+  return Object.entries(TICKER_MAP)
+    .filter(([sym]) => sym.startsWith(q))
+    .map(([symbol, companyName]) => ({ symbol, companyName }))
+    .slice(0, 12);
+}
+
+
 // ═══════════════════════════════════════════════════════════════════
 // INSIGHTS (Phase 3.6)
 // ═══════════════════════════════════════════════════════════════════
