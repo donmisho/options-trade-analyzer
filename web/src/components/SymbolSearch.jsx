@@ -45,18 +45,25 @@ export default function SymbolSearch({
 
   const inputRef = useRef(null);
   const containerRef = useRef(null);
+  const isProgrammatic = useRef(false);
 
-  // Reset query when parent signals a new initialValue (e.g. page navigation)
+  // When initialValue changes (e.g. Scan card navigation), update input
+  // without triggering the search effect.
   useEffect(() => {
+    isProgrammatic.current = true;
     setQuery(initialValue || '');
     dispatch({ type: 'CLOSE' });
   }, [initialValue]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Run searchFn whenever query changes
+  // Run searchFn whenever query changes (skip programmatic updates)
   useEffect(() => {
     const q = query.trim();
     if (!q || !searchFn) {
-      dispatch({ type: 'CLOSE' });  // single dispatch — no cascade
+      dispatch({ type: 'CLOSE' });
+      return;
+    }
+    if (isProgrammatic.current) {
+      isProgrammatic.current = false;
       return;
     }
     let cancelled = false;

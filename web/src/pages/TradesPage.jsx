@@ -17,7 +17,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import SymbolSearch from '../components/SymbolSearch';
 import QuoteBar from '../components/QuoteBar';
-import SmaPanel from '../components/SmaPanel';
+import SmaPanel, { computeSma } from '../components/SmaPanel';
 import ResultsTable from '../components/ResultsTable';
 import { SectionA, SectionB, SectionC, SectionE } from '../components/TradeDetail';
 import { verticalsColumns } from '../config/verticals-columns';
@@ -679,6 +679,7 @@ function TradeDetailExpansion({
       <SectionE
         evaluation={evaluation || null}
         tradeContext={tradeContext}
+        canEvaluate={!!(underlying && underlying > 0)}
         onEvaluate={onEvaluate}
         onFollow={onFollow}
         onTakePosition={onTakePosition}
@@ -706,6 +707,26 @@ export default function TradesPage() {
   // ── SMA chart state ──────────────────────────────────────────────────────
   const [smaPeriods, setSmaPeriods] = useState({ short: 8, mid: 21, long: 50 });
   const [candles, setCandles] = useState([]);
+
+  // ── SMA alignment derived from chart candles ─────────────────────────────
+  const smaAlignment = useMemo(() => {
+    if (!candles.length) return { alignment: 'mixed', sma_8: 'N/A', sma_21: 'N/A', sma_50: 'N/A' };
+    const sS = computeSma(candles, smaPeriods.short);
+    const sM = computeSma(candles, smaPeriods.mid);
+    const sL = computeSma(candles, smaPeriods.long);
+    const lS = sS.filter(Boolean).pop() || 0;
+    const lM = sM.filter(Boolean).pop() || 0;
+    const lL = sL.filter(Boolean).pop() || 0;
+    let alignment = 'mixed';
+    if (lS > lM && lM > lL) alignment = 'bullish';
+    else if (lS < lM && lM < lL) alignment = 'bearish';
+    return {
+      alignment,
+      [`sma_${smaPeriods.short}`]: lS || 'N/A',
+      [`sma_${smaPeriods.mid}`]:   lM || 'N/A',
+      [`sma_${smaPeriods.long}`]:  lL || 'N/A',
+    };
+  }, [candles, smaPeriods]);
 
   // ── Vertical spreads state ───────────────────────────────────────────────
   // Default: expanded unless a long_option strategy is specified
@@ -861,7 +882,7 @@ export default function TradesPage() {
   }, [callResults, callsUnderlying]);
 
   // ── Shared handler factory (closes over symbol, showToast, setEvaluations) ─
-  function makeTradeHandlers(trade, rowId, underlying, { defaultStrategy, getEntryPrice, tradeLabel }) {
+  function makeTradeHandlers(trade, rowId, underlying, { defaultStrategy, getEntryPrice, tradeLabel, smaAlign }) {
     const strategyKeys = (trade.strategies || []).map(a => ABBR_TO_KEY[a] || a);
     if (!strategyKeys.length) strategyKeys.push(defaultStrategy);
 
@@ -871,7 +892,7 @@ export default function TradesPage() {
           symbol,
           current_price: underlying,
           iv: trade.iv || trade.mid_iv || 0.25,
-          sma_alignment: { sma_8: 'N/A', sma_21: 'N/A', sma_50: 'N/A', alignment: 'mixed' },
+          sma_alignment: smaAlign || { sma_8: 'N/A', sma_21: 'N/A', sma_50: 'N/A', alignment: 'mixed' },
           strategy_keys: strategyKeys,
           trade,
         });
@@ -938,6 +959,7 @@ export default function TradesPage() {
         defaultStrategy: 'steady-paycheck',
         getEntryPrice: t => Math.abs(t.net_debit || 0),
         tradeLabel: t => `${t.long_strike}/${t.short_strike}`,
+        smaAlign: smaAlignment,
       }
     );
     return (
@@ -970,6 +992,7 @@ export default function TradesPage() {
         defaultStrategy: 'trend-rider',
         getEntryPrice: t => t.mid_price || 0,
         tradeLabel: t => `${t.option_type} ${t.strike}`,
+        smaAlign: smaAlignment,
       }
     );
     return (

@@ -11,10 +11,12 @@
 
 import { useState, useEffect, useMemo, Fragment } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useApp } from '../context/AppContext';
 import { STRATEGY_CONFIGS } from '../strategy-configs/index';
 import { STRATEGY_COLORS } from '../utils/strategyColors';
 import { PositionHealthBadge } from '../components/PositionHealthBadge';
 import { getPositions, refreshPosition } from '../api/client';
+import RefreshConfirmDialog from '../components/RefreshConfirmDialog';
 import { formatDate } from '../utils/formatDate';
 import { useToast } from '../components/Toast';
 import './PageShared.css';
@@ -151,63 +153,13 @@ function PnLCell({ amount, pct }) {
   );
 }
 
-/** Confirmation dialog for "Refresh all" when >1 position. */
-function RefreshConfirmDialog({ count, onConfirm, onCancel }) {
-  return (
-    <div style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100,
-    }}>
-      <div style={{
-        background: 'var(--bg3, #21262d)',
-        border: '1px solid var(--border, #30363d)',
-        borderRadius: 6,
-        padding: 20,
-        maxWidth: 360,
-        width: '100%',
-        fontFamily: 'monospace',
-      }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: '#e6edf3', marginBottom: 10 }}>
-          Refresh {count} positions?
-        </div>
-        <p style={{ fontSize: 10, color: '#c9d1d9', lineHeight: 1.5, marginBottom: 16 }}>
-          This will refresh {count} positions via Claude, consuming API tokens for each.
-          Daily automated refreshes already run after market close — only confirm if you need
-          current data right now.
-        </p>
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button
-            style={{
-              background: 'rgba(45,212,191,0.1)', border: '1px solid rgba(45,212,191,0.4)',
-              color: '#2dd4bf', padding: '7px 16px', borderRadius: 4, fontSize: 11,
-              fontFamily: 'monospace', cursor: 'pointer',
-            }}
-            onClick={onConfirm}
-          >
-            Confirm refresh
-          </button>
-          <button
-            style={{
-              background: 'transparent', border: '1px solid #30363d',
-              color: '#8b949e', padding: '7px 14px', borderRadius: 4, fontSize: 11,
-              fontFamily: 'monospace', cursor: 'pointer',
-            }}
-            onClick={onCancel}
-          >
-            Cancel
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function StrategyPage() {
   const { key }    = useParams();
   const navigate   = useNavigate();
   const { showToast } = useToast();
+  const { activeSymbol } = useApp();
 
   // Config + color lookup
   const config   = STRATEGY_CONFIGS[key] ?? null;
@@ -564,12 +516,18 @@ export default function StrategyPage() {
             color: '#2dd4bf', padding: '7px 16px', borderRadius: 4, fontSize: 11,
             fontFamily: 'monospace', cursor: 'pointer',
           }}
-          onClick={() => navigate(`/trades?strategy=${key}`)}
+          onClick={() => {
+            const params = new URLSearchParams({ strategy: key });
+            if (activeSymbol) params.set('symbol', activeSymbol);
+            navigate(`/trades?${params.toString()}`);
+          }}
         >
           Find trades →
         </button>
         <span style={{ fontSize: 10, color: '#8b949e', fontFamily: 'monospace' }}>
-          Opens Trades page filtered to {config.label} parameters
+          {activeSymbol
+            ? `Opens Trades page for ${activeSymbol} filtered to ${config.label}`
+            : `Opens Trades page filtered to ${config.label} parameters`}
         </span>
       </div>
 

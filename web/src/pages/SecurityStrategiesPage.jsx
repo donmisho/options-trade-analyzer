@@ -16,7 +16,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
-import { getWatchlist, getPositions, getStrategyScorecard } from '../api/client';
+import { getWatchlist, getPositions, getStrategyScorecard, addWatchlistSymbol } from '../api/client';
 import ScanCard from '../components/ScanCard';
 import { useToast } from '../components/Toast';
 import { C, mono } from '../styles/tokens';
@@ -89,9 +89,29 @@ const numInputStyle = {
 
 // ─── Main component ────────────────────────────────────────────────────────
 export default function SecurityStrategiesPage() {
-  const { watchlist } = useApp();
+  const { watchlist, addToWatchlist } = useApp();
   const navigate = useNavigate();
   const { showToast } = useToast();
+
+  const [newSymbol, setNewSymbol] = useState('');
+
+  async function handleAddSymbol() {
+    const sym = newSymbol.trim().toUpperCase();
+    if (!sym) return;
+    if (watchlist.some(w => (typeof w === 'string' ? w : w.symbol) === sym)) {
+      showToast({ type: 'info', message: `${sym} is already in your scan list` });
+      setNewSymbol('');
+      return;
+    }
+    try {
+      await addWatchlistSymbol(sym);
+      addToWatchlist(sym);
+      setNewSymbol('');
+      showToast({ type: 'success', message: `${sym} added to scan list` });
+    } catch (err) {
+      showToast({ type: 'error', message: `Failed to add ${sym}: ${err.message}` });
+    }
+  }
 
   const [filterSource,   setFilterSource]   = useState('watchlist');
   const [filterSignal,   setFilterSignal]   = useState('all');
@@ -307,6 +327,38 @@ export default function SecurityStrategiesPage() {
         >
           {scanning ? 'Scanning...' : 'Scan now'}
         </button>
+
+        {/* Add symbol to watchlist */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
+          <input
+            type="text"
+            placeholder="Add symbol..."
+            value={newSymbol}
+            onChange={e => setNewSymbol(e.target.value.toUpperCase())}
+            onKeyDown={e => e.key === 'Enter' && handleAddSymbol()}
+            style={{
+              ...selectStyle,
+              width: 110,
+              padding: '5px 8px',
+              letterSpacing: '0.04em',
+            }}
+          />
+          <button
+            onClick={handleAddSymbol}
+            style={{
+              background: 'transparent',
+              border: '1px solid #30363d',
+              color: '#8b949e',
+              padding: '5px 10px',
+              borderRadius: 4,
+              fontSize: 10,
+              fontFamily: mono,
+              cursor: 'pointer',
+            }}
+          >
+            Add
+          </button>
+        </div>
       </div>
 
       {/* ── Progress ── */}

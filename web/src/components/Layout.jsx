@@ -17,7 +17,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import Logo from '../assets/Logo';
-import Toast from './Toast';
+import Toast, { useToast } from './Toast';
 import TradeAgentPanel from './TradeAgentPanel';
 import SystemVarsPanel from './SystemVarsPanel';
 import StartupProgress from './StartupProgress';
@@ -74,6 +74,7 @@ const NAV_ITEMS = [
 
 export default function Layout() {
   const { fetchPrices, activeSymbol, systemVarsPanelOpen, setSystemVarsPanelOpen, strategyAdmin } = useApp();
+  const { showToast } = useToast();
   const location = useLocation();
   const navigate  = useNavigate();
 
@@ -201,7 +202,7 @@ export default function Layout() {
 
       // Fix 4: Detect popup blocker
       if (!popup || popup.closed) {
-        alert('Popup was blocked by your browser. Please allow popups for this site and try again.');
+        showToast({ type: 'error', message: 'Popup blocked — please allow popups for this site and try again.' });
         return;
       }
 

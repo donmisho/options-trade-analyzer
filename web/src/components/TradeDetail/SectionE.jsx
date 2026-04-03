@@ -105,6 +105,7 @@ const neutralOutlined = {
 export default function SectionE({
   evaluation,
   tradeContext,
+  canEvaluate = true,  // false when price data not yet loaded
   onEvaluate,      // async () => void — parent handles API call + state update
   onFollow,        // async () => void
   onTakePosition,  // async () => void
@@ -174,10 +175,19 @@ export default function SectionE({
   // Pre-evaluation state
   if (!evaluation) {
     return (
-      <div style={{ marginTop: 12 }}>
-        <button style={tealOutlined} onClick={handleEvaluate}>
+      <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
+        <button
+          style={{ ...tealOutlined, ...(canEvaluate ? {} : { opacity: 0.35, cursor: 'default' }) }}
+          onClick={canEvaluate ? handleEvaluate : undefined}
+          disabled={!canEvaluate}
+        >
           Evaluate
         </button>
+        {!canEvaluate && (
+          <span style={{ fontSize: 9, color: 'var(--muted)', fontFamily: 'monospace' }}>
+            Loading price data…
+          </span>
+        )}
       </div>
     );
   }
