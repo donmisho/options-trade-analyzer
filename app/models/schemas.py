@@ -260,6 +260,8 @@ class ScorecardResponse(BaseModel):
     """Full scorecard response for a symbol across all strategies."""
     symbol: str
     underlying_price: float
+    quote: Optional[dict] = None      # { price, change, change_pct, volume, volume_ratio }
+    sma_signal: Optional[dict] = None # { alignment, summary, sma_8, sma_21, sma_50 }
     strategies: list[StrategyScoreItem]
 
 

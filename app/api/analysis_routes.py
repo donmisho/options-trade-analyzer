@@ -18,6 +18,7 @@ too complex for query strings and semantically these are "compute
 this for me" requests, not simple resource retrievals.
 """
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -37,7 +38,7 @@ from app.analysis.long_call_engine import (
     LongCallEngine, LongCallWeights, LongCallFilters
 )
 from app.analysis.directional_engine import DirectionalEngine, Thesis
-from app.analysis.strategy_scorer import score_all_strategies
+from app.analysis.strategy_scorer import score_all_strategies, compute_sma_signal
 from app.analysis.black_scholes import compute_probability_matrix
 from app.models.schemas import (
     ScorecardRequest, ScorecardResponse, StrategyScoreItem,
@@ -543,15 +544,51 @@ async def get_strategy_scorecard(
     factory = _get_factory()
     provider = factory.get_market_data(settings.default_market_data_provider, user_id=user.get("sub"))
 
-    scores, underlying_price = await score_all_strategies(
-        symbol=sym,
-        provider=provider,
-        user_config=req.user_config,
-    )
+    # Fetch strategy scores, quote, and price history in parallel
+    scores_task = score_all_strategies(symbol=sym, provider=provider, user_config=req.user_config)
+
+    has_price_history = hasattr(provider, "get_price_history")
+    if has_price_history:
+        results = await asyncio.gather(
+            scores_task,
+            provider.get_quote(sym),
+            provider.get_price_history(sym),
+            return_exceptions=True,
+        )
+        scores_result, quote_result, history_result = results
+    else:
+        results = await asyncio.gather(
+            scores_task,
+            provider.get_quote(sym),
+            return_exceptions=True,
+        )
+        scores_result, quote_result = results
+        history_result = []
+
+    scores, underlying_price = scores_result if not isinstance(scores_result, Exception) else ([], 0.0)
+
+    quote_data = None
+    if not isinstance(quote_result, Exception):
+        q = quote_result
+        quote_data = {
+            "price":       q.get("price"),
+            "change":      q.get("change"),
+            "change_pct":  q.get("change_pct"),
+            "volume":      q.get("volume"),
+            "rel_volume":  q.get("volume_ratio"),
+        }
+
+    sma_signal = None
+    candles = history_result if isinstance(history_result, list) else []
+    price_for_sma = (quote_data or {}).get("price") or underlying_price
+    if candles and price_for_sma:
+        sma_signal = compute_sma_signal(candles, price_for_sma)
 
     return ScorecardResponse(
         symbol=sym,
         underlying_price=underlying_price,
+        quote=quote_data,
+        sma_signal=sma_signal,
         strategies=[
             StrategyScoreItem(
                 strategy_key=s.strategy_key,

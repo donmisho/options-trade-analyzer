@@ -333,6 +333,37 @@ class SchwabMarketData(MarketDataProvider):
 
         return sorted(strikes)
 
+    async def get_price_history(self, symbol: str, num_periods: int = 3) -> list[dict]:
+        """
+        GET /marketdata/v1/pricehistory
+
+        Returns list of daily candles ordered oldest → newest, each with:
+          { "close": float, "datetime": int }
+
+        Uses 3 months of daily data (~65 candles) — enough for SMA-50.
+        Returns [] on any error so callers can degrade gracefully.
+        """
+        try:
+            headers = await self._get_headers()
+            resp = await self._client.get(
+                "/pricehistory",
+                headers=headers,
+                params={
+                    "symbol": symbol.upper(),
+                    "periodType": "month",
+                    "period": str(num_periods),
+                    "frequencyType": "daily",
+                    "frequency": "1",
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            candles = data.get("candles", [])
+            return [{"close": c["close"], "datetime": c.get("datetime")} for c in candles if "close" in c]
+        except Exception as e:
+            logger.warning(f"get_price_history failed for {symbol}: {e}")
+            return []
+
     async def health_check(self) -> bool:
         """
         Test if the Schwab connection is working.
