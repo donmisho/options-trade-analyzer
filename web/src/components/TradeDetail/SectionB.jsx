@@ -74,9 +74,11 @@ function ExitSignalBadge({ signal }) {
 import { useState } from 'react';
 
 export default function SectionB({ scenarios = [], totalEV }) {
-  const [showFullTable, setShowFullTable] = useState(false);
   const keyRows = scenarios.filter(r => r.exitSignal);
-  const displayRows = showFullTable ? scenarios : keyRows;
+  const hasKeyRows = keyRows.length > 0;
+  // Default collapsed (5 key rows). If tagging produced no key rows, fall back to full table.
+  const [showFullTable, setShowFullTable] = useState(!hasKeyRows);
+  const displayRows = (showFullTable || !hasKeyRows) ? scenarios : keyRows;
 
   return (
     <div>
@@ -153,9 +155,9 @@ export default function SectionB({ scenarios = [], totalEV }) {
           </tr>
         </tfoot>
       </table>
-      {scenarios.length > keyRows.length && (
+      {hasKeyRows && scenarios.length > keyRows.length && (
         <button
-          onClick={() => setShowFullTable(p => !p)}
+          onClick={(e) => { e.stopPropagation(); setShowFullTable(p => !p); }}
           style={{
             marginTop: 6,
             background: 'transparent',
