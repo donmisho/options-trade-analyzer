@@ -1,4 +1,4 @@
-# Options Analyzer — architecture-plan.md (Updated 2026-04-02 12:00)
+# Options Analyzer — architecture-plan.md (Updated 2026-04-02 16:00)
 ## Options Trade Analyzer — Phase 2.6 and Forward
 
 ---
@@ -612,5 +612,6 @@ New SQL tables by phase:
 - **Phase 3.5**: Market Intelligence Aggregator + Position Monitor Agent ✅
 - **Phase 3.6**: Insight Engine (Generic) + Options Domain ✅
 - **Sprint 4**: Trades page unification — TradesPage.jsx replaces VerticalsPage + LongCallsPage, Sections A-E fully wired, Puts & calls live, per-section Config drawers, SecurityStrategiesPage v3 ✅
+- **Sprint 5**: Integration, polish & cleanup — regression fixes (evaluate payload, pill colors, dropdown, watchlist auto-add, exit scenarios condensed to 5 key rows), scorecard API enriched with quote + SMA signal, scan page caching, CSS custom properties for strategy colors, Strategies column reordered, Section D (ProbabilityMatrix) retired from trade detail frontend, dead files deleted (AskClaudePanel_v2.jsx, Watchlist.jsx), alert → Toast migration, RefreshConfirmDialog consolidated ✅
 - **Phase 4**: MCP Integration 🔲
 - **Phase 5**: Live Trading Execution 🔲 (positions/take records intent only — Schwab order entry not yet wired)

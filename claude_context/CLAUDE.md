@@ -1,4 +1,4 @@
-﻿# Options Analyzer — CLAUDE.md (Updated 2026-04-02 12:00)
+﻿# Options Analyzer — CLAUDE.md (Updated 2026-04-02 16:00)
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -29,10 +29,9 @@ ordered by status ascending (so 1-To Do appears before 2-In Review, etc.).
 the Board view. The board is sprint-based and will appear empty.
 List view URL: https://tmtctech-team.atlassian.net/jira/software/projects/OTA/list
 
-**Atlassian MCP workaround (as of March 2026):** Atlassian MCP tools do not surface
-in Claude.ai tool_search. Workaround: export Jira CSV manually, or use Claude in
-Chrome to navigate the list view URL above. When MCP tools become available, update
-this protocol to use them directly instead of browser automation.
+**Atlassian MCP status (as of April 2026):** Atlassian MCP tools ARE now available
+and surfacing in Claude.ai tool_search. Use `mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql`
+and `mcp__claude_ai_Atlassian__transitionJiraIssue` directly. No curl workaround needed.
 
 ## Jira Workflow — Status Definitions
 
@@ -655,8 +654,9 @@ Key decisions summarized (v3.2 — 04-02-2026):
 - RefreshConfirmDialog.jsx — reusable confirmation dialog for multi-position Claude API refresh. Used on both PositionsPage and StrategyPage.
 - PositionsPage.jsx — v3 design with StrategyPill (abbreviated 2-letter pills), health grade letter badges (A-F), versioned re-reads with white outlined Claude advice badge, exit plan levels, group by strategy/symbol/health.
 - Claude API cost guardrail: Refresh all shows confirmation dialog when >1 position. Single position refresh runs without confirmation. One daily auto-refresh per position after market close. Never on page load or timers.
-- Trade detail Sections A-E fully wired in TradesPage (Sprint 4): Section D uses live B-S probability matrix; Section E fully wired evaluate → verdict → Follow/Take Position → follow-up.
+- Trade detail Sections A-C, E fully wired in TradesPage (Sprint 4 + Sprint 5): Section D (ProbabilityMatrix) retired from frontend; Section E fully wired evaluate → verdict → Follow/Take Position → follow-up.
 - Security Strategies page: Config drawer removed (Part 11). SMA periods fixed at 8/21/50.
+- Sprint 5 (April 2026): regression fixes (evaluate payload, pill colors, dropdown, watchlist auto-add, exit scenarios condensed to 5 key rows), scorecard API enriched with quote data + SMA signal, scan page caching, CSS custom properties for strategy colors (`--strategy-sp/wg/tr/lt` in global.css), Strategies column reordered to index 1 in both column configs, dead file cleanup (AskClaudePanel_v2.jsx, Watchlist.jsx deleted), alert → Toast migration, RefreshConfirmDialog consolidated. ✅
 
 ---
 
