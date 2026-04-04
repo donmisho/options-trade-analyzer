@@ -5,23 +5,51 @@
  * React.StrictMode runs your components twice during development
  * (not in production) to help catch accidental side effects.
  * It's a free bug-finder — leave it on during development.
+ *
+ * Auth redirect flow:
+ *  1. User clicks sign in → LoginPage saves startup state to sessionStorage, redirects to Microsoft
+ *  2. Microsoft redirects back with ?code=... in the URL
+ *  3. handleRedirectPromise() exchanges the code → we get an Entra id_token
+ *  4. entraLogin() exchanges id_token for our app JWT → stored in localStorage
+ *  5. updateStartupStateForAuth() marks step 2 (auth) complete in sessionStorage with elapsed
+ *  6. React renders → Layout reads sessionStorage → continues startup from step 3
  */
 
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
 import { msalInstance, loginRequest } from './auth/msalConfig';
-import { entraLogin, getSchwabStatus } from './api/client';
+import { entraLogin } from './api/client';
+import { SS_STATE_KEY } from './hooks/useStartupProgress';
 import './styles/global.css';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 
+/**
+ * After entraLogin completes, mark the 'auth' step complete in sessionStorage.
+ * Layout's useStartupProgress hook reads this on mount so it can show step 2
+ * as already complete (with the correct MSAL redirect elapsed time).
+ */
+function updateStartupStateForAuth() {
+  try {
+    const raw = sessionStorage.getItem(SS_STATE_KEY);
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    const authStartedAt = saved.stepStarts?.auth;
+    if (!authStartedAt) return;
+
+    const authElapsed = (Date.now() - authStartedAt) / 1000;
+    const updatedSteps = (saved.steps ?? []).map(s =>
+      s.id === 'auth' ? { ...s, status: 'complete', elapsed: authElapsed } : s
+    );
+    sessionStorage.setItem(SS_STATE_KEY, JSON.stringify({
+      ...saved,
+      steps: updatedSteps,
+    }));
+  } catch { /* best-effort */ }
+}
+
 // MSAL v5 requires initialize() before the app renders.
-// After initialize(), call handleRedirectPromise() to process the auth code
-// that Microsoft sends back in the URL after loginRedirect(). We exchange the
-// Entra id_token for our app JWT here — before React renders — so that by
-// the time routing runs, ota_token is already in localStorage and RequireAuth
-// sends the user straight to /connect or /verticals instead of /login.
 msalInstance.initialize().then(async () => {
   let redirectToLogin = false;
 
@@ -32,17 +60,11 @@ msalInstance.initialize().then(async () => {
       const data = await entraLogin(result.idToken);
       localStorage.setItem('ota_token', data.access_token);
 
-      // Determine where to send the user after login
-      let targetRoute = '/connect';
-      try {
-        const schwabStatus = await getSchwabStatus();
-        if (schwabStatus.connected) targetRoute = '/dashboard';
-      } catch { /* default to /connect */ }
+      // Mark auth step complete with elapsed time — Layout picks this up
+      updateStartupStateForAuth();
 
-      // MSAL replaces the URL with /login (the redirectStartPage) after processing
-      // the auth code. We override it here — before React renders — so BrowserRouter
-      // starts at the correct page instead of re-rendering the login screen.
-      window.history.replaceState(null, '', targetRoute);
+      // Always route to dashboard. Layout's startup (step 5) checks Schwab connection.
+      window.history.replaceState(null, '', '/dashboard');
 
     } else if (!result) {
       // No redirect in progress. If MSAL has cached accounts but we have no app

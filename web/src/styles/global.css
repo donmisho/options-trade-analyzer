@@ -60,6 +60,12 @@
   --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
 }
 
+/* ── Animations ── */
+@keyframes ota-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
 /* ── Reset ── */
 *, *::before, *::after {
   box-sizing: border-box;

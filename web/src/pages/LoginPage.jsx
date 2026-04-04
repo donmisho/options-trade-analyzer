@@ -2,35 +2,119 @@
  * LoginPage — "Sign in with Microsoft" via MSAL redirect.
  *
  * Flow:
- *  1. User clicks the button → loginRedirect() → full Microsoft login page
- *  2. Microsoft redirects back to the app with ?code=... in the URL
- *  3. main.jsx calls handleRedirectPromise() → exchanges id_token for our JWT
- *  4. main.jsx stores ota_token → React renders → RequireAuth routes to /connect or /verticals
- *
- * LoginPage itself only needs to trigger the redirect. All post-redirect
- * processing happens in main.jsx before React even mounts.
+ *  1. User clicks the button → steps 1–2 of StartupProgress are shown
+ *  2. Step 1 "Initializing app" completes immediately (~200ms)
+ *  3. Step 2 "Authenticating with Microsoft" becomes active
+ *  4. Startup state is saved to sessionStorage (survives the redirect)
+ *  5. loginRedirect() fires — Microsoft login page takes over
+ *  6. On redirect return, main.jsx marks step 2 complete in sessionStorage
+ *  7. Layout.jsx reads sessionStorage and continues from step 3 onward
  */
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useMsal } from '@azure/msal-react';
 import { loginRequest } from '../auth/msalConfig';
 import logoSrc from '../assets/options-analyzer-logo.png';
+import StartupProgress from '../components/StartupProgress';
+import { STARTUP_STEP_DEFS, SS_STATE_KEY } from '../hooks/useStartupProgress';
+
+const delay = ms => new Promise(r => setTimeout(r, ms));
+
+function makeSteps() {
+  return STARTUP_STEP_DEFS.map(def => ({
+    ...def, status: 'pending', elapsed: null, hint: null,
+  }));
+}
 
 export default function LoginPage() {
   const { instance } = useMsal();
-  const [loading, setLoading] = useState(false);
+  const [showProgress, setShowProgress] = useState(false);
+  const [steps, setSteps] = useState(makeSteps);
+  const [totalElapsed, setTotalElapsed] = useState(0);
   const [error, setError] = useState(null);
+  const wallClockStartRef = useRef(null);
+  const timerRef = useRef(null);
+
+  // Clear any stale startup state from a previous login attempt in this tab
+  useEffect(() => {
+    sessionStorage.removeItem(SS_STATE_KEY);
+  }, []);
+
+  // Running total elapsed timer while progress card is shown
+  useEffect(() => {
+    if (!showProgress) return;
+    timerRef.current = setInterval(() => {
+      if (wallClockStartRef.current) {
+        setTotalElapsed((Date.now() - wallClockStartRef.current) / 1000);
+      }
+    }, 100);
+    return () => clearInterval(timerRef.current);
+  }, [showProgress]);
 
   async function handleSignIn() {
     setError(null);
-    setLoading(true);
+    wallClockStartRef.current = Date.now();
+    setShowProgress(true);
+
+    // Step 1: Initializing app — app is already running, complete quickly
+    const initStartMs = Date.now();
+    setSteps(prev => prev.map(s => s.id === 'init' ? { ...s, status: 'active' } : s));
+    await delay(200);
+
+    const initElapsed = (Date.now() - initStartMs) / 1000;
+    const authStartMs = Date.now();
+
+    // Step 1 complete → Step 2 active
+    setSteps(prev => prev.map(s => {
+      if (s.id === 'init') return { ...s, status: 'complete', elapsed: initElapsed };
+      if (s.id === 'auth') return { ...s, status: 'active' };
+      return s;
+    }));
+
+    // Persist to sessionStorage before redirect — Layout's hook restores this on return
+    sessionStorage.setItem(SS_STATE_KEY, JSON.stringify({
+      wallClockStart: wallClockStartRef.current,
+      stepStarts: {
+        init: initStartMs,
+        auth: authStartMs,
+      },
+      steps: [
+        { id: 'init',    status: 'complete', elapsed: initElapsed, hint: null },
+        { id: 'auth',    status: 'active',   elapsed: null,        hint: null },
+        { id: 'backend', status: 'pending',  elapsed: null,        hint: null },
+        { id: 'session', status: 'pending',  elapsed: null,        hint: null },
+        { id: 'schwab',  status: 'pending',  elapsed: null,        hint: null },
+        { id: 'ready',   status: 'pending',  elapsed: null,        hint: null },
+      ],
+    }));
+
     try {
       await instance.loginRedirect(loginRequest);
       // Page navigates away — no code runs after this
     } catch (err) {
+      clearInterval(timerRef.current);
+      setShowProgress(false);
       setError(err.message || 'Sign-in failed. Please try again.');
-      setLoading(false);
     }
+  }
+
+  // While progress is shown (redirect in flight), render the progress card
+  if (showProgress) {
+    return (
+      <div style={styles.page}>
+        <div style={styles.logoWrapper}>
+          <img src={logoSrc} alt="Options Analyzer" style={styles.logo} />
+        </div>
+        <div style={{ width: '100%', maxWidth: 400 }}>
+          <StartupProgress
+            steps={steps}
+            totalElapsed={totalElapsed}
+            visible
+            onRetry={null}
+          />
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -42,19 +126,9 @@ export default function LoginPage() {
       <div style={styles.card}>
         <p style={styles.subtitle}>Property of TM Technologies, LLC.</p>
 
-        <button
-          onClick={handleSignIn}
-          disabled={loading}
-          style={{ ...styles.btn, ...(loading ? styles.btnDisabled : {}) }}
-        >
-          {loading ? (
-            <span>Signing in…</span>
-          ) : (
-            <>
-              <MicrosoftLogo />
-              <span>Sign in with Microsoft</span>
-            </>
-          )}
+        <button onClick={handleSignIn} style={styles.btn}>
+          <MicrosoftLogo />
+          <span>Sign in with Microsoft</span>
         </button>
 
         {error && <p style={styles.error}>{error}</p>}
@@ -122,10 +196,6 @@ const styles = {
     fontWeight: 500,
     cursor: 'pointer',
     transition: 'background 0.15s',
-  },
-  btnDisabled: {
-    background: '#3a4a6a',
-    cursor: 'not-allowed',
   },
   error: {
     marginTop: 20,

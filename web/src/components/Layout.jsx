@@ -25,17 +25,11 @@ import { useApp } from '../context/AppContext';
 import { SCORECARD_STRATEGIES } from '../strategy-configs/index';
 import { getSchwabStatus, getSchwabAuthUrl } from '../api/client';
 import { msalInstance } from '../auth/msalConfig';
+import { useStartupProgress, SS_STATE_KEY } from '../hooks/useStartupProgress';
 import './Layout.css';
 
 // Base URL for the backend (strips the /api/v1 suffix from the API client base)
 const BACKEND_ORIGIN = import.meta.env.VITE_API_BASE_URL || '';
-
-const INITIAL_STEPS = [
-  { id: 'backend', label: 'Connecting to backend',   status: 'pending', hint: null },
-  { id: 'auth',    label: 'Checking authentication', status: 'pending', hint: null },
-  { id: 'schwab',  label: 'Checking Schwab connection', status: 'pending', hint: null },
-  { id: 'ready',   label: 'Ready',                   status: 'pending', hint: null },
-];
 
 // ─── Spec-exact colors ────────────────────────────────────────────────────────
 const RAIL_W = 200;
@@ -78,15 +72,21 @@ export default function Layout() {
   const location = useLocation();
   const navigate  = useNavigate();
 
-  // ── Startup progress state ────────────────────────────────────────────────
-  const [startupSteps, setStartupSteps] = useState(INITIAL_STEPS);
+  // ── Startup progress (6-step, hook-driven) ───────────────────────────────
+  const {
+    steps: startupSteps,
+    activateStep,
+    completeStep,
+    warnStep,
+    errorStep,
+    reset: resetStartup,
+    totalElapsed: startupTotalElapsed,
+    hasError: startupHasError,
+  } = useStartupProgress();
+
   const [startupVisible, setStartupVisible] = useState(true);
   const [startupComplete, setStartupComplete] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
-
-  const updateStep = useCallback((id, status, hint = null) => {
-    setStartupSteps(prev => prev.map(s => s.id === id ? { ...s, status, hint } : s));
-  }, []);
 
   // ── Schwab status (moved from Header.jsx) ────────────────────────────────
   const [schwabConnected, setSchwabConnected] = useState(null);
@@ -111,14 +111,44 @@ export default function Layout() {
   // ── Startup sequence ──────────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
-    // Reset steps on retry
-    setStartupSteps(INITIAL_STEPS);
-
-    const minDelay = (ms) => new Promise(r => setTimeout(r, ms));
+    const minDelay = ms => new Promise(r => setTimeout(r, ms));
 
     const runStartup = async () => {
-      // Step 1: Backend health check
-      updateStep('backend', 'active');
+      // Determine where to start from — read sessionStorage at the top of each run
+      // so retry (which clears sessionStorage) starts fresh
+      let savedSteps = [];
+      try {
+        const raw = sessionStorage.getItem(SS_STATE_KEY);
+        savedSteps = raw ? (JSON.parse(raw).steps ?? []) : [];
+      } catch { savedSteps = []; }
+
+      const getStatus = id => savedSteps.find(s => s.id === id)?.status ?? 'pending';
+
+      // ── Steps 1–2 (init, auth) ─────────────────────────────────────────
+      // On redirect return: already 'complete' in sessionStorage — skip.
+      // On fresh load or retry: run them quickly for visual continuity.
+
+      if (getStatus('init') !== 'complete') {
+        activateStep('init');
+        await minDelay(200);
+        if (cancelled) return;
+        completeStep('init');      // auto-activates 'auth'
+        await minDelay(100);
+        if (cancelled) return;
+      }
+
+      if (getStatus('auth') !== 'complete') {
+        // Fresh load: 'auth' was auto-activated by completeStep('init') above
+        await minDelay(300);
+        if (cancelled) return;
+        completeStep('auth');      // auto-activates 'backend'
+      } else {
+        // Redirect return: auth already complete — manually activate backend
+        // (no completeStep('auth') was called so auto-activate didn't fire)
+        activateStep('backend');
+      }
+
+      // ── Step 3: Connecting to backend ─────────────────────────────────
       try {
         const [resp] = await Promise.all([
           fetch(`${BACKEND_ORIGIN}/health`, { signal: AbortSignal.timeout(30000) }),
@@ -126,15 +156,14 @@ export default function Layout() {
         ]);
         if (cancelled) return;
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        updateStep('backend', 'success');
+        completeStep('backend');   // auto-activates 'session'
       } catch {
         if (cancelled) return;
-        updateStep('backend', 'error', 'Backend unavailable. Is the server running?');
+        errorStep('backend', 'Backend unavailable. Is the server running?');
         return;
       }
 
-      // Step 2: Authentication check
-      updateStep('auth', 'active');
+      // ── Step 4: Verifying user session ────────────────────────────────
       try {
         const accounts = msalInstance.getAllAccounts();
         if (accounts.length > 0) {
@@ -146,38 +175,37 @@ export default function Layout() {
           await minDelay(400);
         }
         if (cancelled) return;
-        updateStep('auth', 'success');
+        completeStep('session');   // auto-activates 'schwab'
       } catch {
         if (cancelled) return;
-        // Auth errors handled by route guards — don't block startup
-        updateStep('auth', 'success');
+        completeStep('session');   // auth errors handled by route guards — don't block
       }
 
-      // Step 3: Schwab connection check
-      updateStep('schwab', 'active');
+      // ── Step 5: Checking Schwab connection ────────────────────────────
       try {
         const [status] = await Promise.all([getSchwabStatus(), minDelay(400)]);
         if (cancelled) return;
         const connected = status?.connected === true;
         setSchwabConnected(connected);
         if (connected) {
-          updateStep('schwab', 'success');
+          completeStep('schwab');  // auto-activates 'ready'
         } else {
-          updateStep('schwab', 'warning', 'Click "Schwab Disconnected" in the sidebar to connect.');
+          warnStep('schwab', 'Click "Schwab Disconnected" in the sidebar to connect.');
         }
       } catch {
         if (cancelled) return;
         setSchwabConnected(false);
-        updateStep('schwab', 'warning', 'Could not reach Schwab. Connect when ready.');
+        warnStep('schwab', 'Could not reach Schwab. Connect when ready.');
       }
 
-      // Step 4: Ready
+      // ── Step 6: Ready ─────────────────────────────────────────────────
+      await minDelay(600);
       if (cancelled) return;
-      updateStep('ready', 'success');
+      completeStep('ready');
       await minDelay(600);
       if (cancelled) return;
 
-      // Fade out then unmount widget
+      // Fade out then unmount the startup widget
       setStartupVisible(false);
       setTimeout(() => { if (!cancelled) setStartupComplete(true); }, 310);
     };
@@ -467,8 +495,13 @@ export default function Layout() {
           {!startupComplete ? (
             <StartupProgress
               steps={startupSteps}
+              totalElapsed={startupTotalElapsed}
               visible={startupVisible}
-              onRetry={() => { setStartupVisible(true); setRetryCount(c => c + 1); }}
+              onRetry={startupHasError ? () => {
+                resetStartup();
+                setStartupVisible(true);
+                setRetryCount(c => c + 1);
+              } : null}
             />
           ) : (
             <Outlet />
