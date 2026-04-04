@@ -322,12 +322,13 @@ function mapSpreadToDetail(spread) {
     : null;
   const debit = spread.net_debit;
   const isDebit = debit != null && debit > 0;
+  const absDebit = debit != null ? Math.abs(debit) : null;
   const isBull = (spread.spread_type || '').startsWith('bull');
-  const maxProfit = spreadWidth != null && debit != null
-    ? (isDebit ? spreadWidth - debit : debit) * 100
+  const maxProfit = spreadWidth != null && absDebit != null
+    ? (isDebit ? spreadWidth - absDebit : absDebit) * 100
     : null;
-  const maxLoss = spreadWidth != null && debit != null
-    ? (isDebit ? debit : spreadWidth - debit) * 100
+  const maxLoss = spreadWidth != null && absDebit != null
+    ? (isDebit ? absDebit : spreadWidth - absDebit) * 100
     : null;
   const loStrike = spread.long_strike != null && spread.short_strike != null
     ? Math.min(spread.long_strike, spread.short_strike)
@@ -335,10 +336,10 @@ function mapSpreadToDetail(spread) {
   const hiStrike = spread.long_strike != null && spread.short_strike != null
     ? Math.max(spread.long_strike, spread.short_strike)
     : null;
-  const breakeven = debit != null && loStrike != null
+  const breakeven = absDebit != null && loStrike != null
     ? (isBull
-      ? (isDebit ? loStrike + debit : hiStrike - Math.abs(debit))
-      : (isDebit ? hiStrike - debit : loStrike + Math.abs(debit)))
+      ? (isDebit ? loStrike + absDebit : hiStrike - absDebit)
+      : (isDebit ? hiStrike - absDebit : loStrike + absDebit))
     : null;
   const dte = spread.expiration
     ? Math.max(0, Math.round((new Date(spread.expiration) - new Date()) / 86400000))
