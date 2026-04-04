@@ -73,7 +73,7 @@ function ExitSignalBadge({ signal }) {
 
 import { useState } from 'react';
 
-export default function SectionB({ scenarios = [], totalEV }) {
+export default function SectionB({ scenarios = [], totalEV, isSingleLeg = false }) {
   const keyRows = scenarios.filter(r => r.exitSignal);
   const hasKeyRows = keyRows.length > 0;
   // Default collapsed (5 key rows). If tagging produced no key rows, fall back to full table.
@@ -87,7 +87,7 @@ export default function SectionB({ scenarios = [], totalEV }) {
         <thead>
           <tr>
             <th style={thLeftStyle}>Underlying Price</th>
-            <th style={thStyle}>Spread Value</th>
+            <th style={thStyle}>{isSingleLeg ? 'Option Value' : 'Spread Value'}</th>
             <th style={thStyle}>P&amp;L / Contract</th>
             <th style={thStyle}>P&amp;L %</th>
             <th style={thStyle}>Probability</th>

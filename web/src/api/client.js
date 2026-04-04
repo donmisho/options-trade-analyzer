@@ -128,10 +128,10 @@ export async function analyzeVerticals(data) {
   });
 }
 
-export async function analyzeLongCalls({ symbol, max_results = 15, option_types = ["call"] }) {
+export async function analyzeLongCalls({ symbol, max_results = 15, option_types = ["call"], ...extra }) {
   return apiFetch("/analyze/long-calls", {
     method: "POST",
-    body: JSON.stringify({ symbol, max_results, option_types }),
+    body: JSON.stringify({ symbol, max_results, option_types, ...extra }),
   });
 }
 

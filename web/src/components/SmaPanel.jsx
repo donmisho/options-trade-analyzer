@@ -38,9 +38,6 @@ function CandlestickChart({ candles, smaPeriods, height = 280 }) {
   const pLabels = Array.from({ length: steps }, (_, i) => { const p = mn + (rng / (steps - 1)) * i; return { p, y: yS(p) }; });
   const lc = vis[vis.length - 1]?.close || 0;
   const pc = vis[vis.length - 2]?.close || lc;
-  const lastSmaS = vS.filter(Boolean).pop();
-  const lastSmaM = vM.filter(Boolean).pop();
-  const lastSmaL = vL.filter(Boolean).pop();
 
   return (
     <div ref={ref} style={{ width: "100%" }}>
@@ -54,9 +51,6 @@ function CandlestickChart({ candles, smaPeriods, height = 280 }) {
         <line x1={pad.left} y1={yS(lc)} x2={w - pad.right} y2={yS(lc)} stroke={C.text} strokeWidth={0.6} strokeDasharray="4,4" opacity={0.2} />
         <rect x={w - pad.right + 1} y={yS(lc) - 9} width={48} height={18} rx={3} fill={lc >= pc ? C.candleGreen : C.candleRed} opacity={0.9} />
         <text x={w - pad.right + 5} y={yS(lc) + 4} fill="#fff" fontSize={10} fontFamily={mono} fontWeight={600}>{lc.toFixed(1)}</text>
-        {lastSmaS && <><rect x={w-pad.right+1} y={yS(lastSmaS)-8} width={26} height={14} rx={2} fill={C.bg} opacity={0.8}/><text x={w-pad.right+4} y={yS(lastSmaS)+3} fill={C.smaCyan} fontSize={8.5} fontFamily={mono} fontWeight={600}>{smaPeriods.short}</text></>}
-        {lastSmaM && <><rect x={w-pad.right+1} y={yS(lastSmaM)-8} width={26} height={14} rx={2} fill={C.bg} opacity={0.8}/><text x={w-pad.right+4} y={yS(lastSmaM)+3} fill={C.smaOrange} fontSize={8.5} fontFamily={mono} fontWeight={600}>{smaPeriods.mid}</text></>}
-        {lastSmaL && <><rect x={w-pad.right+1} y={yS(lastSmaL)-8} width={26} height={14} rx={2} fill={C.bg} opacity={0.8}/><text x={w-pad.right+4} y={yS(lastSmaL)+3} fill={C.smaRed} fontSize={8.5} fontFamily={mono} fontWeight={600}>{smaPeriods.long}</text></>}
       </svg>
     </div>
   );

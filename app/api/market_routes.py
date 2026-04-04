@@ -206,6 +206,32 @@ async def get_market_overview(
     return {"quotes": quotes, "fetched_at": datetime.now(timezone.utc).isoformat()}
 
 
+@router.get("/instruments")
+async def search_instruments(
+    symbol: str = Query(..., min_length=1, description="Symbol prefix or full symbol to search"),
+    user: dict = Depends(require_read),
+):
+    """
+    Search for instruments by symbol prefix using Schwab's instrument search API.
+    Falls back to an empty list if Schwab is unavailable.
+
+    Full path: GET /api/v1/market/instruments?symbol={query}
+    Returns: [{ symbol, name, type }]
+    """
+    factory = _get_factory()
+    provider = _get_provider(factory, user.get("sub"))
+
+    if not hasattr(provider, "search_instruments"):
+        return {"instruments": []}
+
+    try:
+        results = await provider.search_instruments(symbol)
+        return {"instruments": results}
+    except Exception as e:
+        log.warning(f"Instrument search failed for '{symbol}': {e}")
+        return {"instruments": []}
+
+
 @router.post("/collect-chains")
 async def trigger_chain_collection(
     symbols: list[str],

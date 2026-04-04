@@ -13,7 +13,7 @@
  *   Empty states
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { getWatchlist, getPositions, getStrategyScorecard, addWatchlistSymbol } from '../api/client';
@@ -123,6 +123,22 @@ export default function SecurityStrategiesPage() {
   const [progress,       setProgress]       = useState({ completed: 0, total: 0 });
   const [hasScanned,     setHasScanned]     = useState(false);
 
+  // Load cached scan results on mount (show last scan instantly)
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('ota_scan_results');
+      if (raw) {
+        const { results: cached } = JSON.parse(raw);
+        if (cached?.length > 0) {
+          setResults(cached);
+          setHasScanned(true);
+        }
+      }
+    } catch (_) {
+      // corrupt cache — ignore
+    }
+  }, []);
+
   // ── Scan orchestration ─────────────────────────────────────────────────
   const handleScan = async () => {
     setScanning(true);
@@ -201,6 +217,14 @@ export default function SecurityStrategiesPage() {
 
     setScanning(false);
     showToast({ type: 'info', message: `Scanned ${total} symbol${total !== 1 ? 's' : ''}` });
+
+    // Persist results so returning to this page shows them instantly
+    setResults(prev => {
+      try {
+        localStorage.setItem('ota_scan_results', JSON.stringify({ results: prev, timestamp: Date.now() }));
+      } catch (_) { /* storage full — skip */ }
+      return prev;
+    });
   };
 
   // ── Apply client-side filters + sort ──────────────────────────────────

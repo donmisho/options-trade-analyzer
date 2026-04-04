@@ -2,14 +2,21 @@ import { formatDate } from '../../utils/formatDate';
 import TradeTypeBadge from '../TradeTypeBadge';
 
 
+const SPREAD_INFO = {
+  bull_call: { direction: 'bullish', entry: 'you pay debit' },
+  bear_put:  { direction: 'bearish', entry: 'you pay debit' },
+  bull_put:  { direction: 'bullish', entry: 'you receive credit' },
+  bear_call: { direction: 'bearish', entry: 'you receive credit' },
+  long_call: { direction: 'bullish', entry: 'you pay premium' },
+  long_put:  { direction: 'bearish', entry: 'you pay premium' },
+};
+
 function getContextLabel(type) {
   if (!type) return '';
-  const upper = type.toUpperCase();
-  const isBull = upper.startsWith('BULL');
-  const isDebit = upper.includes('DEBIT');
-  const direction = isBull ? 'bullish' : 'bearish';
-  const entry = isDebit ? 'you pay to enter' : 'you receive credit';
-  return `(${direction} — ${entry})`;
+  const key = type.toLowerCase().replace(/-/g, '_');
+  const info = SPREAD_INFO[key];
+  if (!info) return '';
+  return `(${info.direction} — ${info.entry})`;
 }
 
 const fieldStyle = {

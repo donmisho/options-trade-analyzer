@@ -508,6 +508,43 @@ class SchwabMarketData(MarketDataProvider):
             "rho": safe_greek(raw.get("rho")),
         }
 
+    async def search_instruments(self, query: str, max_results: int = 12) -> list[dict]:
+        """
+        GET /marketdata/v1/instruments?symbol={query}&projection=symbol-search
+
+        Returns a list of matching instruments with symbol, name, and type.
+        Used by the SymbolSearch typeahead on the TradesPage.
+
+        Falls back to an empty list on error so the frontend static fallback
+        can fill in without surfacing API errors to the user.
+        """
+        headers = await self._get_headers()
+
+        try:
+            resp = await self._client.get(
+                "/instruments",
+                headers=headers,
+                params={"symbol": query.upper(), "projection": "symbol-search"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            logger.warning(f"Schwab instruments search failed for '{query}': {e}")
+            return []
+
+        instruments = data.get("instruments", [])
+        results = []
+        for inst in instruments[:max_results]:
+            sym = inst.get("symbol")
+            if not sym:
+                continue
+            results.append({
+                "symbol": sym,
+                "name": inst.get("description") or inst.get("name", ""),
+                "type": inst.get("assetType", ""),
+            })
+        return results
+
     async def close(self):
         """Clean up the HTTP client."""
         await self._client.aclose()

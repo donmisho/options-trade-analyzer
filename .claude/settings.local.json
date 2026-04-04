@@ -152,7 +152,10 @@
       "Bash(cd \"/c/Users/DonMishory/OneDrive - jmholistic.com/VS Code Projects/Options Analyzer/options-analyzer/web\" && npm run build 2>&1 | tail -30)",
       "Bash(cd \"/c/Users/DonMishory/OneDrive - jmholistic.com/VS Code Projects/Options Analyzer/options-analyzer/web\" && npx eslint src/components/StrategyScorecard.jsx src/pages/SecurityDashboard.jsx src/api/client.js --max-warnings=20 2>&1 | tail -20)",
       "Bash(cd \"/c/Users/DonMishory/OneDrive - jmholistic.com/VS Code Projects/Options Analyzer/options-analyzer/web\" && npx eslint src/components/StrategyScorecard.jsx src/pages/SecurityDashboard.jsx src/api/client.js --max-warnings=20 2>&1 | tail -10)",
-      "Bash(cd \"C:\\\\Users\\\\DonMishory\\\\OneDrive - jmholistic.com\\\\VS Code Projects\\\\Options Analyzer\\\\options-analyzer\" && venv/Scripts/python -c \"\nfrom app.main import app\nprint\\('App loaded OK'\\)\nprint\\('Routers:', [r.prefix for r in app.routes if hasattr\\(r, 'prefix'\\)]\\)\n\" 2>&1 | head -30)"
+      "Bash(cd \"C:\\\\Users\\\\DonMishory\\\\OneDrive - jmholistic.com\\\\VS Code Projects\\\\Options Analyzer\\\\options-analyzer\" && venv/Scripts/python -c \"\nfrom app.main import app\nprint\\('App loaded OK'\\)\nprint\\('Routers:', [r.prefix for r in app.routes if hasattr\\(r, 'prefix'\\)]\\)\n\" 2>&1 | head -30)",
+      "Bash(cd \"C:\\\\Users\\\\DonMishory\\\\OneDrive - jmholistic.com\\\\VS Code Projects\\\\Options Analyzer\\\\options-analyzer\" && openssl x509 -text -noout -in cert.pem | grep -A5 \"Subject Alternative\")",
+      "Bash(cd \"C:\\\\Users\\\\DonMishory\\\\OneDrive - jmholistic.com\\\\VS Code Projects\\\\Options Analyzer\\\\options-analyzer\\\\web\" && npm run lint 2>&1 | tail -20)",
+      "Bash(cd \"C:\\\\Users\\\\DonMishory\\\\OneDrive - jmholistic.com\\\\VS Code Projects\\\\Options Analyzer\\\\options-analyzer\\\\web\" && npx eslint src/components/Layout.jsx src/components/StartupProgress.jsx 2>&1)"
     ]
   }
 }

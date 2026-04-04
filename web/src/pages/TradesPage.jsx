@@ -105,7 +105,8 @@ function buildExitScenarios(spread, underlying) {
   const loStrike = Math.min(long_strike, short_strike);
   const hiStrike = Math.max(long_strike, short_strike);
   const width = hiStrike - loStrike;
-  const isBull = (spread.spread_type || '').startsWith('bull');
+  const spreadType = (spread.spread_type || '').toLowerCase().replace(/-/g, '_');
+  const isCallSpread = ['bull_call', 'bear_call'].includes(spreadType);
   const isDebit = net_debit > 0;
   const creditAmt = Math.abs(net_debit);
 
@@ -115,7 +116,7 @@ function buildExitScenarios(spread, underlying) {
   const sigma = Math.max(1, (iv || 0.25) * underlying * Math.sqrt(dte / 365));
 
   function spreadValueAt(price) {
-    if (isBull) return Math.max(0, Math.min(price - loStrike, width));
+    if (isCallSpread) return Math.max(0, Math.min(price - loStrike, width));
     return Math.max(0, Math.min(hiStrike - price, width));
   }
 
@@ -732,7 +733,7 @@ function TradeDetailExpansion({
       fontFamily: 'monospace',
     }}>
       <SectionA trade={detailProps} />
-      <SectionB scenarios={scenarios || []} totalEV={totalEV ?? null} />
+      <SectionB scenarios={scenarios || []} totalEV={totalEV ?? null} isSingleLeg={!!rawTrade?.option_type} />
       <SectionC outcome={outcome || null} />
       <SectionE
         evaluation={evaluation || null}
@@ -810,6 +811,14 @@ export default function TradesPage() {
   const [vertConfigOpen, setVertConfigOpen]   = useState(false);
   const [callsConfigOpen, setCallsConfigOpen] = useState(false);
 
+  function handleVertConfigApply(_strategyKey, config) {
+    if (symbol) fetchVerticals(symbol, config);
+  }
+
+  function handleCallsConfigApply(_strategyKey, config) {
+    if (symbol) fetchCalls(symbol, config);
+  }
+
   // ── Auto-fetch on mount when symbol is pre-set from URL ──────────────────
   // Handles /trades?symbol=X (from scan card click) and /trades?strategy=X
   useEffect(() => {
@@ -820,7 +829,7 @@ export default function TradesPage() {
   }, []);
 
   // ── Fetch verticals ──────────────────────────────────────────────────────
-  async function fetchVerticals(sym) {
+  async function fetchVerticals(sym, config = {}) {
     if (!sym) return;
     setVertLoading(true);
     setVertError(null);
@@ -829,6 +838,7 @@ export default function TradesPage() {
         symbol: sym,
         spread_types: ['bull_call', 'bear_put'],
         max_results: 20,
+        ...config,
       });
       const underlying = data.underlying_price || 0;
       setVertUnderlying(underlying);
@@ -853,7 +863,7 @@ export default function TradesPage() {
   }
 
   // ── Fetch puts & calls ───────────────────────────────────────────────────
-  async function fetchCalls(sym) {
+  async function fetchCalls(sym, config = {}) {
     if (!sym) return;
     setCallsLoading(true);
     setCallsError(null);
@@ -862,6 +872,7 @@ export default function TradesPage() {
         symbol: sym,
         max_results: 20,
         option_types: ['call', 'put'],
+        ...config,
       });
       const underlying = data.underlying_price || 0;
       setCallsUnderlying(underlying);
@@ -1233,11 +1244,13 @@ export default function TradesPage() {
       <SectionConfigDrawer
         open={vertConfigOpen}
         onClose={() => setVertConfigOpen(false)}
+        onApply={handleVertConfigApply}
         strategyKeys={VERT_STRATEGY_KEYS}
       />
       <SectionConfigDrawer
         open={callsConfigOpen}
         onClose={() => setCallsConfigOpen(false)}
+        onApply={handleCallsConfigApply}
         strategyKeys={CALLS_STRATEGY_KEYS}
       />
     </>
