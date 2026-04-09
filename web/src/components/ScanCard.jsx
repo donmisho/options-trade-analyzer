@@ -38,9 +38,10 @@ function formatVolume(v) {
 
 export default function ScanCard({
   symbol, price, change, changePercent, volume,
-  signal, isNew, strategies = [], signalSummary, ivRank, onClick,
+  signal, isNew, strategies = [], signalSummary, ivRank, onClick, onRemove,
 }) {
   const [hovered, setHovered] = useState(false);
+  const [removeBtnHovered, setRemoveBtnHovered] = useState(false);
 
   const sig = (signal || 'NEUTRAL').toUpperCase();
   const badge = SIGNAL_BADGE[sig] || SIGNAL_BADGE.NEUTRAL;
@@ -62,6 +63,7 @@ export default function ScanCard({
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
+        position: 'relative',
         border: `1px solid ${hovered ? 'rgba(45,212,191,0.3)' : C.border}`,
         borderRadius: 6,
         padding: '12px',
@@ -71,6 +73,30 @@ export default function ScanCard({
         userSelect: 'none',
       }}
     >
+      {/* ── Remove button (× — hover only, watchlist source only) ── */}
+      {onRemove && hovered && (
+        <button
+          onClick={e => { e.stopPropagation(); onRemove(); }}
+          onMouseEnter={() => setRemoveBtnHovered(true)}
+          onMouseLeave={() => setRemoveBtnHovered(false)}
+          style={{
+            position: 'absolute',
+            top: 6,
+            right: 8,
+            background: 'none',
+            border: 'none',
+            color: removeBtnHovered ? '#e6edf3' : '#8b949e',
+            fontSize: 16,
+            lineHeight: 1,
+            cursor: 'pointer',
+            padding: '0 2px',
+            fontFamily: mono,
+            zIndex: 1,
+          }}
+          title={`Remove ${symbol} from watchlist`}
+        >×</button>
+      )}
+
       {/* ── Header: symbol · signal badge · NEW badge ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 14, fontWeight: 700, color: '#e6edf3', fontFamily: mono }}>

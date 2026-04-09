@@ -762,6 +762,75 @@ export async function actOnInsight(insightId) {
 
 
 // ═══════════════════════════════════════════════════════════════════
+// HEALTH (OTA-441)
+// ═══════════════════════════════════════════════════════════════════
+
+export async function getDetailedHealth() {
+  return apiFetch('/health/detailed');
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// NAMED WATCHLISTS (OTA-444 / OTA-445 / OTA-446)
+// ═══════════════════════════════════════════════════════════════════
+
+/** Return all watchlists for the current user. Creates default on first call. */
+export async function getWatchlists() {
+  return apiFetch('/watchlists');
+}
+
+/** Create a new watchlist. @returns {id, name, is_default, symbol_count} */
+export async function createWatchlist(name) {
+  return apiFetch('/watchlists', {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  });
+}
+
+/** Rename a watchlist. @returns {id, name, updated_at} */
+export async function renameWatchlist(id, name) {
+  return apiFetch(`/watchlists/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ name }),
+  });
+}
+
+/** Delete a watchlist and its symbols. Cannot delete default watchlist. */
+export async function deleteWatchlist(id) {
+  return apiFetch(`/watchlists/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+}
+
+/** List symbols in a watchlist. @returns [{symbol, added_at}] */
+export async function getWatchlistSymbols(id) {
+  return apiFetch(`/watchlists/${encodeURIComponent(id)}/symbols`);
+}
+
+/** Add a symbol to a named watchlist. Validates via Schwab. */
+export async function addSymbolToWatchlist(id, symbol) {
+  return apiFetch(`/watchlists/${encodeURIComponent(id)}/symbols`, {
+    method: 'POST',
+    body: JSON.stringify({ symbol: symbol.toUpperCase() }),
+  });
+}
+
+/** Remove a symbol from a named watchlist. */
+export async function removeSymbolFromWatchlist(id, symbol) {
+  return apiFetch(`/watchlists/${encodeURIComponent(id)}/symbols/${encodeURIComponent(symbol.toUpperCase())}`, {
+    method: 'DELETE',
+  });
+}
+
+/**
+ * Get available scan sources for Security Strategies page.
+ * @returns { watchlists: [{id, name, is_default, symbol_count}], builtin: [{id, name, symbol_count}] }
+ */
+export async function getWatchlistSources() {
+  return apiFetch('/watchlists/sources');
+}
+
+
+// ═══════════════════════════════════════════════════════════════════
 // DASHBOARD (Phase 2.3)
 // ═══════════════════════════════════════════════════════════════════
 

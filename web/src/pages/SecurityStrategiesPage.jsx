@@ -7,7 +7,7 @@
  *
  * Layout:
  *   Page title
- *   Filter bar: Source · Signal · Min score · Sort · "Scan now"
+ *   Filter bar: Source (WatchlistPicker) · Signal · Min score · Sort · "Scan now" · Add symbol
  *   Progress indicator (while scanning)
  *   Card grid: ScanCard per symbol (progressive render)
  *   Empty states
@@ -15,9 +15,15 @@
 
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useApp } from '../context/AppContext';
-import { getWatchlist, getPositions, getStrategyScorecard, addWatchlistSymbol } from '../api/client';
+import {
+  getPositions,
+  getStrategyScorecard,
+  getWatchlistSymbols,
+  addSymbolToWatchlist,
+  removeSymbolFromWatchlist,
+} from '../api/client';
 import ScanCard from '../components/ScanCard';
+import WatchlistPicker from '../components/WatchlistPicker';
 import { useToast } from '../components/Toast';
 import { C, mono } from '../styles/tokens';
 
@@ -89,31 +95,86 @@ const numInputStyle = {
 
 // ─── Main component ────────────────────────────────────────────────────────
 export default function SecurityStrategiesPage() {
-  const { watchlist, addToWatchlist } = useApp();
   const navigate = useNavigate();
   const { showToast } = useToast();
 
+  // ── Source selection (WatchlistPicker) ─────────────────────────────────
+  const [selectedSource, setSelectedSource] = useState(null);
+
+  function handleSourceChange(source) {
+    setSelectedSource(source);
+    // Clear stale results when source changes
+    setResults([]);
+    setErrors([]);
+    setHasScanned(false);
+  }
+
+  // ── Add symbol ─────────────────────────────────────────────────────────
   const [newSymbol, setNewSymbol] = useState('');
+  const [addError, setAddError]   = useState('');
+
+  const isWatchlistSource = selectedSource?.type === 'watchlist';
 
   async function handleAddSymbol() {
     const sym = newSymbol.trim().toUpperCase();
-    if (!sym) return;
-    if (watchlist.some(w => (typeof w === 'string' ? w : w.symbol) === sym)) {
-      showToast({ type: 'info', message: `${sym} is already in your scan list` });
+    if (!sym || !isWatchlistSource) return;
+    setAddError('');
+
+    if (results.some(r => r.symbol === sym)) {
+      showToast({ type: 'info', message: `${sym} is already in scan results` });
       setNewSymbol('');
       return;
     }
+
     try {
-      await addWatchlistSymbol(sym);
-      addToWatchlist(sym);
+      await addSymbolToWatchlist(selectedSource.id, sym);
       setNewSymbol('');
-      showToast({ type: 'success', message: `${sym} added to scan list` });
+      // Update local count
+      setSelectedSource(prev => ({ ...prev, symbolCount: (prev.symbolCount || 0) + 1 }));
+
+      // Trigger single-symbol scorecard and append card
+      try {
+        const data = await getStrategyScorecard(sym);
+        const strats = data.strategies || [];
+        const ivRaw = strats[0]?.best_trade?.iv_rank ?? strats[0]?.best_trade?.iv;
+        setResults(prev => [...prev, {
+          symbol:        sym,
+          price:         data.quote?.price,
+          change:        data.quote?.change,
+          changePercent: data.quote?.change_pct,
+          volume:        data.quote?.volume,
+          signal:        data.sma_signal?.alignment || 'NEUTRAL',
+          strategies:    strats,
+          signalSummary: data.sma_signal?.summary || '',
+          ivRank:        ivRaw,
+          isNew:         true,
+        }]);
+      } catch {
+        // Symbol added to watchlist but scorecard failed — that's OK
+      }
+
+      showToast({ type: 'success', message: `${sym} added to watchlist` });
     } catch (err) {
-      showToast({ type: 'error', message: `Failed to add ${sym}: ${err.message}` });
+      const msg = err.message?.includes('not found') || err.message?.includes('400')
+        ? `Symbol not found: ${sym}`
+        : (err.message || `Failed to add ${sym}`);
+      setAddError(msg);
     }
   }
 
-  const [filterSource,   setFilterSource]   = useState('watchlist');
+  // ── Remove symbol from watchlist + grid ────────────────────────────────
+  async function handleRemoveSymbol(symbol) {
+    if (!isWatchlistSource) return;
+    try {
+      await removeSymbolFromWatchlist(selectedSource.id, symbol);
+      setResults(prev => prev.filter(r => r.symbol !== symbol));
+      setSelectedSource(prev => ({ ...prev, symbolCount: Math.max(0, (prev.symbolCount || 1) - 1) }));
+    } catch (err) {
+      showToast({ type: 'error', message: `Failed to remove ${symbol}: ${err.message}` });
+    }
+  }
+
+  // ── Scan state ──────────────────────────────────────────────────────────
   const [filterSignal,   setFilterSignal]   = useState('all');
   const [filterMinScore, setFilterMinScore] = useState(0);
   const [filterSort,     setFilterSort]     = useState('score');
@@ -134,35 +195,29 @@ export default function SecurityStrategiesPage() {
           setHasScanned(true);
         }
       }
-    } catch (_) {
+    } catch {
       // corrupt cache — ignore
     }
   }, []);
 
-  // ── Scan orchestration ─────────────────────────────────────────────────
+  // ── Scan orchestration ──────────────────────────────────────────────────
   const handleScan = async () => {
     setScanning(true);
     setResults([]);
     setErrors([]);
     setProgress({ completed: 0, total: 0 });
     setHasScanned(true);
+    setAddError('');
 
-    // Gather symbols from selected source
     let symbols = [];
     try {
-      if (filterSource === 'watchlist' || filterSource === 'all') {
-        const wl = await getWatchlist().catch(() => []);
-        const wlSymbols = (wl || [])
-          .map(w => (typeof w === 'string' ? w : w.symbol))
-          .filter(Boolean);
-        symbols.push(...wlSymbols);
-      }
-      if (filterSource === 'positions' || filterSource === 'all') {
+      if (selectedSource?.type === 'watchlist') {
+        const data = await getWatchlistSymbols(selectedSource.id).catch(() => []);
+        symbols = (data || []).map(s => (typeof s === 'string' ? s : s.symbol)).filter(Boolean);
+      } else if (selectedSource?.id === 'all-positions') {
         const resp = await getPositions({ status: 'all' }).catch(() => ({ positions: [] }));
-        const posSymbols = [...new Set((resp?.positions || []).map(p => p.symbol))];
-        symbols.push(...posSymbols);
+        symbols = [...new Set((resp?.positions || []).map(p => p.symbol))];
       }
-      // Deduplicate, preserve order
       symbols = [...new Set(symbols)];
     } catch (err) {
       setScanning(false);
@@ -179,7 +234,7 @@ export default function SecurityStrategiesPage() {
     const total = symbols.length;
     setProgress({ completed: 0, total });
 
-    // Fan out with max 5 concurrent using chunked Promise.allSettled
+    // Fan out with max 5 concurrent
     let completed = 0;
     for (let i = 0; i < symbols.length; i += 5) {
       const chunk = symbols.slice(i, i + 5);
@@ -187,7 +242,6 @@ export default function SecurityStrategiesPage() {
         chunk.map(sym => getStrategyScorecard(sym))
       );
 
-      // Append results progressively as each chunk resolves
       settled.forEach((result, idx) => {
         const sym = chunk[idx];
         completed++;
@@ -218,11 +272,11 @@ export default function SecurityStrategiesPage() {
     setScanning(false);
     showToast({ type: 'info', message: `Scanned ${total} symbol${total !== 1 ? 's' : ''}` });
 
-    // Persist results so returning to this page shows them instantly
+    // Persist results for instant display on return
     setResults(prev => {
       try {
         localStorage.setItem('ota_scan_results', JSON.stringify({ results: prev, timestamp: Date.now() }));
-      } catch (_) { /* storage full — skip */ }
+      } catch { /* storage full — skip */ }
       return prev;
     });
   };
@@ -252,14 +306,12 @@ export default function SecurityStrategiesPage() {
 
   // ── Empty state flags ──────────────────────────────────────────────────
   const showNoWatchlist = !hasScanned
-    && (filterSource === 'watchlist' || filterSource === 'all')
-    && watchlist.length === 0;
+    && isWatchlistSource
+    && (selectedSource?.symbolCount ?? 0) === 0;
 
   const showPreScan  = !hasScanned && !showNoWatchlist;
   const showNoMatch  = hasScanned && !scanning && results.length > 0 && filtered.length === 0;
   const showEmpty    = hasScanned && !scanning && results.length === 0 && errors.length === 0;
-
-  // Show 3 skeleton cards while scanning (visual placeholder for in-flight items)
   const showSkeletons = scanning;
 
   return (
@@ -282,16 +334,11 @@ export default function SecurityStrategiesPage() {
         alignItems: 'center',
         flexWrap: 'wrap',
       }}>
-        {/* Source */}
-        <select
-          value={filterSource}
-          onChange={e => setFilterSource(e.target.value)}
-          style={selectStyle}
-        >
-          <option value="watchlist">Watchlist</option>
-          <option value="positions">Positions</option>
-          <option value="all">All</option>
-        </select>
+        {/* Source — WatchlistPicker */}
+        <WatchlistPicker
+          selectedSource={selectedSource}
+          onSourceChange={handleSourceChange}
+        />
 
         {/* Signal */}
         <select
@@ -352,36 +399,51 @@ export default function SecurityStrategiesPage() {
           {scanning ? 'Scanning...' : 'Scan now'}
         </button>
 
-        {/* Add symbol to watchlist */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
-          <input
-            type="text"
-            placeholder="Add symbol..."
-            value={newSymbol}
-            onChange={e => setNewSymbol(e.target.value.toUpperCase())}
-            onKeyDown={e => e.key === 'Enter' && handleAddSymbol()}
-            style={{
-              ...selectStyle,
-              width: 110,
-              padding: '5px 8px',
-              letterSpacing: '0.04em',
-            }}
-          />
-          <button
-            onClick={handleAddSymbol}
-            style={{
-              background: 'transparent',
-              border: '1px solid #30363d',
-              color: '#8b949e',
-              padding: '5px 10px',
-              borderRadius: 4,
-              fontSize: 10,
-              fontFamily: mono,
-              cursor: 'pointer',
-            }}
-          >
-            Add
-          </button>
+        {/* Add symbol to current watchlist */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginLeft: 'auto' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div style={{ position: 'relative' }}>
+              <input
+                type="text"
+                placeholder={isWatchlistSource ? 'Add symbol…' : 'Select a watchlist to add'}
+                value={newSymbol}
+                onChange={e => { setNewSymbol(e.target.value.toUpperCase()); setAddError(''); }}
+                onKeyDown={e => e.key === 'Enter' && handleAddSymbol()}
+                disabled={!isWatchlistSource || scanning}
+                title={!isWatchlistSource ? 'Select a watchlist to add symbols' : undefined}
+                style={{
+                  ...selectStyle,
+                  width: isWatchlistSource ? 110 : 160,
+                  padding: '5px 8px',
+                  letterSpacing: '0.04em',
+                  opacity: !isWatchlistSource ? 0.5 : 1,
+                  cursor: !isWatchlistSource ? 'not-allowed' : 'text',
+                }}
+              />
+            </div>
+            <button
+              onClick={handleAddSymbol}
+              disabled={!isWatchlistSource || scanning || !newSymbol.trim()}
+              style={{
+                background: 'transparent',
+                border: '1px solid #30363d',
+                color: '#8b949e',
+                padding: '5px 10px',
+                borderRadius: 4,
+                fontSize: 10,
+                fontFamily: mono,
+                cursor: isWatchlistSource && newSymbol.trim() ? 'pointer' : 'not-allowed',
+                opacity: (!isWatchlistSource || !newSymbol.trim()) ? 0.5 : 1,
+              }}
+            >
+              Add
+            </button>
+          </div>
+          {addError && (
+            <span style={{ fontSize: 10, color: '#f87171', fontFamily: mono }}>
+              {addError}
+            </span>
+          )}
         </div>
       </div>
 
@@ -395,7 +457,7 @@ export default function SecurityStrategiesPage() {
       {/* ── Content ── */}
       <div style={{ padding: '16px' }}>
 
-        {/* Empty: no watchlist symbols yet */}
+        {/* Empty: watchlist has no symbols */}
         {showNoWatchlist && (
           <div style={{
             textAlign: 'center', padding: '64px 16px',
@@ -411,7 +473,9 @@ export default function SecurityStrategiesPage() {
             textAlign: 'center', padding: '64px 16px',
             color: '#8b949e', fontSize: 12, fontFamily: mono,
           }}>
-            Select a source and click "Scan now" to analyze symbols
+            {selectedSource
+              ? `Click "Scan now" to analyze ${selectedSource.name}`
+              : 'Select a source and click "Scan now" to analyze symbols'}
           </div>
         )}
 
@@ -447,6 +511,7 @@ export default function SecurityStrategiesPage() {
                 key={r.symbol}
                 {...r}
                 onClick={() => navigate(`/trades?symbol=${r.symbol}`)}
+                onRemove={isWatchlistSource ? () => handleRemoveSymbol(r.symbol) : undefined}
               />
             ))}
 
