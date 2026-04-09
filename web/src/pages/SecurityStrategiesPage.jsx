@@ -96,6 +96,27 @@ const numInputStyle = {
   textAlign: 'right',
 };
 
+// ─── Build a scan result object from a scorecard API response ─────────────
+// Used by both handleScan (bulk) and handleAddSymbol (single). extra is merged
+// last so callers can override fields (e.g. isNew: true for manual adds).
+function buildScanResult(sym, data, extra = {}) {
+  const strats = data.strategies || [];
+  const ivRaw = strats[0]?.best_trade?.iv_rank ?? strats[0]?.best_trade?.iv;
+  return {
+    symbol:        sym,
+    price:         data.quote?.price,
+    change:        data.quote?.change,
+    changePercent: data.quote?.change_pct,
+    volume:        data.quote?.volume,
+    relVolume:     data.quote?.rel_volume,
+    signal:        data.sma_signal?.alignment || 'NEUTRAL',
+    strategies:    strats,
+    signalSummary: data.sma_signal?.summary || '',
+    ivRank:        ivRaw,
+    ...extra,
+  };
+}
+
 // ─── Main component ────────────────────────────────────────────────────────
 export default function SecurityStrategiesPage() {
   const navigate = useNavigate();
@@ -138,20 +159,7 @@ export default function SecurityStrategiesPage() {
       // Trigger single-symbol scorecard and append card
       try {
         const data = await getStrategyScorecard(sym);
-        const strats = data.strategies || [];
-        const ivRaw = strats[0]?.best_trade?.iv_rank ?? strats[0]?.best_trade?.iv;
-        setResults(prev => [...prev, {
-          symbol:        sym,
-          price:         data.quote?.price,
-          change:        data.quote?.change,
-          changePercent: data.quote?.change_pct,
-          volume:        data.quote?.volume,
-          signal:        data.sma_signal?.alignment || 'NEUTRAL',
-          strategies:    strats,
-          signalSummary: data.sma_signal?.summary || '',
-          ivRank:        ivRaw,
-          isNew:         true,
-        }]);
+        setResults(prev => [...prev, buildScanResult(sym, data, { isNew: true })]);
       } catch {
         // Symbol added to watchlist but scorecard failed — that's OK
       }
@@ -247,21 +255,7 @@ export default function SecurityStrategiesPage() {
         const sym = chunk[idx];
         completed++;
         if (result.status === 'fulfilled') {
-          const data = result.value;
-          const strats = data.strategies || [];
-          const ivRaw = strats[0]?.best_trade?.iv_rank ?? strats[0]?.best_trade?.iv;
-          const item = {
-            symbol:        sym,
-            price:         data.quote?.price,
-            change:        data.quote?.change,
-            changePercent: data.quote?.change_pct,
-            volume:        data.quote?.volume,
-            relVolume:     data.quote?.rel_volume,
-            signal:        data.sma_signal?.alignment || 'NEUTRAL',
-            strategies:    strats,
-            signalSummary: data.sma_signal?.summary || '',
-            ivRank:        ivRaw,
-          };
+          const item = buildScanResult(sym, result.value);
           finalResults.push(item);
           setResults(prev => [...prev, item]);
         } else {
@@ -438,7 +432,7 @@ export default function SecurityStrategiesPage() {
             </button>
           </div>
           {addError && (
-            <span style={{ fontSize: 10, color: '#f87171', fontFamily: mono }}>
+            <span style={{ fontSize: 10, color: C.red, fontFamily: mono }}>
               {addError}
             </span>
           )}
