@@ -52,7 +52,11 @@ async function apiFetch(path, options = {}) {
     return await response.json();
   } catch (err) {
     if (err.name === "TypeError" && err.message.includes("fetch")) {
-      throw new Error(`Cannot reach the backend at ${API_BASE}.`);
+      throw new Error(
+        import.meta.env.DEV
+          ? "Cannot reach backend. Check: uvicorn running on https://127.0.0.1:8000 and Vite dev server running."
+          : `Cannot reach backend at ${import.meta.env.VITE_API_BASE_URL}.`
+      );
     }
     throw err;
   }
