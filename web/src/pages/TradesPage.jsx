@@ -129,8 +129,8 @@ function buildExitScenarios(spread, underlying) {
   const maxLossAmt = isDebit ? net_debit * 100 : (width - creditAmt) * 100;
   const risk = isDebit ? net_debit * 100 : (width - creditAmt) * 100;
 
-  const rangeStart = Math.max(1, Math.floor((underlying - 3 * sigma) / 5) * 5);
-  const rangeEnd   = Math.ceil((underlying + 3 * sigma) / 5) * 5;
+  const rangeStart = Math.max(1, Math.floor((Math.min(underlying - 3 * sigma, loStrike - width)) / 5) * 5);
+  const rangeEnd   = Math.ceil((Math.max(underlying + 3 * sigma, hiStrike + width)) / 5) * 5;
 
   const scenarios = [];
   let totalEV = 0;
@@ -717,6 +717,7 @@ function normalizeEvalResponse(result, fallbackStrategyKey) {
     keyLevelExplanation: typeof e.key_level === 'string'
       ? e.key_level
       : (e.key_level?.explanation ?? null),
+    autoPassReason: e.auto_pass_reason || null,
     _raw: e,
   };
 }
@@ -1218,7 +1219,10 @@ export default function TradesPage() {
                 )}
                 {!callsLoading && !callsError && callResults.length === 0 && symbol && (
                   <div style={{ padding: '12px 0', color: MUTED, fontSize: 10, textAlign: 'center' }}>
-                    No long option candidates found for {symbol}
+                    No candidates matching Trend Rider / Lottery Ticket filters for {symbol}
+                    {smaAlignment?.alignment && (
+                      <span> — SMA signal is {smaAlignment.alignment.charAt(0).toUpperCase() + smaAlignment.alignment.slice(1)}{smaAlignment.alignment === 'mixed' ? ' (requires Bullish or Bearish alignment)' : ''}</span>
+                    )}
                   </div>
                 )}
                 {!symbol && (

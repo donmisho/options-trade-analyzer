@@ -200,6 +200,7 @@ export default function SectionE({
     keyLevelPrice,
     keyLevelExplanation,
     score,
+    autoPassReason,
   } = evaluation;
 
   const analysisBlocks = Array.isArray(analysis)
@@ -269,6 +270,20 @@ export default function SectionE({
           {para}
         </p>
       ))}
+
+      {/* Auto-pass reason (shown when evaluation was skipped by pipeline gate) */}
+      {!analysisBlocks.length && autoPassReason && (
+        <div style={{
+          background: 'rgba(248,113,113,0.08)',
+          borderLeft: '2px solid var(--red)',
+          padding: '6px 10px',
+          fontSize: 10,
+          color: 'var(--muted)',
+          borderRadius: '0 4px 4px 0',
+        }}>
+          {autoPassReason}
+        </div>
+      )}
 
       {/* Key level callout */}
       {(keyLevelPrice != null || keyLevelExplanation) && (
