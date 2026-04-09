@@ -52,7 +52,7 @@ async function apiFetch(path, options = {}) {
     return await response.json();
   } catch (err) {
     if (err.name === "TypeError" && err.message.includes("fetch")) {
-      throw new Error("Cannot reach the backend. Is it running on https://127.0.0.1:8000?");
+      throw new Error(`Cannot reach the backend at ${API_BASE}.`);
     }
     throw err;
   }
