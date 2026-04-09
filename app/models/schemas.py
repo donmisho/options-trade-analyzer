@@ -689,3 +689,23 @@ class WatchlistSymbol(BaseModel):
 
 class WatchlistResponse(BaseModel):
     symbols: list[str]
+
+
+# ============================================================
+# Named Watchlist Schemas (OTA-444, OTA-445)
+# ============================================================
+
+class _WatchlistNameBase(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+
+
+class NamedWatchlistCreate(_WatchlistNameBase):
+    """Create a new named watchlist."""
+
+
+class NamedWatchlistRename(_WatchlistNameBase):
+    """Rename an existing watchlist."""
+
+
+class NamedWatchlistSymbolAdd(BaseModel):
+    symbol: str

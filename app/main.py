@@ -22,7 +22,9 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -41,6 +43,7 @@ from app.providers.schwab_token_manager import SchwabTokenManager
 from app.api.evaluation_routes import router as evaluation_router, init_evaluation_routes
 from app.api.user_routes import router as user_router
 from app.api.watchlist_routes import router as watchlist_router
+from app.api.named_watchlist_routes import router as named_watchlist_router, init_named_watchlist_routes
 from app.api.entra_auth_routes import router as entra_auth_router
 from app.api.agent_routes import router as agent_router, init_agent_routes
 from app.api.admin_routes import router as admin_router
@@ -49,6 +52,7 @@ from app.api.agents_routes import router as agents_router, init_agents_routes, u
 from app.api.insight_routes import router as insight_router
 from app.api.validation_routes import router as validation_router
 from app.api.dashboard_routes import router as dashboard_router
+from app.api.health_routes import router as health_router, init_health_routes
 from app.providers.ai import AnthropicAdapter, FoundryAdapter
 
 # Dev-only test routes — imported and registered only outside production
@@ -64,6 +68,15 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+_app_startup_start: float | None = None
+
+
+def _log_startup_timing(step: str, start_time: float) -> None:
+    """Log a structured startup timing event (grep-friendly, pipe-separated)."""
+    elapsed_ms = int((time.monotonic() - start_time) * 1000)
+    timestamp = datetime.now(timezone.utc).isoformat()
+    logger.info(f"STARTUP_TIMING | step={step} | elapsed_ms={elapsed_ms} | timestamp={timestamp}")
 
 
 def _install_odbc_if_needed():
@@ -142,7 +155,11 @@ async def lifespan(app: FastAPI):
     secrets manager, and provider factory.
     """
     # --- STARTUP ---
+    global _app_startup_start
+    _app_startup_start = time.monotonic()
     logger.info(f"Starting {settings.app_name} v{settings.app_version}")
+    _log_startup_timing("app_start", _app_startup_start)
+    _log_startup_timing("routers_registered", _app_startup_start)
 
     # 0. Install ODBC Driver 18 if on Azure App Service Linux (needed for Azure SQL)
     _install_odbc_if_needed()
@@ -150,6 +167,7 @@ async def lifespan(app: FastAPI):
     # 1. Initialize database tables
     await init_db()
     logger.info("Database initialized")
+    _log_startup_timing("database_connected", _app_startup_start)
 
     # 2. Initialize secrets manager (Key Vault or .env fallback)
     secrets_manager = SecretsManager(vault_url=settings.azure_keyvault_url)
@@ -163,6 +181,7 @@ async def lifespan(app: FastAPI):
     init_market_routes(provider_factory)
     init_analysis_routes(provider_factory)
     init_position_routes(provider_factory)
+    init_named_watchlist_routes(provider_factory)
     if settings.app_env != "production":
         _init_test_routes(provider_factory)
 
@@ -174,6 +193,7 @@ async def lifespan(app: FastAPI):
     logger.info("Schwab OAuth token manager initialized (background refresh started)")
 
     logger.info(f"Provider factory initialized. Available: {provider_factory.list_providers()}")
+    _log_startup_timing("providers_initialized", _app_startup_start)
 
     # 6. Initialize AI provider for agent routes (SDK-based: triage, deep-dive, followup)
     if settings.ai_provider == "foundry":
@@ -283,7 +303,11 @@ async def lifespan(app: FastAPI):
         )
         init_agents_routes(None)
 
+    # 9. Wire health routes — inject startup time + token manager for uptime/Schwab checks
+    init_health_routes(_app_startup_start, schwab_token_manager)
+
     logger.info(f"{settings.app_name} ready at http://{settings.host}:{settings.port}")
+    _log_startup_timing("startup_complete", _app_startup_start)
 
     yield  # App runs here
 
@@ -332,6 +356,7 @@ app.include_router(schwab_auth_router, prefix="/api/v1")
 app.include_router(evaluation_router, prefix="/api/v1")
 app.include_router(user_router, prefix="/api/v1")
 app.include_router(watchlist_router, prefix="/api/v1")
+app.include_router(named_watchlist_router, prefix="/api/v1")
 app.include_router(entra_auth_router, prefix="/api/v1")
 app.include_router(agent_router, prefix="/api/v1")
 app.include_router(admin_router, prefix="/api/v1")
@@ -340,6 +365,7 @@ app.include_router(agents_router, prefix="/api/v1")
 app.include_router(insight_router, prefix="/api/v1")
 app.include_router(validation_router, prefix="/api/v1")
 app.include_router(dashboard_router, prefix="/api/v1")
+app.include_router(health_router, prefix="/api/v1")
 if settings.app_env != "production":
     app.include_router(test_router, prefix="/api/v1/test")
 

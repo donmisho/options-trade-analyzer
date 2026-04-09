@@ -23,6 +23,7 @@ async def run_migrations(engine: AsyncEngine) -> None:
     async with engine.begin() as conn:
         await _m001_trade_recommendations_add_user_id(conn)
         await _m002_positions_drop_user_fk(conn)
+        await _m003_create_named_watchlists(conn)
 
 
 async def _m001_trade_recommendations_add_user_id(conn) -> None:
@@ -127,6 +128,98 @@ async def _m002_positions_drop_user_fk(conn) -> None:
         logger.info("Migration 002: FK dropped")
     else:
         logger.debug("Migration 002: no FK on positions.user_id — skipping")
+
+
+async def _table_exists(conn, table_name: str) -> bool:
+    """Return True if table_name exists in the current database."""
+    if _is_mssql(conn):
+        result = await conn.execute(text(
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES "
+            "WHERE TABLE_NAME = :t"
+        ), {"t": table_name})
+    else:
+        result = await conn.execute(text(
+            "SELECT COUNT(*) FROM sqlite_master "
+            "WHERE type='table' AND name = :t"
+        ), {"t": table_name})
+    return result.scalar() > 0
+
+
+async def _m003_create_named_watchlists(conn) -> None:
+    """
+    Migration 003: Create watchlists and watchlist_symbols tables (OTA-444).
+
+    SQLAlchemy create_all handles this for fresh installs. This migration
+    is for existing deployed databases that pre-date these tables.
+
+    Idempotent: _table_exists checks before CREATE, so re-running is safe.
+    """
+    is_mssql = _is_mssql(conn)
+
+    # ── 1. Create watchlists table if missing ──────────────────────────
+    if not await _table_exists(conn, "watchlists"):
+        logger.info("Migration 003: creating watchlists table")
+        if is_mssql:
+            await conn.execute(text("""
+                CREATE TABLE watchlists (
+                    id         NVARCHAR(36)  NOT NULL PRIMARY KEY,
+                    name       NVARCHAR(100) NOT NULL,
+                    user_id    NVARCHAR(255) NOT NULL,
+                    is_default BIT           NOT NULL DEFAULT 0,
+                    created_at DATETIME2     DEFAULT GETUTCDATE(),
+                    updated_at DATETIME2     DEFAULT GETUTCDATE()
+                )
+            """))
+        else:
+            await conn.execute(text("""
+                CREATE TABLE watchlists (
+                    id         VARCHAR(36)  NOT NULL PRIMARY KEY,
+                    name       VARCHAR(100) NOT NULL,
+                    user_id    VARCHAR(255) NOT NULL,
+                    is_default INTEGER      NOT NULL DEFAULT 0,
+                    created_at TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
+        await conn.execute(text(
+            "CREATE INDEX ix_watchlists_user ON watchlists (user_id)"
+        ))
+        logger.info("Migration 003: watchlists table created")
+    else:
+        logger.debug("Migration 003: watchlists already present — skipping")
+
+    # ── 2. Create watchlist_symbols table if missing ───────────────────
+    if not await _table_exists(conn, "watchlist_symbols"):
+        logger.info("Migration 003: creating watchlist_symbols table")
+        if is_mssql:
+            await conn.execute(text("""
+                CREATE TABLE watchlist_symbols (
+                    id           NVARCHAR(36) NOT NULL PRIMARY KEY,
+                    watchlist_id NVARCHAR(36) NOT NULL
+                        REFERENCES watchlists(id) ON DELETE CASCADE,
+                    symbol       NVARCHAR(20) NOT NULL,
+                    added_at     DATETIME2    DEFAULT GETUTCDATE(),
+                    CONSTRAINT uq_watchlist_symbol UNIQUE (watchlist_id, symbol)
+                )
+            """))
+        else:
+            await conn.execute(text("""
+                CREATE TABLE watchlist_symbols (
+                    id           VARCHAR(36) NOT NULL PRIMARY KEY,
+                    watchlist_id VARCHAR(36) NOT NULL
+                        REFERENCES watchlists(id) ON DELETE CASCADE,
+                    symbol       VARCHAR(20) NOT NULL,
+                    added_at     TIMESTAMP   DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE (watchlist_id, symbol)
+                )
+            """))
+        await conn.execute(text(
+            "CREATE INDEX ix_watchlist_symbols_watchlist "
+            "ON watchlist_symbols (watchlist_id)"
+        ))
+        logger.info("Migration 003: watchlist_symbols table created")
+    else:
+        logger.debug("Migration 003: watchlist_symbols already present — skipping")
 
 
 def _is_mssql(conn) -> bool:

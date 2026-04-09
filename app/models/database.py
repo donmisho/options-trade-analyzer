@@ -831,3 +831,61 @@ class OptionsChainSnapshot(Base):
     __table_args__ = (
         UniqueConstraint("symbol", "snapshot_date", name="uq_chain_snapshot_symbol_date"),
     )
+
+
+# ─── Named Watchlists (OTA-444) ───────────────────────────────────────────────
+
+
+class NamedWatchlist(Base):
+    """
+    A named watchlist owned by a user. Users can have multiple watchlists.
+
+    One watchlist per user is marked is_default=True and is created lazily
+    on first access. The default watchlist cannot be deleted.
+
+    WHY no FK on user_id: Same SKIP_AUTH dev mode compat reason as UserWatchlist.
+    """
+    __tablename__ = "watchlists"
+
+    id         = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    name       = Column(String(100), nullable=False)
+    user_id    = Column(String(255), nullable=False)
+    is_default = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    symbols = relationship(
+        "WatchlistEntry",
+        back_populates="watchlist",
+        cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        Index("ix_watchlists_user", "user_id"),
+    )
+
+
+class WatchlistEntry(Base):
+    """
+    A symbol inside a named watchlist.
+
+    UNIQUE on (watchlist_id, symbol): duplicate adds are handled at the
+    application layer (return existing row, no error).
+    """
+    __tablename__ = "watchlist_symbols"
+
+    id           = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    watchlist_id = Column(
+        String(36),
+        ForeignKey("watchlists.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    symbol   = Column(String(20), nullable=False)
+    added_at = Column(DateTime, default=datetime.utcnow)
+
+    watchlist = relationship("NamedWatchlist", back_populates="symbols")
+
+    __table_args__ = (
+        UniqueConstraint("watchlist_id", "symbol", name="uq_watchlist_symbol"),
+        Index("ix_watchlist_symbols_watchlist", "watchlist_id"),
+    )
