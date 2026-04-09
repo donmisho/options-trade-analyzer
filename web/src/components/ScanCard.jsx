@@ -8,6 +8,7 @@
 
 import { useState } from 'react';
 import { C, mono } from '../styles/tokens';
+import './ScanCard.css';
 
 const STRATEGY_META = {
   'steady-paycheck': { color: 'var(--strategy-sp)' },
@@ -41,7 +42,6 @@ export default function ScanCard({
   signal, isNew, strategies = [], signalSummary, ivRank, onClick, onRemove,
 }) {
   const [hovered, setHovered] = useState(false);
-  const [removeBtnHovered, setRemoveBtnHovered] = useState(false);
 
   const sig = (signal || 'NEUTRAL').toUpperCase();
   const badge = SIGNAL_BADGE[sig] || SIGNAL_BADGE.NEUTRAL;
@@ -76,16 +76,15 @@ export default function ScanCard({
       {/* ── Remove button (× — hover only, watchlist source only) ── */}
       {onRemove && hovered && (
         <button
+          className="scan-remove-btn"
           onClick={e => { e.stopPropagation(); onRemove(); }}
-          onMouseEnter={() => setRemoveBtnHovered(true)}
-          onMouseLeave={() => setRemoveBtnHovered(false)}
           style={{
             position: 'absolute',
             top: 6,
             right: 8,
             background: 'none',
             border: 'none',
-            color: removeBtnHovered ? '#e6edf3' : '#8b949e',
+            color: C.textDim,
             fontSize: 16,
             lineHeight: 1,
             cursor: 'pointer',

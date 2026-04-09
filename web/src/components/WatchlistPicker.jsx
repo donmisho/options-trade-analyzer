@@ -32,32 +32,30 @@ export default function WatchlistPicker({ selectedSource, onSourceChange }) {
   const [busy, setBusy]                 = useState(false);
   const containerRef                    = useRef(null);
 
-  async function loadSources() {
+  // autoSelect: if true and no source is currently selected, pick the default watchlist.
+  // Called with autoSelect=true only on mount so it uses the initial selectedSource value (null).
+  async function loadSources(autoSelect = false) {
     try {
       const data = await getWatchlistSources();
       setSources(data);
+      if (autoSelect && !selectedSource && data?.watchlists?.length > 0) {
+        const def = data.watchlists.find(w => w.is_default) || data.watchlists[0];
+        onSourceChange({
+          id: def.id,
+          name: def.name,
+          type: 'watchlist',
+          symbolCount: def.symbol_count,
+          isDefault: def.is_default,
+        });
+      }
       return data;
     } catch {
       return null;
     }
   }
 
-  // Initial load
-  useEffect(() => { loadSources(); }, []);
-
-  // Auto-select default watchlist once sources are available and nothing is selected
-  useEffect(() => {
-    if (!selectedSource && sources?.watchlists?.length > 0) {
-      const def = sources.watchlists.find(w => w.is_default) || sources.watchlists[0];
-      onSourceChange({
-        id: def.id,
-        name: def.name,
-        type: 'watchlist',
-        symbolCount: def.symbol_count,
-        isDefault: def.is_default,
-      });
-    }
-  }, [sources]);
+  // Initial load — auto-select default if nothing is selected yet
+  useEffect(() => { loadSources(true); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Close dropdown on outside click
   useEffect(() => {

@@ -1,0 +1,6 @@
+/* ScanCard — scan result card on Security Strategies page */
+
+/* Remove button hover color — replaces JS removeBtnHovered state */
+.scan-remove-btn:hover {
+  color: var(--text) !important;
+}

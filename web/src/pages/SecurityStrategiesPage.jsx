@@ -27,6 +27,9 @@ import WatchlistPicker from '../components/WatchlistPicker';
 import { useToast } from '../components/Toast';
 import { C, mono } from '../styles/tokens';
 
+// Source ID for the "All Positions" built-in scan source (matches backend)
+const ALL_POSITIONS_SOURCE_ID = 'all-positions';
+
 // ─── Skeleton card (loading placeholder) ──────────────────────────────────
 function SkeletonCard() {
   return (
@@ -155,10 +158,7 @@ export default function SecurityStrategiesPage() {
 
       showToast({ type: 'success', message: `${sym} added to watchlist` });
     } catch (err) {
-      const msg = err.message?.includes('not found') || err.message?.includes('400')
-        ? `Symbol not found: ${sym}`
-        : (err.message || `Failed to add ${sym}`);
-      setAddError(msg);
+      setAddError(err.message || `Failed to add ${sym}`);
     }
   }
 
@@ -169,6 +169,7 @@ export default function SecurityStrategiesPage() {
       await removeSymbolFromWatchlist(selectedSource.id, symbol);
       setResults(prev => prev.filter(r => r.symbol !== symbol));
       setSelectedSource(prev => ({ ...prev, symbolCount: Math.max(0, (prev.symbolCount || 1) - 1) }));
+      showToast({ type: 'success', message: `${symbol} removed from watchlist` });
     } catch (err) {
       showToast({ type: 'error', message: `Failed to remove ${symbol}: ${err.message}` });
     }
@@ -214,11 +215,10 @@ export default function SecurityStrategiesPage() {
       if (selectedSource?.type === 'watchlist') {
         const data = await getWatchlistSymbols(selectedSource.id).catch(() => []);
         symbols = (data || []).map(s => (typeof s === 'string' ? s : s.symbol)).filter(Boolean);
-      } else if (selectedSource?.id === 'all-positions') {
+      } else if (selectedSource?.id === ALL_POSITIONS_SOURCE_ID) {
         const resp = await getPositions({ status: 'all' }).catch(() => ({ positions: [] }));
         symbols = [...new Set((resp?.positions || []).map(p => p.symbol))];
       }
-      symbols = [...new Set(symbols)];
     } catch (err) {
       setScanning(false);
       showToast({ type: 'error', message: `Scan failed: ${err.message || 'Could not load symbols'}` });
@@ -234,8 +234,9 @@ export default function SecurityStrategiesPage() {
     const total = symbols.length;
     setProgress({ completed: 0, total });
 
-    // Fan out with max 5 concurrent
+    // Fan out with max 5 concurrent; accumulate final list for localStorage
     let completed = 0;
+    const finalResults = [];
     for (let i = 0; i < symbols.length; i += 5) {
       const chunk = symbols.slice(i, i + 5);
       const settled = await Promise.allSettled(
@@ -249,7 +250,7 @@ export default function SecurityStrategiesPage() {
           const data = result.value;
           const strats = data.strategies || [];
           const ivRaw = strats[0]?.best_trade?.iv_rank ?? strats[0]?.best_trade?.iv;
-          setResults(prev => [...prev, {
+          const item = {
             symbol:        sym,
             price:         data.quote?.price,
             change:        data.quote?.change,
@@ -260,7 +261,9 @@ export default function SecurityStrategiesPage() {
             strategies:    strats,
             signalSummary: data.sma_signal?.summary || '',
             ivRank:        ivRaw,
-          }]);
+          };
+          finalResults.push(item);
+          setResults(prev => [...prev, item]);
         } else {
           setErrors(prev => [...prev, { symbol: sym }]);
         }
@@ -273,12 +276,9 @@ export default function SecurityStrategiesPage() {
     showToast({ type: 'info', message: `Scanned ${total} symbol${total !== 1 ? 's' : ''}` });
 
     // Persist results for instant display on return
-    setResults(prev => {
-      try {
-        localStorage.setItem('ota_scan_results', JSON.stringify({ results: prev, timestamp: Date.now() }));
-      } catch { /* storage full — skip */ }
-      return prev;
-    });
+    try {
+      localStorage.setItem('ota_scan_results', JSON.stringify({ results: finalResults, timestamp: Date.now() }));
+    } catch { /* storage full — skip */ }
   };
 
   // ── Apply client-side filters + sort ──────────────────────────────────
@@ -402,25 +402,23 @@ export default function SecurityStrategiesPage() {
         {/* Add symbol to current watchlist */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginLeft: 'auto' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <div style={{ position: 'relative' }}>
-              <input
-                type="text"
-                placeholder={isWatchlistSource ? 'Add symbol…' : 'Select a watchlist to add'}
-                value={newSymbol}
-                onChange={e => { setNewSymbol(e.target.value.toUpperCase()); setAddError(''); }}
-                onKeyDown={e => e.key === 'Enter' && handleAddSymbol()}
-                disabled={!isWatchlistSource || scanning}
-                title={!isWatchlistSource ? 'Select a watchlist to add symbols' : undefined}
-                style={{
-                  ...selectStyle,
-                  width: isWatchlistSource ? 110 : 160,
-                  padding: '5px 8px',
-                  letterSpacing: '0.04em',
-                  opacity: !isWatchlistSource ? 0.5 : 1,
-                  cursor: !isWatchlistSource ? 'not-allowed' : 'text',
-                }}
-              />
-            </div>
+            <input
+              type="text"
+              placeholder={isWatchlistSource ? 'Add symbol…' : 'Select a watchlist to add'}
+              value={newSymbol}
+              onChange={e => { setNewSymbol(e.target.value.toUpperCase()); setAddError(''); }}
+              onKeyDown={e => e.key === 'Enter' && handleAddSymbol()}
+              disabled={!isWatchlistSource || scanning}
+              title={!isWatchlistSource ? 'Select a watchlist to add symbols' : undefined}
+              style={{
+                ...selectStyle,
+                width: isWatchlistSource ? 110 : 160,
+                padding: '5px 8px',
+                letterSpacing: '0.04em',
+                opacity: !isWatchlistSource ? 0.5 : 1,
+                cursor: !isWatchlistSource ? 'not-allowed' : 'text',
+              }}
+            />
             <button
               onClick={handleAddSymbol}
               disabled={!isWatchlistSource || scanning || !newSymbol.trim()}
