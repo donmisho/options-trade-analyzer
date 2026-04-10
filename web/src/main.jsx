@@ -18,7 +18,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
-import { msalInstance, loginRequest } from './auth/msalConfig';
+import { msalInstance } from './auth/msalConfig';
 import { entraLogin } from './api/client';
 import { SS_STATE_KEY } from './hooks/useStartupProgress';
 import './styles/global.css';
@@ -51,20 +51,25 @@ function updateStartupStateForAuth() {
 
 // MSAL v5 requires initialize() before the app renders.
 msalInstance.initialize().then(async () => {
-  let redirectToLogin = false;
-
   try {
     const result = await msalInstance.handleRedirectPromise();
 
     if (result?.idToken && !localStorage.getItem('ota_token')) {
-      const data = await entraLogin(result.idToken);
-      localStorage.setItem('ota_token', data.access_token);
+      try {
+        const data = await entraLogin(result.idToken);
+        localStorage.setItem('ota_token', data.access_token);
 
-      // Mark auth step complete with elapsed time — Layout picks this up
-      updateStartupStateForAuth();
+        // Mark auth step complete with elapsed time — Layout picks this up
+        updateStartupStateForAuth();
 
-      // Always route to dashboard. Layout's startup (step 5) checks Schwab connection.
-      window.history.replaceState(null, '', '/dashboard');
+        // Always route to dashboard. Layout's startup (step 5) checks Schwab connection.
+        window.history.replaceState(null, '', '/dashboard');
+      } catch (loginErr) {
+        // Backend call failed (cold start, network, CORS, etc.).
+        // Do NOT call loginRedirect() here — that creates an infinite redirect loop.
+        // Mount the app and let RequireAuth route to /login so the user can retry.
+        console.error('[MSAL] entraLogin failed — showing login page for retry:', loginErr);
+      }
 
     } else if (!result) {
       // No redirect in progress. If MSAL has cached accounts but we have no app
@@ -77,23 +82,18 @@ msalInstance.initialize().then(async () => {
       }
     }
   } catch (err) {
-    // handleRedirectPromise failed — stale nonce, expired state, or network error.
-    // Clear all MSAL state so the next loginRedirect starts clean, then
-    // force the user back through interactive login rather than silently
-    // landing on the login screen with broken auth state.
+    // handleRedirectPromise itself failed — stale nonce, expired state, or network error.
+    // Clear MSAL state so the next manual sign-in starts with a fresh PKCE challenge.
+    // Do NOT call loginRedirect() — that creates an infinite loop if the failure persists.
+    // Mount the app and let the user click "Sign in" to retry cleanly.
     console.error('[MSAL] Redirect processing failed:', err);
     try { msalInstance.clearCache(); } catch (clearErr) {
       console.warn('[MSAL] Cache clear failed:', clearErr);
     }
-    redirectToLogin = true;
   }
 
-  if (redirectToLogin) {
-    // Navigate away to interactive login — nothing below this runs.
-    await msalInstance.loginRedirect(loginRequest);
-    return;
-  }
-
+  // Always mount the app. RequireAuth redirects to /login if ota_token is absent.
+  // The login page waits for user interaction — no automatic redirect loop possible.
   createRoot(document.getElementById('root')).render(
     <StrictMode>
       <App />
