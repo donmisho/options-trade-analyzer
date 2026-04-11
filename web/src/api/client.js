@@ -21,7 +21,7 @@ export function setCsrfTokenGlobal(token) {
   window.__OTA_CSRF_TOKEN = token || '';
 }
 
-function getCsrfToken() {
+export function getCsrfToken() {
   return window.__OTA_CSRF_TOKEN || '';
 }
 
@@ -50,7 +50,8 @@ async function apiFetch(path, options = {}) {
     });
 
     if (response.status === 401) {
-      if (window.location.pathname !== '/') {
+      if (window.location.pathname !== '/' && !window.__OTA_REDIRECTING) {
+        window.__OTA_REDIRECTING = true;
         window.location.href = '/';
       }
       throw new Error("Session expired");

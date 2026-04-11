@@ -167,7 +167,6 @@ export default function Layout() {
       // ── Step 4: Verifying user session ────────────────────────────────
       // Cookie-based auth: session is verified by /auth/me (AuthContext).
       // By the time Layout renders, AuthContext has already confirmed auth.
-      await minDelay(400);
       if (cancelled) return;
       completeStep('session');   // auto-activates 'schwab'
 

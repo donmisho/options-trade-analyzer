@@ -1,13 +1,11 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { setCsrfTokenGlobal } from '../api/client';
+import { setCsrfTokenGlobal, getCsrfToken } from '../api/client';
 
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [csrfToken, setCsrfToken] = useState(null);
 
   const checkAuth = useCallback(async () => {
     try {
@@ -17,19 +15,14 @@ export function AuthProvider({ children }) {
       if (response.ok) {
         const data = await response.json();
         setUser(data);
-        setIsAuthenticated(true);
-        setCsrfToken(data.csrf_token);
         setCsrfTokenGlobal(data.csrf_token);
       } else {
         setUser(null);
-        setIsAuthenticated(false);
-        setCsrfToken(null);
         setCsrfTokenGlobal(null);
       }
     } catch (err) {
       console.error('Auth check failed:', err);
       setUser(null);
-      setIsAuthenticated(false);
     } finally {
       setIsLoading(false);
     }
@@ -45,23 +38,24 @@ export function AuthProvider({ children }) {
 
   const logout = useCallback(async () => {
     try {
+      const csrf = getCsrfToken();
       await fetch('/api/v1/auth/logout', {
         method: 'POST',
         credentials: 'include',
-        headers: csrfToken ? { 'X-CSRF-Token': csrfToken } : {},
+        headers: csrf ? { 'X-CSRF-Token': csrf } : {},
       });
     } catch (err) {
       console.error('Logout failed:', err);
     }
-    setUser(null);
-    setIsAuthenticated(false);
-    setCsrfToken(null);
     setCsrfTokenGlobal(null);
+    setUser(null);
     window.location.href = '/';
-  }, [csrfToken]);
+  }, []);
+
+  const isAuthenticated = user !== null;
 
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated, isLoading, csrfToken, login, logout, checkAuth }}>
+    <AuthContext.Provider value={{ user, isAuthenticated, isLoading, login, logout, checkAuth }}>
       {children}
     </AuthContext.Provider>
   );
