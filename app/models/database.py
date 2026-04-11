@@ -889,3 +889,39 @@ class WatchlistEntry(Base):
         UniqueConstraint("watchlist_id", "symbol", name="uq_watchlist_symbol"),
         Index("ix_watchlist_symbols_watchlist", "watchlist_id"),
     )
+
+
+# ─── BFF Session Store (OTA-461) ──────────────────────────────────────────────
+
+
+class UserSession(Base):
+    """
+    Server-side session for the BFF identity management pattern.
+
+    Created when a user completes the OIDC login flow. The session_id is
+    stored in an httponly cookie on the browser — the actual tokens are
+    encrypted and stored here, never exposed to the client.
+
+    csrf_token is returned to the browser via GET /auth/me and must be
+    sent as the X-CSRF-Token header on all state-changing requests.
+    """
+    __tablename__ = "user_sessions"
+
+    id                      = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    session_id              = Column(String(128), unique=True, nullable=False)
+    user_id                 = Column(String(255), nullable=False)
+    provider                = Column(String(50), nullable=False, default="entra")
+    email                   = Column(String(255))
+    display_name            = Column(String(255))
+    access_token_encrypted  = Column(Text)
+    refresh_token_encrypted = Column(Text)
+    id_token                = Column(Text)
+    token_expires_at        = Column(DateTime)
+    csrf_token              = Column(String(128), nullable=False)
+    created_at              = Column(DateTime, default=datetime.utcnow)
+    expires_at              = Column(DateTime, nullable=False)
+    last_active_at          = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_user_sessions_expires_at", "expires_at"),
+    )

@@ -24,6 +24,7 @@ async def run_migrations(engine: AsyncEngine) -> None:
         await _m001_trade_recommendations_add_user_id(conn)
         await _m002_positions_drop_user_fk(conn)
         await _m003_create_named_watchlists(conn)
+        await _m004_create_user_sessions(conn)
 
 
 async def _m001_trade_recommendations_add_user_id(conn) -> None:
@@ -220,6 +221,67 @@ async def _m003_create_named_watchlists(conn) -> None:
         logger.info("Migration 003: watchlist_symbols table created")
     else:
         logger.debug("Migration 003: watchlist_symbols already present — skipping")
+
+
+async def _m004_create_user_sessions(conn) -> None:
+    """
+    Migration 004: Create user_sessions table for BFF identity management (OTA-461).
+
+    Server-side session store for the OIDC confidential client auth pattern.
+    Replaces browser-side MSAL.js token management.
+
+    Idempotent: _table_exists checks before CREATE, so re-running is safe.
+    """
+    if await _table_exists(conn, "user_sessions"):
+        logger.debug("Migration 004: user_sessions already present — skipping")
+        return
+
+    logger.info("Migration 004: creating user_sessions table")
+    is_mssql = _is_mssql(conn)
+
+    if is_mssql:
+        await conn.execute(text("""
+            CREATE TABLE user_sessions (
+                id                      NVARCHAR(36)  NOT NULL PRIMARY KEY,
+                session_id              NVARCHAR(128) NOT NULL UNIQUE,
+                user_id                 NVARCHAR(255) NOT NULL,
+                provider                NVARCHAR(50)  NOT NULL DEFAULT 'entra',
+                email                   NVARCHAR(255),
+                display_name            NVARCHAR(255),
+                access_token_encrypted  NVARCHAR(MAX),
+                refresh_token_encrypted NVARCHAR(MAX),
+                id_token                NVARCHAR(MAX),
+                token_expires_at        DATETIME2,
+                csrf_token              NVARCHAR(128) NOT NULL,
+                created_at              DATETIME2     DEFAULT GETUTCDATE(),
+                expires_at              DATETIME2     NOT NULL,
+                last_active_at          DATETIME2     DEFAULT GETUTCDATE()
+            )
+        """))
+    else:
+        await conn.execute(text("""
+            CREATE TABLE user_sessions (
+                id                      VARCHAR(36)  NOT NULL PRIMARY KEY,
+                session_id              VARCHAR(128) NOT NULL UNIQUE,
+                user_id                 VARCHAR(255) NOT NULL,
+                provider                VARCHAR(50)  NOT NULL DEFAULT 'entra',
+                email                   VARCHAR(255),
+                display_name            VARCHAR(255),
+                access_token_encrypted  TEXT,
+                refresh_token_encrypted TEXT,
+                id_token                TEXT,
+                token_expires_at        TIMESTAMP,
+                csrf_token              VARCHAR(128) NOT NULL,
+                created_at              TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+                expires_at              TIMESTAMP    NOT NULL,
+                last_active_at          TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+
+    await conn.execute(text(
+        "CREATE INDEX ix_user_sessions_expires_at ON user_sessions (expires_at)"
+    ))
+    logger.info("Migration 004: user_sessions table created")
 
 
 def _is_mssql(conn) -> bool:

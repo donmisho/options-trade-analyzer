@@ -70,6 +70,13 @@ class Settings(BaseSettings):
     # --- Entra ID (Azure AD) Authentication ---
     entra_tenant_id: str = ""
     entra_client_id: str = ""
+    entra_cert_thumbprint: str = ""
+    entra_redirect_uri_dev: str = "https://127.0.0.1:8000/api/v1/auth/entra/callback"
+    entra_redirect_uri_prod: str = "https://oa.tmtctech.ai/api/v1/auth/entra/callback"
+
+    # --- BFF Session Management (OTA-461) ---
+    session_ttl_hours: int = 24
+    session_cookie_name: str = "ota_session"
 
     # --- AI Provider ---
     # "anthropic" = direct to Anthropic API (uses ANTHROPIC_API_KEY)

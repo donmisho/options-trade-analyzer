@@ -1,0 +1,289 @@
+"""
+Server-side session management for BFF (Backend-for-Frontend) auth pattern.
+
+WHY: The browser-side MSAL.js approach stored tokens in localStorage, exposing
+them to XSS attacks and causing redirect loops when tokens expired mid-session.
+This server-side session store keeps tokens encrypted in the database — the
+browser only ever holds an httponly cookie with a random session ID.
+
+HOW IT WORKS:
+  1. OIDC callback creates a session → returns session_id in an httponly cookie
+  2. Every request reads the session from DB by session_id from cookie
+  3. Tokens are encrypted at rest using Fernet (AES-128-CBC) with a key from Key Vault
+  4. Token refresh happens server-side using the stored refresh_token — browser never
+     sees the new access token
+
+CLEANUP: Expired sessions are purged fire-and-forget after each new session creation.
+"""
+
+import asyncio
+import logging
+import secrets
+from datetime import datetime, timedelta, timezone
+from typing import Optional, TYPE_CHECKING
+
+import httpx
+from cryptography.fernet import Fernet
+from sqlalchemy import delete, select
+
+from app.core.config import settings
+from app.models.database import UserSession
+from app.models.session import async_session as make_session
+
+if TYPE_CHECKING:
+    from app.auth.client_assertion import ClientAssertionBuilder
+    from app.core.secrets import SecretsManager
+
+logger = logging.getLogger(__name__)
+
+
+class SessionManager:
+    """Server-side session management for BFF auth pattern."""
+
+    def __init__(
+        self,
+        secrets_manager: "SecretsManager",
+        assertion_builder: Optional["ClientAssertionBuilder"] = None,
+    ):
+        self._secrets = secrets_manager
+        self._assertion_builder = assertion_builder
+        self._fernet: Optional[Fernet] = None
+
+    # ------------------------------------------------------------------
+    # Encryption helpers
+    # ------------------------------------------------------------------
+
+    def _get_fernet(self) -> Fernet:
+        if self._fernet is not None:
+            return self._fernet
+
+        key = self._secrets.get("session-encryption-key")
+        if not key:
+            # First run: generate a key and store it in Key Vault
+            raw_key = Fernet.generate_key()
+            key = raw_key.decode()
+            self._secrets.set("session-encryption-key", key)
+            logger.info("SessionManager: Generated new session encryption key")
+
+        self._fernet = Fernet(key.encode() if isinstance(key, str) else key)
+        return self._fernet
+
+    def _encrypt(self, value: str) -> str:
+        return self._get_fernet().encrypt(value.encode()).decode()
+
+    def _decrypt(self, value: str) -> str:
+        return self._get_fernet().decrypt(value.encode()).decode()
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    async def create_session(
+        self,
+        user_profile: dict,
+        tokens: dict,
+        provider: str = "entra",
+    ) -> str:
+        """
+        Create a new server-side session. Returns the session_id.
+
+        user_profile fields: user_id (or oid), email, display_name
+        tokens fields: access_token, refresh_token, id_token, expires_in
+        """
+        session_id = secrets.token_urlsafe(64)
+        csrf_token = secrets.token_urlsafe(32)
+        now = datetime.utcnow()
+        expires_at = now + timedelta(hours=settings.session_ttl_hours)
+
+        access_token_enc = None
+        if tokens.get("access_token"):
+            access_token_enc = self._encrypt(tokens["access_token"])
+
+        refresh_token_enc = None
+        if tokens.get("refresh_token"):
+            refresh_token_enc = self._encrypt(tokens["refresh_token"])
+
+        token_expires_at = None
+        if tokens.get("expires_in"):
+            token_expires_at = now + timedelta(seconds=int(tokens["expires_in"]))
+        elif tokens.get("token_expires_at"):
+            token_expires_at = tokens["token_expires_at"]
+
+        user_id = user_profile.get("user_id") or user_profile.get("oid") or ""
+
+        session = UserSession(
+            session_id=session_id,
+            user_id=user_id,
+            provider=provider,
+            email=user_profile.get("email", ""),
+            display_name=user_profile.get("display_name", ""),
+            access_token_encrypted=access_token_enc,
+            refresh_token_encrypted=refresh_token_enc,
+            id_token=tokens.get("id_token"),
+            token_expires_at=token_expires_at,
+            csrf_token=csrf_token,
+            expires_at=expires_at,
+            last_active_at=now,
+        )
+
+        async with make_session() as db:
+            db.add(session)
+            await db.commit()
+
+        logger.info(
+            f"SessionManager: Created session for {user_profile.get('email')} "
+            f"via {provider} (expires {expires_at.isoformat()})"
+        )
+
+        # Fire-and-forget cleanup — don't block the response
+        asyncio.create_task(self.cleanup_expired())
+        return session_id
+
+    async def get_session(self, session_id: str) -> Optional[dict]:
+        """
+        Look up an active session by session_id.
+
+        Returns None if not found or expired.
+        Updates last_active_at on each successful access.
+        Schedules a background token refresh if the token is within 5 minutes
+        of expiry (fire-and-forget — does not block the request).
+        """
+        now = datetime.utcnow()
+
+        async with make_session() as db:
+            result = await db.execute(
+                select(UserSession)
+                .where(UserSession.session_id == session_id)
+                .where(UserSession.expires_at > now)
+            )
+            session = result.scalar_one_or_none()
+
+            if session is None:
+                return None
+
+            session.last_active_at = now
+
+            # Schedule background token refresh if token is about to expire
+            if session.token_expires_at is not None:
+                token_exp = session.token_expires_at
+                if (token_exp - now) < timedelta(minutes=5):
+                    asyncio.create_task(self.refresh_tokens(session_id))
+
+            await db.commit()
+
+            return {
+                "user_id": session.user_id,
+                "email": session.email or "",
+                "display_name": session.display_name or "",
+                "provider": session.provider,
+                "csrf_token": session.csrf_token,
+                "session_expires_at": session.expires_at.isoformat() + "Z",
+            }
+
+    async def refresh_tokens(self, session_id: str) -> bool:
+        """
+        Server-side token refresh using the stored refresh_token.
+
+        Uses a JWT client assertion signed with the certificate from Key Vault
+        (same credential type as the initial login callback).
+
+        Returns True on success, False on failure. On failure, the session
+        is invalidated — the user must log in again.
+        """
+        if self._assertion_builder is None:
+            logger.warning("SessionManager: No assertion builder configured — cannot refresh tokens")
+            return False
+
+        async with make_session() as db:
+            result = await db.execute(
+                select(UserSession).where(UserSession.session_id == session_id)
+            )
+            session = result.scalar_one_or_none()
+
+            if session is None or not session.refresh_token_encrypted:
+                return False
+
+            try:
+                refresh_token = self._decrypt(session.refresh_token_encrypted)
+                provider_name = session.provider
+            except Exception as e:
+                logger.error(f"SessionManager: Failed to decrypt refresh token: {e}")
+                return False
+
+        try:
+            from app.auth.providers import get_provider_config
+            config = get_provider_config(provider_name, settings)
+            token_url = config["token_url"]
+            client_id = config["client_id"]
+
+            assertion = await self._assertion_builder.build_assertion(token_url)
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    token_url,
+                    data={
+                        "grant_type": "refresh_token",
+                        "refresh_token": refresh_token,
+                        "client_id": client_id,
+                        "client_assertion_type": (
+                            "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
+                        ),
+                        "client_assertion": assertion,
+                    },
+                )
+
+            if resp.status_code != 200:
+                logger.error(
+                    f"SessionManager: Token refresh failed ({resp.status_code}): {resp.text}"
+                )
+                await self.delete_session(session_id)
+                return False
+
+            token_data = resp.json()
+            now = datetime.utcnow()
+
+        except Exception as e:
+            logger.error(f"SessionManager: Token refresh error: {e}")
+            return False
+
+        async with make_session() as db:
+            result = await db.execute(
+                select(UserSession).where(UserSession.session_id == session_id)
+            )
+            session = result.scalar_one_or_none()
+            if session:
+                session.access_token_encrypted = self._encrypt(token_data["access_token"])
+                if "refresh_token" in token_data:
+                    session.refresh_token_encrypted = self._encrypt(token_data["refresh_token"])
+                expires_in = token_data.get("expires_in", 3600)
+                session.token_expires_at = now + timedelta(seconds=int(expires_in))
+                await db.commit()
+
+        logger.info(f"SessionManager: Token refresh succeeded for session {session_id[:8]}...")
+        return True
+
+    async def delete_session(self, session_id: str) -> None:
+        """Hard delete a session row (logout or invalidation)."""
+        async with make_session() as db:
+            await db.execute(
+                delete(UserSession).where(UserSession.session_id == session_id)
+            )
+            await db.commit()
+        logger.info(f"SessionManager: Deleted session {session_id[:8]}...")
+
+    async def cleanup_expired(self) -> int:
+        """Delete all expired sessions. Returns count deleted. Fire-and-forget safe."""
+        now = datetime.utcnow()
+        try:
+            async with make_session() as db:
+                result = await db.execute(
+                    delete(UserSession).where(UserSession.expires_at <= now)
+                )
+                await db.commit()
+                count = result.rowcount or 0
+                if count > 0:
+                    logger.info(f"SessionManager: Cleaned up {count} expired sessions")
+                return count
+        except Exception as e:
+            logger.warning(f"SessionManager: Cleanup failed (non-fatal): {e}")
+            return 0

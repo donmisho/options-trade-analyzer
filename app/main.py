@@ -45,6 +45,10 @@ from app.api.user_routes import router as user_router
 from app.api.watchlist_routes import router as watchlist_router
 from app.api.named_watchlist_routes import router as named_watchlist_router, init_named_watchlist_routes
 from app.api.entra_auth_routes import router as entra_auth_router
+from app.api.identity_routes import router as identity_router, init_identity_routes
+from app.auth.session_manager import SessionManager
+from app.auth.client_assertion import ClientAssertionBuilder
+from app.auth.dependencies import init_session
 from app.api.agent_routes import router as agent_router, init_agent_routes
 from app.api.admin_routes import router as admin_router
 from app.api.position_routes import router as position_router, init_position_routes
@@ -54,6 +58,7 @@ from app.api.validation_routes import router as validation_router
 from app.api.dashboard_routes import router as dashboard_router
 from app.api.health_routes import router as health_router, init_health_routes
 from app.providers.ai import AnthropicAdapter, FoundryAdapter
+from app.middleware.csrf import CSRFMiddleware
 
 # Dev-only test routes — imported and registered only outside production
 if settings.app_env != "production":
@@ -175,6 +180,27 @@ async def lifespan(app: FastAPI):
     # 3. Initialize auth system with secrets
     init_auth(secrets_manager)
     logger.info("Auth system initialized")
+
+    # 3b. Initialize BFF session manager + client assertion builder (OTA-461/462)
+    assertion_builder = None
+    session_manager = None
+    if settings.entra_client_id and settings.azure_keyvault_url:
+        assertion_builder = ClientAssertionBuilder(
+            vault_url=settings.azure_keyvault_url,
+            cert_name="entra-bff-cert",
+            client_id=settings.entra_client_id,
+        )
+        logger.info("BFF: ClientAssertionBuilder initialized (entra-bff-cert)")
+    else:
+        logger.warning(
+            "BFF: ENTRA_CLIENT_ID or AZURE_KEYVAULT_URL not set — "
+            "certificate-based assertion disabled (OIDC login will not work)"
+        )
+
+    session_manager = SessionManager(secrets_manager, assertion_builder)
+    init_session(session_manager)
+    init_identity_routes(session_manager, assertion_builder, secrets_manager)
+    logger.info("BFF: SessionManager initialized")
 
     # 4. Initialize provider factory
     provider_factory = ProviderFactory(secrets_manager)
@@ -345,6 +371,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# CSRF protection for BFF session-cookie auth (OTA-463).
+# Validates X-CSRF-Token header on state-changing requests that carry a session cookie.
+# The session manager is resolved lazily inside the middleware so this can be registered
+# before the lifespan starts (where the session manager is created).
+app.add_middleware(CSRFMiddleware)
+
 
 
 # --- ROUTES ---
@@ -358,6 +390,7 @@ app.include_router(user_router, prefix="/api/v1")
 app.include_router(watchlist_router, prefix="/api/v1")
 app.include_router(named_watchlist_router, prefix="/api/v1")
 app.include_router(entra_auth_router, prefix="/api/v1")
+app.include_router(identity_router, prefix="/api/v1")
 app.include_router(agent_router, prefix="/api/v1")
 app.include_router(admin_router, prefix="/api/v1")
 app.include_router(position_router, prefix="/api/v1")

@@ -22,11 +22,14 @@ impossible to accidentally expose an unprotected endpoint.
 
 from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 from app.auth.service import AuthService
 from app.core.secrets import SecretsManager
 from app.core.config import settings
+
+if TYPE_CHECKING:
+    from app.auth.session_manager import SessionManager
 
 # Bearer token extraction from Authorization header
 security = HTTPBearer(auto_error=False)
@@ -34,6 +37,7 @@ security = HTTPBearer(auto_error=False)
 # These will be initialized in main.py at startup
 _secrets_manager: Optional[SecretsManager] = None
 _auth_service: Optional[AuthService] = None
+_session_manager: Optional["SessionManager"] = None
 
 
 def init_auth(secrets_manager: SecretsManager):
@@ -41,6 +45,17 @@ def init_auth(secrets_manager: SecretsManager):
     global _secrets_manager, _auth_service
     _secrets_manager = secrets_manager
     _auth_service = AuthService(secrets_manager)
+
+
+def init_session(session_manager: "SessionManager"):
+    """Called once at startup to register the BFF session manager."""
+    global _session_manager
+    _session_manager = session_manager
+
+
+def get_session_manager() -> Optional["SessionManager"]:
+    """Return the session manager instance (may be None before startup completes)."""
+    return _session_manager
 
 
 def get_auth_service() -> AuthService:
@@ -141,7 +156,7 @@ async def require_admin(user: dict = Depends(require_write)) -> dict:
 async def require_trader(user: dict = Depends(require_write)) -> dict:
     """
     Trader-level access (but NOT trade execution — that uses per-trade MFA).
-    
+
     Requires: Tier 2 + trader or admin role.
     Used by: provider connection, portfolio viewing, trade previews.
     """
@@ -151,3 +166,53 @@ async def require_trader(user: dict = Depends(require_write)) -> dict:
             detail="Trader access required",
         )
     return user
+
+
+async def get_session_user(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    auth: AuthService = Depends(get_auth_service),
+) -> dict:
+    """
+    Unified auth dependency for the BFF pattern (OTA-463).
+
+    Accepts either:
+      1. BFF session cookie (new browser flow — preferred)
+      2. JWT Bearer token in Authorization header (API clients, backward compat)
+
+    The cookie-based path uses the server-side SessionManager. The JWT path
+    uses the existing AuthService. skip_auth bypasses both for local dev.
+
+    Use this dependency on routes that need to support both the new
+    browser-based session flow and legacy API-client JWT flow.
+    """
+    if settings.skip_auth:
+        return {
+            "sub": "00000000-0000-0000-0000-000000000001",
+            "username": "dev",
+            "role": "admin",
+            "mfa": True,
+        }
+
+    # -- Try BFF session cookie first --
+    # Avoids double-fetch when CSRFMiddleware already validated and stored the session
+    if hasattr(request.state, "bff_session") and request.state.bff_session:
+        return request.state.bff_session
+
+    session_id = request.cookies.get(settings.session_cookie_name)
+    if session_id and _session_manager is not None:
+        session = await _session_manager.get_session(session_id)
+        if session is not None:
+            return session
+
+    # -- Fall back to JWT Bearer (API clients, existing mobile/desktop flows) --
+    if credentials is not None:
+        payload = auth.verify_token(credentials.credentials)
+        if payload is not None:
+            return payload
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Not authenticated",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
