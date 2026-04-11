@@ -2,7 +2,7 @@
  * useStartupProgress — 6-step startup state machine.
  *
  * Persists step state to sessionStorage under 'ota_startup_state' so progress
- * survives the MSAL login redirect (full page reload). Uses wall-clock timestamps
+ * survives full page reloads. Uses wall-clock timestamps
  * (Date.now()) so elapsed times remain correct across the reload.
  *
  * After step 6 ('ready') completes:

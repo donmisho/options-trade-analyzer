@@ -2,22 +2,16 @@
  * App — Root component that wires together routing and shared state.
  *
  * Auth flow:
- *  - No JWT in localStorage → redirect to /login (RequireAuth guard)
- *  - /login → Entra popup → our JWT stored → redirect to /connect or /verticals
- *  - /connect → Schwab OAuth popup → on success → /verticals
- *  - JWT 401 from any API call → apiFetch auto-redirects to /login
+ *  - AuthContext checks /auth/me on mount — shows login page if not authenticated
+ *  - /login → redirect to backend /api/v1/auth/login → Entra → callback → cookie set
+ *  - Cookie is sent automatically via credentials: 'include' on all API calls
+ *  - 401 from any API call → apiFetch auto-redirects to root (shows login page)
  *
  * HOW ROUTING WORKS:
  * React Router v6 nested layout: <Layout> renders the left nav rail + <Outlet>.
- * /login and /connect render outside Layout (no nav chrome).
- *
- * activeStrategy (lives here) controls which config OptionsTerminal uses.
- * Layout's nav items call setActiveStrategy on click.
  */
 
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { MsalProvider } from '@azure/msal-react';
-import { msalInstance } from './auth/msalConfig';
 import { AppProvider } from './context/AppContext';
 import { ToastProvider } from './components/Toast';
 import Layout from './components/Layout';
@@ -26,58 +20,22 @@ import StrategyPage from './pages/StrategyPage';
 import PositionsPage from './pages/PositionsPage';
 import DashboardPage from './pages/DashboardPage';
 import SecurityStrategiesPage from './pages/SecurityStrategiesPage';
-import LoginPage from './pages/LoginPage';
 import BrokerConnectPage from './pages/BrokerConnectPage';
-
-/** Decode the exp claim from a JWT without a library. Returns 0 if unreadable. */
-function getTokenExpiry(token) {
-  try {
-    const payload = JSON.parse(atob(token.split('.')[1]));
-    return payload.exp || 0;
-  } catch {
-    return 0;
-  }
-}
-
-/** Redirect unauthenticated or expired sessions to /login. */
-function RequireAuth({ children }) {
-  const token = localStorage.getItem('ota_token');
-  if (!token) return <Navigate to="/login" replace />;
-
-  const exp = getTokenExpiry(token);
-  if (exp && Date.now() / 1000 > exp) {
-    localStorage.removeItem('ota_token');
-    return <Navigate to="/login" replace />;
-  }
-
-  return children;
-}
 
 export default function App() {
   return (
-    <MsalProvider instance={msalInstance}>
-      <BrowserRouter>
+    <BrowserRouter>
       <ToastProvider>
         <Routes>
-          {/* Public routes — no auth, no AppContext, no Layout chrome */}
-          <Route path="/login" element={<LoginPage />} />
-          <Route
-            path="/connect"
-            element={
-              <RequireAuth>
-                <BrokerConnectPage />
-              </RequireAuth>
-            }
-          />
+          {/* /connect renders outside Layout (no nav chrome) */}
+          <Route path="/connect" element={<BrokerConnectPage />} />
 
-          {/* Protected routes — AppProvider only mounts when authenticated */}
+          {/* All protected routes — AppProvider wraps the layout */}
           <Route
             element={
-              <RequireAuth>
-                <AppProvider>
-                  <Layout />
-                </AppProvider>
-              </RequireAuth>
+              <AppProvider>
+                <Layout />
+              </AppProvider>
             }
           >
             {/* Dashboard — default home */}
@@ -92,14 +50,14 @@ export default function App() {
             <Route path="/puts-calls"    element={<Navigate to="/trades" replace />} />
             <Route path="/long-calls"    element={<Navigate to="/trades" replace />} />
 
-            {/* Security Dashboard — per-symbol strategy scorecard (legacy) */}
+            {/* Security Dashboard — legacy redirect */}
             <Route path="/security/:symbol" element={<Navigate to="/security-strategies" replace />} />
 
             {/* Security Strategies — primary landing page for a symbol */}
             <Route path="/security-strategies" element={<SecurityStrategiesPage />} />
             <Route path="/security-strategies/:symbol" element={<SecurityStrategiesPage />} />
 
-            {/* Strategy pages — per-strategy detail (placeholder, wired in later session) */}
+            {/* Strategy pages */}
             <Route path="/strategies/:key" element={<StrategyPage />} />
 
             {/* Other pages */}
@@ -112,7 +70,6 @@ export default function App() {
           </Route>
         </Routes>
       </ToastProvider>
-      </BrowserRouter>
-    </MsalProvider>
+    </BrowserRouter>
   );
 }

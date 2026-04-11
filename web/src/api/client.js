@@ -16,26 +16,42 @@
 // In local dev, it's empty so the Vite proxy handles /api/* → localhost backend.
 const API_BASE = `${import.meta.env.VITE_API_BASE_URL || ''}/api/v1`;
 
+// ─── CSRF token (set by AuthContext after /auth/me) ───────────────
+export function setCsrfTokenGlobal(token) {
+  window.__OTA_CSRF_TOKEN = token || '';
+}
+
+function getCsrfToken() {
+  return window.__OTA_CSRF_TOKEN || '';
+}
+
 // ─── Helper: Make authenticated requests ──────────────────────────
+// All requests use credentials: 'include' so the ota_session cookie is sent.
+// State-changing requests (POST/PATCH/PUT/DELETE) also include the CSRF token.
 async function apiFetch(path, options = {}) {
   const url = `${API_BASE}${path}`;
-  const token = localStorage.getItem("ota_token");
+  const method = options.method?.toUpperCase() || 'GET';
 
   const headers = {
     "Content-Type": "application/json",
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...options.headers,
   };
 
-  try {
-    const response = await fetch(url, { ...options, headers });
+  if (['POST', 'PATCH', 'PUT', 'DELETE'].includes(method)) {
+    const csrf = getCsrfToken();
+    if (csrf) headers['X-CSRF-Token'] = csrf;
+  }
 
-    // 401 with an existing token means the session expired → kick back to login.
-    // Don't hard-reload if already on /login — that would kill an in-flight MSAL popup.
-    if (response.status === 401 && localStorage.getItem("ota_token")) {
-      localStorage.removeItem("ota_token");
-      if (window.location.pathname !== "/login") {
-        window.location.href = "/login";
+  try {
+    const response = await fetch(url, {
+      ...options,
+      headers,
+      credentials: 'include',
+    });
+
+    if (response.status === 401) {
+      if (window.location.pathname !== '/') {
+        window.location.href = '/';
       }
       throw new Error("Session expired");
     }
@@ -60,23 +76,6 @@ async function apiFetch(path, options = {}) {
     }
     throw err;
   }
-}
-
-
-// ═══════════════════════════════════════════════════════════════════
-// AUTH — Entra ID token exchange
-// ═══════════════════════════════════════════════════════════════════
-
-/**
- * Exchange a Microsoft Entra id_token for our app JWT.
- * Called by LoginPage after a successful MSAL loginPopup.
- * No Authorization header needed — this is the login endpoint.
- */
-export async function entraLogin(entraToken) {
-  return apiFetch("/auth/entra/token", {
-    method: "POST",
-    body: JSON.stringify({ entra_token: entraToken }),
-  });
 }
 
 

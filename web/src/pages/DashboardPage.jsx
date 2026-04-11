@@ -17,7 +17,7 @@
 
 import { useState, useEffect } from 'react';
 import { ResponsiveGridLayout } from 'react-grid-layout';
-import { useMsal } from '@azure/msal-react';
+import { useAuth } from '../context/AuthContext';
 import { WIDGET_REGISTRY } from '../widgets/WidgetRegistry';
 import { getDashboardLayout } from '../api/client';
 import { formatDate } from '../utils/formatDate';
@@ -37,8 +37,8 @@ function getFirstName(fullName) {
 }
 
 export default function DashboardPage() {
-  const { accounts } = useMsal();
-  const name = getFirstName(accounts[0]?.name);
+  const { user } = useAuth();
+  const name = getFirstName(user?.display_name);
 
   const [layout, setLayout]   = useState([]);
   const [widgets, setWidgets] = useState([]);

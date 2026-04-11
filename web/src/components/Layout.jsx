@@ -24,7 +24,7 @@ import StartupProgress from './StartupProgress';
 import { useApp } from '../context/AppContext';
 import { SCORECARD_STRATEGIES } from '../strategy-configs/index';
 import { getSchwabStatus, getSchwabAuthUrl } from '../api/client';
-import { msalInstance } from '../auth/msalConfig';
+import { useAuth } from '../context/AuthContext';
 import { useStartupProgress, SS_STATE_KEY } from '../hooks/useStartupProgress';
 import './Layout.css';
 
@@ -68,6 +68,7 @@ const NAV_ITEMS = [
 
 export default function Layout() {
   const { fetchPrices, activeSymbol, systemVarsPanelOpen, setSystemVarsPanelOpen, strategyAdmin } = useApp();
+  const { logout } = useAuth();
   const { showToast } = useToast();
   const location = useLocation();
   const navigate  = useNavigate();
@@ -164,22 +165,11 @@ export default function Layout() {
       }
 
       // ── Step 4: Verifying user session ────────────────────────────────
-      try {
-        const accounts = msalInstance.getAllAccounts();
-        if (accounts.length > 0) {
-          await Promise.all([
-            msalInstance.acquireTokenSilent({ scopes: ['openid'], account: accounts[0] }),
-            minDelay(400),
-          ]);
-        } else {
-          await minDelay(400);
-        }
-        if (cancelled) return;
-        completeStep('session');   // auto-activates 'schwab'
-      } catch {
-        if (cancelled) return;
-        completeStep('session');   // auth errors handled by route guards — don't block
-      }
+      // Cookie-based auth: session is verified by /auth/me (AuthContext).
+      // By the time Layout renders, AuthContext has already confirmed auth.
+      await minDelay(400);
+      if (cancelled) return;
+      completeStep('session');   // auto-activates 'schwab'
 
       // ── Step 5: Checking Schwab connection ────────────────────────────
       try {
@@ -460,13 +450,7 @@ export default function Layout() {
 
           {/* Sign out */}
           <button
-            onClick={() => {
-              localStorage.removeItem('ota_token');
-              // Clear MSAL session state so the next sign-in doesn't find a
-              // stale cached account and silently fail.
-              try { msalInstance.clearCache(); } catch { /* best-effort */ }
-              window.location.href = '/login';
-            }}
+            onClick={logout}
             style={{
               display: 'flex', alignItems: 'center', gap: 8,
               padding: '8px 16px', background: 'none', border: 'none',
