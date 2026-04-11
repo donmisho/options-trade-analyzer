@@ -380,6 +380,9 @@ app.add_middleware(CSRFMiddleware)
 
 
 # --- ROUTES ---
+# identity_router must be registered BEFORE auth_router: both have GET /auth/me
+# and the session-cookie version (identity) should take precedence during BFF migration.
+app.include_router(identity_router, prefix="/api/v1")
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(market_router, prefix="/api/v1")
 app.include_router(config_router, prefix="/api/v1")
@@ -390,7 +393,6 @@ app.include_router(user_router, prefix="/api/v1")
 app.include_router(watchlist_router, prefix="/api/v1")
 app.include_router(named_watchlist_router, prefix="/api/v1")
 app.include_router(entra_auth_router, prefix="/api/v1")
-app.include_router(identity_router, prefix="/api/v1")
 app.include_router(agent_router, prefix="/api/v1")
 app.include_router(admin_router, prefix="/api/v1")
 app.include_router(position_router, prefix="/api/v1")
