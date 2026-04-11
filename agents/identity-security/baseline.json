@@ -1,0 +1,5 @@
+{
+  "generated_at": null,
+  "note": "Populate after first clean test run: python -m pytest tests/ -v --json-report --json-report-file=baseline.json",
+  "tests": {}
+}

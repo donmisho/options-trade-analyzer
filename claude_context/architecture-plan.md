@@ -1,4 +1,4 @@
-# Options Analyzer — architecture-plan.md (Updated 2026-04-02 16:00)
+# Options Analyzer — architecture-plan.md (Updated 2026-04-11 00:00)
 ## Options Trade Analyzer — Phase 2.6 and Forward
 
 ---
@@ -209,6 +209,19 @@ fields are `source` (PAPER | LIVE) and `status` (FOLLOWING | LIVE | CLOSED).
 This means the Positions page, monitoring agent, and aggregate analytics work
 identically for both. Live execution in Phase 5 flips `source` from PAPER to LIVE
 without touching any other infrastructure.
+
+### Pattern 6: Backend-for-Frontend Identity
+
+All user authentication flows through FastAPI as a confidential OIDC client.
+The React SPA never handles tokens — it uses HttpOnly session cookies set by
+the backend. Adding a new identity provider (Google, GitHub) requires one
+config entry in `app/auth/providers.py` and zero frontend changes.
+
+See `auth-process.md` for full details: flow diagrams, session lifecycle,
+multi-IdP registry, and cross-cloud token management.
+
+**Established flows:** Entra ID (OIDC, certificate-based assertions), Schwab (OAuth 2.0 market data)
+**Future flows:** Google, GitHub, AWS IAM, Google Cloud service accounts
 
 ### Pattern 5: Generic Insight Engine
 
@@ -613,5 +626,6 @@ New SQL tables by phase:
 - **Phase 3.6**: Insight Engine (Generic) + Options Domain ✅
 - **Sprint 4**: Trades page unification — TradesPage.jsx replaces VerticalsPage + LongCallsPage, Sections A-E fully wired, Puts & calls live, per-section Config drawers, SecurityStrategiesPage v3 ✅
 - **Sprint 5**: Integration, polish & cleanup — regression fixes (evaluate payload, pill colors, dropdown, watchlist auto-add, exit scenarios condensed to 5 key rows), scorecard API enriched with quote + SMA signal, scan page caching, CSS custom properties for strategy colors, Strategies column reordered, Section D (ProbabilityMatrix) retired from trade detail frontend, dead files deleted (AskClaudePanel_v2.jsx, Watchlist.jsx), alert → Toast migration, RefreshConfirmDialog consolidated ✅
+- **Identity Management Foundation**: BFF pattern migration — OTA-455 epic ✅
 - **Phase 4**: MCP Integration 🔲
 - **Phase 5**: Live Trading Execution 🔲 (positions/take records intent only — Schwab order entry not yet wired)

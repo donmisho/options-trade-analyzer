@@ -1,4 +1,4 @@
-﻿# Options Analyzer — CLAUDE.md (Updated 2026-04-02 16:00)
+﻿# Options Analyzer — CLAUDE.md (Updated 2026-04-11 00:00)
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -313,6 +313,20 @@ pytest --cov=app                # With coverage
 
 Note: Test infrastructure is minimal. Most validation happens via Swagger UI at /docs.
 
+### Identity Management
+
+```bash
+# Login: navigate to https://localhost:5173 and click "Sign in with Microsoft"
+# Session cookie: ota_session (HttpOnly — not visible in browser JS console)
+# Auth check:
+curl -k -b cookies.txt https://127.0.0.1:8000/api/v1/auth/me
+# CSRF: all POST/PATCH/DELETE require X-CSRF-Token header (value from /auth/me response)
+# Session status:
+curl -k -b cookies.txt https://127.0.0.1:8000/api/v1/auth/session/status
+```
+
+See `claude_context/auth-process.md` for the full auth architecture.
+
 ### Zombie Process Warning (Windows)
 
 Before restarting the backend, always kill existing processes first:
@@ -357,7 +371,10 @@ app/
 │   └── secrets.py                  # SecretsManager (Azure Key Vault + .env fallback)
 ├── auth/
 │   ├── service.py                  # JWT, passwords, TOTP, trade challenges
-│   └── dependencies.py             # require_tier1/2/3 FastAPI dependencies
+│   ├── session_manager.py          # [BFF] Server-side session CRUD, token encryption
+│   ├── providers.py                # [BFF] IdP registry — OIDC config per provider
+│   ├── client_assertion.py         # [BFF] JWT client assertions (cert-based, no secret)
+│   └── dependencies.py             # require_tier1/2/3 + get_session_user FastAPI deps
 ├── models/
 │   ├── database.py                 # SQLAlchemy models
 │   ├── session.py                  # Async DB engine and session factory
@@ -390,8 +407,11 @@ app/
 │       └── domains/
 │           └── options/
 │               └── SKILL.md        # [NEW 3.6] Options-specific vocabulary
+├── middleware/
+│   └── csrf.py                     # [BFF] CSRF Synchronizer Token Pattern middleware
 └── api/
     ├── auth_routes.py
+    ├── identity_routes.py          # [BFF] OIDC login, callback, me, logout, session/status
     ├── market_routes.py
     ├── config_routes.py
     ├── analysis_routes.py
@@ -592,10 +612,25 @@ Every AI agent invocation writes one row. Never deleted.
 
 ## Important Implementation Details
 
+### BFF Auth Pattern
+
+The app uses a Backend-for-Frontend identity pattern. FastAPI is the confidential OIDC
+client. The React SPA holds only an `HttpOnly` session cookie (`ota_session`) — no tokens
+ever reach the browser.
+
+Key files: `app/auth/session_manager.py`, `app/auth/providers.py`, `app/api/identity_routes.py`,
+`app/middleware/csrf.py`.
+
+See `claude_context/auth-process.md` for full details: ADR, flow diagrams, session lifecycle,
+multi-IdP registry, CSRF controls, and troubleshooting guide.
+
+**Never store tokens in localStorage or React state.** Token management is server-side only.
+
 ### Schwab OAuth Flow
 
 Schwab requires HTTPS. Backend must run on https://127.0.0.1:8000 with self-signed certs.
-See SCHWAB-LOGIN-PROCESS.md for full details.
+Schwab tokens are stored server-side in `SchwabTokenManager` (Key Vault in prod).
+See `claude_context/auth-process.md` — Section 5 (Schwab Coexistence) for the flow diagram.
 
 ### Black-Scholes Probability Matrix
 
