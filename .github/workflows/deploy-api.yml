@@ -1,14 +1,7 @@
 name: Deploy API to Azure App Service
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'app/**'
-      - 'requirements.txt'
-      - 'startup.sh'
-      - '.github/workflows/deploy-api.yml'
+  workflow_dispatch:
 
 jobs:
   deploy:
