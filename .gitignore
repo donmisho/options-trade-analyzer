@@ -29,3 +29,7 @@ certs/
 # SSL certificates (self-signed, dev only — NEVER commit to repo)
 cert.pem
 key.pem
+
+# React build output — populated during CI/CD, never committed
+static/
+web/dist/

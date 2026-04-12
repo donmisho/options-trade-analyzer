@@ -414,3 +414,24 @@ async def health_check():
         "app": settings.app_name,
         "version": settings.app_version,
     }
+
+
+# --- Static Frontend (must be LAST — catch-all for SPA routing) ---
+from pathlib import Path
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+
+_static_dir = Path(__file__).resolve().parent.parent / "static"
+
+if _static_dir.is_dir() and (_static_dir / "index.html").exists():
+    # Serve static assets (JS, CSS, images) from /assets/
+    app.mount("/assets", StaticFiles(directory=str(_static_dir / "assets")), name="static-assets")
+
+    # SPA fallback: any non-API path serves index.html
+    @app.get("/{path:path}")
+    async def spa_fallback(path: str):
+        """Serve the React SPA. API routes take priority (registered first)."""
+        file_path = _static_dir / path
+        if file_path.is_file() and ".." not in path:
+            return FileResponse(str(file_path))
+        return FileResponse(str(_static_dir / "index.html"))
