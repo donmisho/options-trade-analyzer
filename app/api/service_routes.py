@@ -10,10 +10,8 @@ one entry here. No scattered conditionals.
 
 import logging
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 from fastapi.responses import JSONResponse
-
-from app.auth.dependencies import get_session_user
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +51,7 @@ _SERVICE_REGISTRY = [
 
 
 @router.get("/status")
-async def services_status(user: dict = Depends(get_session_user)):
+async def services_status():
     """
     Return the list of external services and their live connection state.
 
