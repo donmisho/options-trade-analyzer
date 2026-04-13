@@ -31,6 +31,16 @@ import './Layout.css';
 // Base URL for the backend (strips the /api/v1 suffix from the API client base)
 const BACKEND_ORIGIN = import.meta.env.VITE_API_BASE_URL || '';
 
+// sessionStorage key — set to 'true' when startup finishes, cleared on logout.
+// Prevents the startup sequence from re-running on page reloads within a session.
+const STARTUP_DONE_KEY = 'ota_startup_complete';
+const isStartupAlreadyDone = () => {
+  try { return sessionStorage.getItem(STARTUP_DONE_KEY) === 'true'; } catch { return false; }
+};
+const markStartupDone = () => {
+  try { sessionStorage.setItem(STARTUP_DONE_KEY, 'true'); } catch {}
+};
+
 // ─── Spec-exact colors ────────────────────────────────────────────────────────
 const RAIL_W = 200;
 const TEAL   = '#2dd4bf';
@@ -86,7 +96,8 @@ export default function Layout() {
   } = useStartupProgress();
 
   const [startupVisible, setStartupVisible] = useState(true);
-  const [startupComplete, setStartupComplete] = useState(false);
+  // Initialize from sessionStorage — survives page reloads within the same session.
+  const [startupComplete, setStartupComplete] = useState(isStartupAlreadyDone);
   const [retryCount, setRetryCount] = useState(0);
 
   // ── Schwab status (moved from Header.jsx) ────────────────────────────────
@@ -182,6 +193,9 @@ export default function Layout() {
     const minDelay = ms => new Promise(r => setTimeout(r, ms));
 
     const runStartup = async () => {
+      // If startup already completed this session, skip entirely.
+      if (isStartupAlreadyDone()) { setStartupComplete(true); return; }
+
       // Determine where to start from — read sessionStorage at the top of each run
       // so retry (which clears sessionStorage) starts fresh
       let savedSteps = [];
@@ -279,7 +293,10 @@ export default function Layout() {
       await minDelay(600);
       if (cancelled) return;
 
-      // Fade out then unmount the startup widget
+      // Fade out then unmount the startup widget.
+      // Write the done flag BEFORE the timeout so any reload within the 310ms
+      // fade also sees it and skips startup.
+      markStartupDone();
       setStartupVisible(false);
       setTimeout(() => { if (!cancelled) setStartupComplete(true); }, 310);
     };

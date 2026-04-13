@@ -47,6 +47,8 @@ export function AuthProvider({ children }) {
     } catch (err) {
       console.error('Logout failed:', err);
     }
+    // Clear startup-done flag so next login shows the full startup sequence.
+    try { sessionStorage.removeItem('ota_startup_complete'); } catch {}
     setCsrfTokenGlobal(null);
     setUser(null);
     window.location.href = '/';
