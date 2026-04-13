@@ -63,6 +63,7 @@ if database_url.startswith("mssql+pyodbc://"):
         f"mssql+aioodbc:///?odbc_connect={urllib.parse.quote_plus(_odbc_connect)}",
         echo=settings.debug,
         pool_pre_ping=True,
+        pool_recycle=1800,
         pool_size=5,
         max_overflow=10,
     )
