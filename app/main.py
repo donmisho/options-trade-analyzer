@@ -344,11 +344,6 @@ async def lifespan(app: FastAPI):
     if scheduler is not None:
         scheduler.shutdown(wait=False)
     await provider_factory.clear_cache()
-    # Dispose the connection pool so all physical connections are cleanly closed.
-    # Prevents "connection already closed" errors on restart and ensures Azure SQL
-    # doesn't hold zombie connections against the server's connection limit.
-    from app.models.session import engine as _db_engine
-    await _db_engine.dispose()
     logger.info(f"{settings.app_name} shut down")
 
 
