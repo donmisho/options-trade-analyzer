@@ -239,7 +239,6 @@ export default function Layout() {
 
       // ── Step 5: Connect External Services ─────────────────────────────
       // Load service registry + live connection state from backend.
-      // Then pause until the user clicks Continue.
       let servicesResult = { services: [] };
       try {
         servicesResult = await getServicesStatus(AbortSignal.timeout(8000));
@@ -247,21 +246,30 @@ export default function Layout() {
       if (cancelled) return;
 
       const initialSchwab = servicesResult.services?.find(s => s.id === 'schwab');
-      setSchwabConnected(initialSchwab?.connected === true);
-      setServicesData(servicesResult.services ?? []);
-      setServicesStepActive(true);
+      const alreadyConnected = initialSchwab?.connected === true;
+      const servicesPreviousDone = getStatus('services') === 'complete' || getStatus('services') === 'warning';
 
-      // Pause — resolved by handleServicesContinue, which passes whether Schwab is connected
-      const schwabConnectedOnContinue = await new Promise(resolve => {
-        servicesResolveRef.current = resolve;
-      });
-      if (cancelled) return;
-      setServicesStepActive(false);
+      setSchwabConnected(alreadyConnected);
 
-      if (schwabConnectedOnContinue) {
+      if (alreadyConnected || servicesPreviousDone) {
+        // Schwab already connected (or step was completed on a prior run) — skip the panel.
         completeStep('services');  // auto-activates 'ready'
       } else {
-        warnStep('services', 'Schwab not connected — click the indicator in the sidebar to connect.');
+        // Show the interactive panel and wait for the user to click Continue.
+        setServicesData(servicesResult.services ?? []);
+        setServicesStepActive(true);
+
+        const schwabConnectedOnContinue = await new Promise(resolve => {
+          servicesResolveRef.current = resolve;
+        });
+        if (cancelled) return;
+        setServicesStepActive(false);
+
+        if (schwabConnectedOnContinue) {
+          completeStep('services');  // auto-activates 'ready'
+        } else {
+          warnStep('services', 'Schwab not connected — click the indicator in the sidebar to connect.');
+        }
       }
 
       // ── Step 6: Ready ─────────────────────────────────────────────────
