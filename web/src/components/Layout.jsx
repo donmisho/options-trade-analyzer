@@ -172,7 +172,10 @@ export default function Layout() {
 
       // ── Step 5: Checking Schwab connection ────────────────────────────
       try {
-        const [status] = await Promise.all([getSchwabStatus(), minDelay(400)]);
+        const [status] = await Promise.all([
+          getSchwabStatus(AbortSignal.timeout(8000)),
+          minDelay(400),
+        ]);
         if (cancelled) return;
         const connected = status?.connected === true;
         setSchwabConnected(connected);

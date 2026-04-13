@@ -47,6 +47,7 @@ async function apiFetch(path, options = {}) {
       ...options,
       headers,
       credentials: 'include',
+      signal: options.signal,
     });
 
     if (response.status === 401) {
@@ -362,9 +363,9 @@ export async function removeFavoriteApi(tradeId) {
  * Check Schwab OAuth connection status.
  * Used by Header to show connection indicator.
  */
-export async function getSchwabStatus() {
+export async function getSchwabStatus(signal) {
   try {
-    const data = await apiFetch("/auth/schwab/status");
+    const data = await apiFetch("/auth/schwab/status", { signal });
     return data;
   } catch {
     return { connected: false, error: "Not available" };
