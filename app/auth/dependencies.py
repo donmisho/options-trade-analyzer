@@ -73,18 +73,20 @@ def get_secrets_manager() -> SecretsManager:
 
 
 async def get_current_user(
-    
-    
+    request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     auth: AuthService = Depends(get_auth_service),
 ) -> dict:
     """
-    Extract and validate the JWT from the Authorization header.
-    Returns the token payload (user_id, role, mfa status, etc.)
-    
-    This is the base dependency — it only checks that the token is valid.
-    It does NOT check MFA status or role. Use require_read/require_write
-    for tier-specific checks.
+    Extract and validate the caller's identity.
+
+    Accepts (in priority order):
+      1. BFF session cookie (browser-based OIDC flow — preferred)
+      2. JWT Bearer token in Authorization header (API clients, backward compat)
+
+    Returns a normalized dict with sub, username, role, mfa keys so all
+    downstream dependencies (require_read, require_write, etc.) work regardless
+    of which auth method was used.
     """
 
     if settings.skip_auth:
@@ -95,6 +97,30 @@ async def get_current_user(
             "mfa": True,
         }
 
+    # -- Try BFF session cookie first --
+    # CSRFMiddleware may have already validated the session and cached it in
+    # request.state.bff_session — skip the DB round-trip if so.
+    if hasattr(request.state, "bff_session") and request.state.bff_session:
+        session = request.state.bff_session
+        return {
+            "sub": session["user_id"],
+            "username": session.get("email") or session.get("display_name") or "user",
+            "role": "admin",
+            "mfa": True,  # Entra OIDC login is inherently MFA-verified
+        }
+
+    session_id = request.cookies.get(settings.session_cookie_name)
+    if session_id and _session_manager is not None:
+        session = await _session_manager.get_session(session_id)
+        if session is not None:
+            return {
+                "sub": session["user_id"],
+                "username": session.get("email") or session.get("display_name") or "user",
+                "role": "admin",
+                "mfa": True,
+            }
+
+    # -- Fall back to JWT Bearer (API clients, existing flows) --
     if credentials is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

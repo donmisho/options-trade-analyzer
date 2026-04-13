@@ -53,6 +53,9 @@ async function apiFetch(path, options = {}) {
     if (response.status === 401) {
       if (window.location.pathname !== '/' && !window.__OTA_REDIRECTING) {
         window.__OTA_REDIRECTING = true;
+        // Clear startup flag so the next page load re-runs auth check
+        // instead of silently skipping startup and hitting 401 again.
+        try { sessionStorage.removeItem('ota_startup_complete'); } catch {}
         window.location.href = '/';
       }
       throw new Error("Session expired");
