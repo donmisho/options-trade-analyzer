@@ -600,7 +600,7 @@ export default function Layout() {
 // Renders inside StartupProgress as children during step 5.
 
 function ServicesPanel({ services, schwabConnecting, onConnect, onContinue }) {
-  const active = services.filter(s => s.active);
+  const schwabConnected = services.some(s => s.id === 'schwab' && s.connected);
 
   return (
     <div style={{
@@ -608,22 +608,23 @@ function ServicesPanel({ services, schwabConnecting, onConnect, onContinue }) {
       borderTop: '1px solid var(--border)',
       paddingTop: 10,
     }}>
-      {active.length === 0 ? (
+      {services.length === 0 ? (
         <div style={{
           fontSize: 11, color: 'var(--muted)', fontFamily: 'monospace',
           textAlign: 'center', padding: '6px 0',
         }}>
           No external services configured.
         </div>
-      ) : active.map(svc => (
+      ) : services.map(svc => (
         <div key={svc.id} style={{
           display: 'flex', alignItems: 'center', gap: 10, padding: '5px 0',
+          opacity: svc.active ? 1 : 0.4,
         }}>
           {/* Status dot */}
           <div style={{
             width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
-            backgroundColor: svc.connected ? '#4ade80' : '#f87171',
-            boxShadow: svc.connected ? '0 0 4px rgba(74,222,128,0.4)' : 'none',
+            backgroundColor: !svc.active ? 'var(--muted)' : svc.connected ? 'var(--green)' : 'var(--red)',
+            boxShadow: svc.connected ? '0 0 4px var(--green)' : 'none',
           }} />
           {/* Name + description */}
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -635,8 +636,12 @@ function ServicesPanel({ services, schwabConnecting, onConnect, onContinue }) {
             </div>
           </div>
           {/* Connect / status badge */}
-          {svc.connected ? (
-            <span style={{ fontSize: 10, color: '#4ade80', fontFamily: 'monospace', flexShrink: 0 }}>
+          {!svc.active ? (
+            <span style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'monospace', flexShrink: 0 }}>
+              Inactive
+            </span>
+          ) : svc.connected ? (
+            <span style={{ fontSize: 10, color: 'var(--green)', fontFamily: 'monospace', flexShrink: 0 }}>
               Connected
             </span>
           ) : svc.auth_type === 'oauth' ? (
@@ -653,9 +658,12 @@ function ServicesPanel({ services, schwabConnecting, onConnect, onContinue }) {
         </div>
       ))}
 
-      {/* Continue button */}
+      {/* Continue button — label indicates whether user is skipping Schwab */}
       <div style={{ marginTop: 12, textAlign: 'center' }}>
-        <ServiceContinueButton onClick={onContinue} />
+        <ServiceContinueButton
+          label={schwabConnected ? 'Continue' : 'Continue without Schwab'}
+          onClick={onContinue}
+        />
       </div>
     </div>
   );
@@ -688,7 +696,7 @@ function ServiceConnectButton({ label, disabled, onClick }) {
   );
 }
 
-function ServiceContinueButton({ onClick }) {
+function ServiceContinueButton({ label, onClick }) {
   const [hovered, setHovered] = useState(false);
   return (
     <button
@@ -707,7 +715,7 @@ function ServiceContinueButton({ onClick }) {
         transition: 'border-color 150ms, color 150ms, background 150ms',
       }}
     >
-      Continue →
+      {label} →
     </button>
   );
 }
