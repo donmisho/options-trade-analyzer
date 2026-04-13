@@ -28,7 +28,7 @@ function iconFor(step) {
   }
 }
 
-export default function StartupProgress({ steps, totalElapsed, visible, onRetry }) {
+export default function StartupProgress({ steps, totalElapsed, visible, onRetry, children }) {
   const hasError = steps.some(s => s.status === 'error');
 
   return (
@@ -102,6 +102,13 @@ export default function StartupProgress({ steps, totalElapsed, visible, onRetry 
             </div>
           );
         })}
+
+        {/* Services panel (or other inline content) injected by parent */}
+        {children && (
+          <div style={{ marginTop: 4 }}>
+            {children}
+          </div>
+        )}
 
         {/* Total elapsed timer */}
         <div style={{

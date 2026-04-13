@@ -57,6 +57,7 @@ from app.api.insight_routes import router as insight_router
 from app.api.validation_routes import router as validation_router
 from app.api.dashboard_routes import router as dashboard_router
 from app.api.health_routes import router as health_router, init_health_routes
+from app.api.service_routes import router as service_router, init_service_routes
 from app.providers.ai import AnthropicAdapter, FoundryAdapter
 from app.middleware.csrf import CSRFMiddleware
 
@@ -214,6 +215,7 @@ async def lifespan(app: FastAPI):
     # 5. Initialize Schwab OAuth token manager + proactive background refresh
     schwab_token_manager = SchwabTokenManager(secrets_manager)
     init_schwab_auth_routes(schwab_token_manager)
+    init_service_routes(schwab_token_manager)
     provider_factory.init_schwab(schwab_token_manager)
     token_refresh_task = asyncio.create_task(schwab_token_manager.start_background_refresh())
     logger.info("Schwab OAuth token manager initialized (background refresh started)")
@@ -400,6 +402,7 @@ app.include_router(agents_router, prefix="/api/v1")
 app.include_router(insight_router, prefix="/api/v1")
 app.include_router(validation_router, prefix="/api/v1")
 app.include_router(dashboard_router, prefix="/api/v1")
+app.include_router(service_router, prefix="/api/v1")
 app.include_router(health_router, prefix="/api/v1")
 if settings.app_env != "production":
     app.include_router(test_router, prefix="/api/v1/test")

@@ -377,6 +377,15 @@ export async function getSchwabAuthUrl() {
   return data.authorization_url;
 }
 
+export async function getServicesStatus(signal) {
+  try {
+    const data = await apiFetch("/services/status", { signal });
+    return data;
+  } catch {
+    return { services: [] };
+  }
+}
+
 
 // ═══════════════════════════════════════════════════════════════════
 // AGENT — Claude Trade Evaluation

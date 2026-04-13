@@ -28,7 +28,7 @@ export const STARTUP_STEP_DEFS = [
   { id: 'auth',    label: 'Authenticating with Microsoft' },
   { id: 'backend', label: 'Connecting to backend' },
   { id: 'session', label: 'Verifying user session' },
-  { id: 'schwab',  label: 'Checking Schwab connection' },
+  { id: 'services', label: 'Connect External Services' },
   { id: 'ready',   label: 'Ready' },
 ];
 

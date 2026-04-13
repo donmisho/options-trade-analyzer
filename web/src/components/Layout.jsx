@@ -23,7 +23,7 @@ import SystemVarsPanel from './SystemVarsPanel';
 import StartupProgress from './StartupProgress';
 import { useApp } from '../context/AppContext';
 import { SCORECARD_STRATEGIES } from '../strategy-configs/index';
-import { getSchwabStatus, getSchwabAuthUrl } from '../api/client';
+import { getSchwabStatus, getSchwabAuthUrl, getServicesStatus } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useStartupProgress, SS_STATE_KEY } from '../hooks/useStartupProgress';
 import './Layout.css';
@@ -93,6 +93,13 @@ export default function Layout() {
   const [schwabConnected, setSchwabConnected] = useState(null);
   const schwabPopupRef = useRef(null);
 
+  // ── Services panel (OTA-500) ─────────────────────────────────────────────
+  const [servicesData, setServicesData] = useState([]);
+  const [servicesStepActive, setServicesStepActive] = useState(false);
+  const [schwabConnecting, setSchwabConnecting] = useState(false);
+  const servicesResolveRef = useRef(null);
+  const servicesSchwabPopupRef = useRef(null);
+
   const checkSchwabStatus = useCallback(async () => {
     try {
       const status = await getSchwabStatus();
@@ -101,6 +108,66 @@ export default function Layout() {
       setSchwabConnected(false);
     }
   }, []);
+
+  // ── Services panel handlers (OTA-500) ────────────────────────────────────
+  const handleServicesConnect = useCallback(async (svc) => {
+    if (svc.id !== 'schwab') return;
+    if (servicesSchwabPopupRef.current && !servicesSchwabPopupRef.current.closed) {
+      servicesSchwabPopupRef.current.focus();
+      return;
+    }
+    setSchwabConnecting(true);
+    try {
+      const authUrl = await getSchwabAuthUrl();
+      const popup = window.open(authUrl, 'schwab-login', 'width=600,height=700,menubar=no,toolbar=no');
+      if (!popup || popup.closed) {
+        showToast({ type: 'error', message: 'Popup blocked — please allow popups for this site and try again.' });
+        setSchwabConnecting(false);
+        return;
+      }
+      servicesSchwabPopupRef.current = popup;
+      const pollInterval = setInterval(async () => {
+        try {
+          if (popup?.closed) {
+            clearInterval(pollInterval);
+            servicesSchwabPopupRef.current = null;
+            setSchwabConnecting(false);
+            const st = await getSchwabStatus();
+            const connected = st?.connected === true;
+            setSchwabConnected(connected);
+            setServicesData(prev => prev.map(s => s.id === 'schwab' ? { ...s, connected } : s));
+            return;
+          }
+          const st = await getSchwabStatus();
+          if (st?.connected) {
+            setSchwabConnected(true);
+            setServicesData(prev => prev.map(s => s.id === 'schwab' ? { ...s, connected: true } : s));
+            clearInterval(pollInterval);
+            servicesSchwabPopupRef.current = null;
+            setSchwabConnecting(false);
+            if (!popup.closed) popup.close();
+          }
+        } catch { /* keep polling */ }
+      }, 2000);
+      setTimeout(() => {
+        clearInterval(pollInterval);
+        servicesSchwabPopupRef.current = null;
+        setSchwabConnecting(false);
+      }, 5 * 60 * 1000);
+    } catch (e) {
+      console.error('Schwab connect failed:', e);
+      setSchwabConnecting(false);
+    }
+  }, [showToast]);
+
+  const handleServicesContinue = useCallback(() => {
+    if (servicesResolveRef.current) {
+      // Pass current schwabConnected state to the startup sequence
+      const connected = servicesData.some(s => s.id === 'schwab' && s.connected);
+      servicesResolveRef.current(connected);
+      servicesResolveRef.current = null;
+    }
+  }, [servicesData]);
 
   // Background 5-minute poll — only after startup completes
   useEffect(() => {
@@ -168,26 +235,33 @@ export default function Layout() {
       // Cookie-based auth: session is verified by /auth/me (AuthContext).
       // By the time Layout renders, AuthContext has already confirmed auth.
       if (cancelled) return;
-      completeStep('session');   // auto-activates 'schwab'
+      completeStep('session');   // auto-activates 'services'
 
-      // ── Step 5: Checking Schwab connection ────────────────────────────
+      // ── Step 5: Connect External Services ─────────────────────────────
+      // Load service registry + live connection state from backend.
+      // Then pause until the user clicks Continue.
+      let servicesResult = { services: [] };
       try {
-        const [status] = await Promise.all([
-          getSchwabStatus(AbortSignal.timeout(8000)),
-          minDelay(400),
-        ]);
-        if (cancelled) return;
-        const connected = status?.connected === true;
-        setSchwabConnected(connected);
-        if (connected) {
-          completeStep('schwab');  // auto-activates 'ready'
-        } else {
-          warnStep('schwab', 'Click "Schwab Disconnected" in the sidebar to connect.');
-        }
-      } catch {
-        if (cancelled) return;
-        setSchwabConnected(false);
-        warnStep('schwab', 'Could not reach Schwab. Connect when ready.');
+        servicesResult = await getServicesStatus(AbortSignal.timeout(8000));
+      } catch { /* use empty list — panel still renders with Continue */ }
+      if (cancelled) return;
+
+      const initialSchwab = servicesResult.services?.find(s => s.id === 'schwab');
+      setSchwabConnected(initialSchwab?.connected === true);
+      setServicesData(servicesResult.services ?? []);
+      setServicesStepActive(true);
+
+      // Pause — resolved by handleServicesContinue, which passes whether Schwab is connected
+      const schwabConnectedOnContinue = await new Promise(resolve => {
+        servicesResolveRef.current = resolve;
+      });
+      if (cancelled) return;
+      setServicesStepActive(false);
+
+      if (schwabConnectedOnContinue) {
+        completeStep('services');  // auto-activates 'ready'
+      } else {
+        warnStep('services', 'Schwab not connected — click the indicator in the sidebar to connect.');
       }
 
       // ── Step 6: Ready ─────────────────────────────────────────────────
@@ -488,7 +562,16 @@ export default function Layout() {
                 setStartupVisible(true);
                 setRetryCount(c => c + 1);
               } : null}
-            />
+            >
+              {servicesStepActive && (
+                <ServicesPanel
+                  services={servicesData}
+                  schwabConnecting={schwabConnecting}
+                  onConnect={handleServicesConnect}
+                  onContinue={handleServicesContinue}
+                />
+              )}
+            </StartupProgress>
           ) : (
             <Outlet />
           )}
@@ -502,5 +585,121 @@ export default function Layout() {
         onClose={() => setSystemVarsPanelOpen(false)}
       />
     </div>
+  );
+}
+
+// ─── Services Panel ────────────────────────────────────────────────────────────
+// Renders inside StartupProgress as children during step 5.
+
+function ServicesPanel({ services, schwabConnecting, onConnect, onContinue }) {
+  const active = services.filter(s => s.active);
+
+  return (
+    <div style={{
+      marginTop: 8,
+      borderTop: '1px solid var(--border)',
+      paddingTop: 10,
+    }}>
+      {active.length === 0 ? (
+        <div style={{
+          fontSize: 11, color: 'var(--muted)', fontFamily: 'monospace',
+          textAlign: 'center', padding: '6px 0',
+        }}>
+          No external services configured.
+        </div>
+      ) : active.map(svc => (
+        <div key={svc.id} style={{
+          display: 'flex', alignItems: 'center', gap: 10, padding: '5px 0',
+        }}>
+          {/* Status dot */}
+          <div style={{
+            width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
+            backgroundColor: svc.connected ? '#4ade80' : '#f87171',
+            boxShadow: svc.connected ? '0 0 4px rgba(74,222,128,0.4)' : 'none',
+          }} />
+          {/* Name + description */}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 11, color: 'var(--text)', fontFamily: 'monospace' }}>
+              {svc.name}
+            </div>
+            <div style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'monospace' }}>
+              {svc.description}
+            </div>
+          </div>
+          {/* Connect / status badge */}
+          {svc.connected ? (
+            <span style={{ fontSize: 10, color: '#4ade80', fontFamily: 'monospace', flexShrink: 0 }}>
+              Connected
+            </span>
+          ) : svc.auth_type === 'oauth' ? (
+            <ServiceConnectButton
+              label={schwabConnecting && svc.id === 'schwab' ? 'Connecting…' : 'Connect'}
+              disabled={schwabConnecting && svc.id === 'schwab'}
+              onClick={() => onConnect(svc)}
+            />
+          ) : (
+            <span style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'monospace', flexShrink: 0 }}>
+              Not connected
+            </span>
+          )}
+        </div>
+      ))}
+
+      {/* Continue button */}
+      <div style={{ marginTop: 12, textAlign: 'center' }}>
+        <ServiceContinueButton onClick={onContinue} />
+      </div>
+    </div>
+  );
+}
+
+function ServiceConnectButton({ label, disabled, onClick }) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        padding: '3px 10px',
+        background: 'none',
+        border: `1px solid ${hovered && !disabled ? 'var(--teal)' : 'var(--muted)'}`,
+        borderRadius: 3,
+        color: hovered && !disabled ? 'var(--teal)' : 'var(--muted)',
+        fontFamily: 'monospace',
+        fontSize: 10,
+        cursor: disabled ? 'default' : 'pointer',
+        flexShrink: 0,
+        transition: 'border-color 150ms, color 150ms',
+        opacity: disabled ? 0.6 : 1,
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+function ServiceContinueButton({ onClick }) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        padding: '7px 24px',
+        background: hovered ? 'rgba(45,212,191,0.1)' : 'none',
+        border: `1px solid ${hovered ? 'var(--teal)' : 'var(--border)'}`,
+        borderRadius: 4,
+        color: hovered ? 'var(--teal)' : 'var(--text)',
+        fontFamily: 'monospace',
+        fontSize: 12,
+        cursor: 'pointer',
+        transition: 'border-color 150ms, color 150ms, background 150ms',
+      }}
+    >
+      Continue →
+    </button>
   );
 }
