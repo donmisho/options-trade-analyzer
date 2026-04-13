@@ -106,7 +106,7 @@ async def get_current_user(
             "sub": session["user_id"],
             "username": session.get("email") or session.get("display_name") or "user",
             "role": "admin",
-            "mfa": True,  # Entra OIDC login is inherently MFA-verified
+            "mfa": True,  # Entra OIDC login is inherently MFA-verified (requires Entra to enforce MFA)
         }
 
     session_id = request.cookies.get(settings.session_cookie_name)
