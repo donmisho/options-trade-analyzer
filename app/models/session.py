@@ -48,11 +48,23 @@ if database_url.startswith("mssql+pyodbc://"):
 
     SQL_COPT_SS_ACCESS_TOKEN = 1256  # pyodbc constant for AAD token injection
 
+    # Singleton credential — created once, reused for every token fetch.
+    # WHY: DefaultAzureCredential caches tokens internally until near-expiry.
+    # Creating a new instance per do_connect discards the cache, causing a
+    # synchronous HTTP round-trip to Azure IMDS on every new pool connection,
+    # which blocks the async event loop and exhausts the connection pool.
+    _azure_credential = None
+
     def _get_azure_token_attr() -> dict:
-        """Get a fresh AAD token for Azure SQL and pack it for pyodbc."""
+        """Get an AAD token for Azure SQL and pack it for pyodbc.
+        Uses a module-level credential singleton so the built-in token cache
+        is preserved across calls — no HTTP request unless the token is
+        within 5 minutes of expiry."""
+        global _azure_credential
         from azure.identity import DefaultAzureCredential
-        credential = DefaultAzureCredential()
-        token = credential.get_token("https://database.windows.net/.default")
+        if _azure_credential is None:
+            _azure_credential = DefaultAzureCredential()
+        token = _azure_credential.get_token("https://database.windows.net/.default")
         token_bytes = token.token.encode("UTF-16-LE")
         token_struct = struct.pack(f"<I{len(token_bytes)}s", len(token_bytes), token_bytes)
         return {SQL_COPT_SS_ACCESS_TOKEN: token_struct}
@@ -62,9 +74,12 @@ if database_url.startswith("mssql+pyodbc://"):
     engine = create_async_engine(
         f"mssql+aioodbc:///?odbc_connect={urllib.parse.quote_plus(_odbc_connect)}",
         echo=settings.debug,
-        pool_pre_ping=True,
-        pool_size=5,
-        max_overflow=10,
+        pool_pre_ping=True,       # drop dead connections before handing them out
+        pool_size=10,             # up from 5 — each authed request uses 2-3 sessions
+        max_overflow=20,          # up from 10 — burst headroom
+        pool_recycle=300,         # recycle after 5 min — Azure SQL firewall closes idle
+                                  # connections at ~4 min; recycle prevents stale pool entries
+        pool_timeout=60,          # wait up to 60s for a connection before raising
     )
 
     # WHY do_connect event: connect_args would bake in a token once at startup
