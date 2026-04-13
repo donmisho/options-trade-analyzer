@@ -208,12 +208,14 @@ async def entra_callback(request: Request):
 
     try:
         assertion = await _assertion_builder.build_assertion(token_url)
+        logger.info(f"Identity: Client assertion built, length={len(assertion)}")
     except Exception as e:
-        logger.error(f"Identity: Failed to build client assertion: {e}")
+        logger.error(f"Identity: Failed to build client assertion: {type(e).__name__}: {e}")
         return RedirectResponse(url="/?auth_error=server_error")
 
+    logger.info("Identity: Attempting token exchange with Entra...")
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
             resp = await client.post(
                 token_url,
                 data={
@@ -229,7 +231,9 @@ async def entra_callback(request: Request):
                 },
             )
     except Exception as e:
-        logger.error(f"Identity: Token exchange HTTP error: {e}")
+        logger.error(
+            f"Identity: Token exchange HTTP error: {type(e).__name__}: {e!r}"
+        )
         return RedirectResponse(url="/?auth_error=server_error")
 
     if resp.status_code != 200:
