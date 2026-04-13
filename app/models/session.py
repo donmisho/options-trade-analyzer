@@ -89,7 +89,11 @@ if database_url.startswith("mssql+pyodbc://"):
 
     @event.listens_for(engine.sync_engine, "do_connect")
     def inject_azure_token(dialect, conn_rec, cargs, cparams):
-        cparams["attrs_before"] = _get_azure_token_attr()
+        try:
+            cparams["attrs_before"] = _get_azure_token_attr()
+        except Exception as e:
+            logger.error(f"Azure SQL token acquisition failed: {e}")
+            raise  # propagate — SQLAlchemy will mark the connection attempt as failed
 elif database_url.startswith("sqlite"):
     logger.info("Using SQLite with aiosqlite driver")
 
