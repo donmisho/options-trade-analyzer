@@ -30,6 +30,7 @@ _DEV_TOKEN_FILE = pathlib.Path(".schwab_tokens.json")
 
 class SecretsManager:
     def __init__(self, vault_url: Optional[str] = None):
+        self._vault_url = vault_url  # stored for async methods
         self._cache: dict[str, str] = {}
         self._client = None
 
@@ -155,3 +156,89 @@ class SecretsManager:
     def clear_cache(self):
         """Clear the in-memory cache. Useful for testing."""
         self._cache.clear()
+
+    # ------------------------------------------------------------------
+    # Async variants — use these from async route handlers to avoid
+    # blocking the event loop with synchronous Azure SDK HTTP calls.
+    # Uses azure.identity.aio + azure.keyvault.secrets.aio under the hood.
+    # ------------------------------------------------------------------
+
+    async def get_async(self, name: str, user_id: Optional[str] = None) -> Optional[str]:
+        """
+        Async-safe version of get(). Must be used from async contexts (route handlers,
+        background tasks) to avoid blocking the event loop with Key Vault HTTP calls.
+        """
+        full_name = f"{name}--{user_id}" if user_id else name
+
+        if full_name in self._cache:
+            return self._cache[full_name]
+
+        value = None
+
+        if self._vault_url:
+            try:
+                from azure.identity.aio import DefaultAzureCredential
+                from azure.keyvault.secrets.aio import SecretClient
+
+                credential = DefaultAzureCredential()
+                secret_client = SecretClient(vault_url=self._vault_url, credential=credential)
+                try:
+                    secret = await secret_client.get_secret(full_name)
+                    value = secret.value
+                finally:
+                    await secret_client.close()
+                    await credential.close()
+            except Exception as e:
+                logger.warning(f"SecretsManager: Key Vault get_async({full_name}) failed: {e}")
+
+        if value is None:
+            env_name = full_name.replace("-", "_").upper()
+            value = os.getenv(env_name)
+
+        if value is None and not self._vault_url and name == "schwab-token-data" and _DEV_TOKEN_FILE.exists():
+            try:
+                file_value = _DEV_TOKEN_FILE.read_text().strip()
+                if file_value:
+                    value = file_value
+            except Exception:
+                pass
+
+        if value is not None:
+            self._cache[full_name] = value
+
+        return value
+
+    async def set_async(self, name: str, value: str, user_id: Optional[str] = None) -> bool:
+        """
+        Async-safe version of set(). Must be used from async contexts to avoid
+        blocking the event loop with Key Vault HTTP calls.
+        """
+        full_name = f"{name}--{user_id}" if user_id else name
+
+        if self._vault_url:
+            try:
+                from azure.identity.aio import DefaultAzureCredential
+                from azure.keyvault.secrets.aio import SecretClient
+
+                credential = DefaultAzureCredential()
+                secret_client = SecretClient(vault_url=self._vault_url, credential=credential)
+                try:
+                    await secret_client.set_secret(full_name, value)
+                    self._cache[full_name] = value
+                    logger.info(f"SecretsManager: Updated {full_name} in Key Vault (async)")
+                    return True
+                finally:
+                    await secret_client.close()
+                    await credential.close()
+            except Exception as e:
+                logger.error(f"SecretsManager: Key Vault set_async({full_name}) failed: {e}")
+                return False
+        else:
+            self._cache[full_name] = value
+            if name == "schwab-token-data":
+                try:
+                    _DEV_TOKEN_FILE.write_text(value)
+                except Exception:
+                    pass
+            logger.info(f"SecretsManager: Updated {full_name} in memory cache (dev mode)")
+            return True

@@ -53,26 +53,34 @@ class SessionManager:
     # Encryption helpers
     # ------------------------------------------------------------------
 
-    def _get_fernet(self) -> Fernet:
-        if self._fernet is not None:
-            return self._fernet
+    async def _ensure_fernet(self) -> None:
+        """
+        Initialize the Fernet cipher from Key Vault (async-safe).
 
-        key = self._secrets.get("session-encryption-key")
+        Uses the async Key Vault client so ManagedIdentityCredential HTTP calls
+        run as coroutines instead of blocking the event loop. Must be awaited
+        before any call to _encrypt() or _decrypt().
+        """
+        if self._fernet is not None:
+            return
+
+        key = await self._secrets.get_async("session-encryption-key")
         if not key:
             # First run: generate a key and store it in Key Vault
             raw_key = Fernet.generate_key()
             key = raw_key.decode()
-            self._secrets.set("session-encryption-key", key)
+            await self._secrets.set_async("session-encryption-key", key)
             logger.info("SessionManager: Generated new session encryption key")
 
         self._fernet = Fernet(key.encode() if isinstance(key, str) else key)
-        return self._fernet
 
     def _encrypt(self, value: str) -> str:
-        return self._get_fernet().encrypt(value.encode()).decode()
+        """Encrypt value. Requires _ensure_fernet() to have been awaited first."""
+        return self._fernet.encrypt(value.encode()).decode()
 
     def _decrypt(self, value: str) -> str:
-        return self._get_fernet().decrypt(value.encode()).decode()
+        """Decrypt value. Requires _ensure_fernet() to have been awaited first."""
+        return self._fernet.decrypt(value.encode()).decode()
 
     # ------------------------------------------------------------------
     # Public API
@@ -94,6 +102,8 @@ class SessionManager:
         csrf_token = secrets.token_urlsafe(32)
         now = datetime.utcnow()
         expires_at = now + timedelta(hours=settings.session_ttl_hours)
+
+        await self._ensure_fernet()
 
         access_token_enc = None
         if tokens.get("access_token"):
@@ -204,6 +214,7 @@ class SessionManager:
                 return False
 
             try:
+                await self._ensure_fernet()
                 refresh_token = self._decrypt(session.refresh_token_encrypted)
                 provider_name = session.provider
             except Exception as e:

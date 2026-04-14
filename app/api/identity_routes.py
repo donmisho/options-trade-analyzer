@@ -68,9 +68,14 @@ def _get_redirect_uri() -> str:
     return settings.entra_redirect_uri_dev
 
 
-def _get_signing_key() -> str:
-    """Return the signing key for state parameter serialization."""
-    key = _secrets_manager.get("jwt-signing-key") if _secrets_manager else None
+async def _get_signing_key() -> str:
+    """Return the signing key for state parameter serialization.
+
+    Uses the async Key Vault client to avoid blocking the event loop with
+    synchronous Azure SDK HTTP calls (ManagedIdentityCredential in production
+    makes HTTP calls to the MSI endpoint that block if called synchronously).
+    """
+    key = await _secrets_manager.get_async("jwt-signing-key") if _secrets_manager else None
     if not key:
         # Fallback for local dev without Key Vault
         key = "ota-state-signing-key-dev"
@@ -125,7 +130,7 @@ async def login(request: Request, provider: str = "entra"):
         "provider": provider,
         "nonce": secrets.token_urlsafe(16),
     }
-    serializer = URLSafeTimedSerializer(_get_signing_key())
+    serializer = URLSafeTimedSerializer(await _get_signing_key())
     state = serializer.dumps(state_data, salt="ota-oidc-state")
 
     # Store verifier server-side keyed by state
@@ -181,7 +186,7 @@ async def entra_callback(request: Request):
     # -- 1. Validate state (CSRF protection) --
     from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
     try:
-        serializer = URLSafeTimedSerializer(_get_signing_key())
+        serializer = URLSafeTimedSerializer(await _get_signing_key())
         state_data = serializer.loads(state, salt="ota-oidc-state", max_age=_PKCE_TTL)
     except SignatureExpired:
         logger.warning("Identity: State token expired")
