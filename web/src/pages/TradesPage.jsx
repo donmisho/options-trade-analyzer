@@ -836,12 +836,9 @@ export default function TradesPage() {
     setVertLoading(true);
     setVertError(null);
     try {
-      const data = await analyzeVerticals({
-        symbol: sym,
-        spread_types: ['bull_call', 'bear_put'],
-        max_results: 20,
-        ...config,
-      });
+      const data = await analyzeVerticals(
+        STRATEGY_CONFIGS['verticals'].buildApiParams(sym, config)
+      );
       const underlying = data.underlying_price || 0;
       setVertUnderlying(underlying);
       // Use underlying price to seed chart if quote fetch hasn't already
