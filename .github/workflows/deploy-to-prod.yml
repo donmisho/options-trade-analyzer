@@ -1,0 +1,49 @@
+name: Deploy to production
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_deploy:
+        description: 'Type DEPLOY to confirm production deployment'
+        required: true
+        default: ''
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Validate confirm_deploy input
+        run: |
+          if [ "${{ github.event.inputs.confirm_deploy }}" != "DEPLOY" ]; then
+            echo "::error::confirm_deploy must equal 'DEPLOY'. Got: '${{ github.event.inputs.confirm_deploy }}'"
+            exit 1
+          fi
+          echo "Confirm gate passed. Proceeding to deploy."
+
+      - name: Download latest successful build artifact
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          workflow: build-on-push.yml
+          workflow_conclusion: success
+          name: deployment-package
+
+      - name: Unzip deployment artifact
+        run: unzip deployment-package.zip
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_E4C4A364847749A6AD6322E92E0BC195 }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_8EE24AB74B6F4F9DB8156F19D3827F6E }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_5B5DBA52E1624F41AA812BFD64B8B490 }}
+
+      - name: Deploy to Azure App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: 'options-analyzer-api'
+          slot-name: 'Production'
+          package: .
