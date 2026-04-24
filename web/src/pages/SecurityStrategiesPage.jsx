@@ -30,6 +30,24 @@ import { C, mono } from '../styles/tokens';
 // Source ID for the "All Positions" built-in scan source (matches backend)
 const ALL_POSITIONS_SOURCE_ID = 'all-positions';
 
+/**
+ * Reads strategy overrides from localStorage at scan time (not mount time).
+ * Returns the full strategyOverrides map { [strategyKey]: { dte_min, dte_max, ... } }
+ * or null if missing, empty, or unparseable.
+ * Returning null causes the API client to omit user_config — backend uses STRATEGIES defaults.
+ */
+function readStrategyOverrides() {
+  try {
+    const stored = JSON.parse(localStorage.getItem('analysisConfig') || '{}');
+    const overrides = stored.strategyOverrides;
+    if (!overrides || Object.keys(overrides).length === 0) return null;
+    return overrides;
+  } catch (e) {
+    console.warn('[OTA-512] Failed to parse analysisConfig from localStorage:', e);
+    return null;
+  }
+}
+
 // ─── Skeleton card (loading placeholder) ──────────────────────────────────
 function SkeletonCard() {
   return (
@@ -158,7 +176,7 @@ export default function SecurityStrategiesPage() {
 
       // Trigger single-symbol scorecard and append card
       try {
-        const data = await getStrategyScorecard(sym);
+        const data = await getStrategyScorecard(sym, readStrategyOverrides());
         setResults(prev => [...prev, buildScanResult(sym, data, { isNew: true })]);
       } catch {
         // Symbol added to watchlist but scorecard failed — that's OK
@@ -248,7 +266,7 @@ export default function SecurityStrategiesPage() {
     for (let i = 0; i < symbols.length; i += 5) {
       const chunk = symbols.slice(i, i + 5);
       const settled = await Promise.allSettled(
-        chunk.map(sym => getStrategyScorecard(sym))
+        chunk.map(sym => getStrategyScorecard(sym, readStrategyOverrides()))
       );
 
       settled.forEach((result, idx) => {
