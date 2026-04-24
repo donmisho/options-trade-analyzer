@@ -219,6 +219,24 @@ thesis_invalidators: exactly 2-3 items. These are specific price or event condit
 
 Populate all numeric fields from the trade data provided.
 Always use {} for probability_matrix — the server replaces it.
+
+STRUCTURED INPUT FIELDS (use these verbatim — do not infer alternatives):
+The user message supplies these values in the MARKET CONTEXT and trade data sections:
+- Price: the current underlying price
+- Expected value (total_ev): the pre-computed EV from the exit scenario table; its sign is authoritative
+- SMA-8, SMA-21, SMA-50: the three moving average values supplied in MARKET CONTEXT
+- Trend alignment (ma_alignment): the authoritative SMA positioning signal
+- Max loss probability and max profit probability: from the trade data if provided
+
+NARRATIVE GROUNDING RULES — violations trigger automated re-generation:
+- Expected value: use the total_ev sign verbatim. If total_ev is negative, do NOT describe EV
+  as "positive", "favorable", or cite a positive EV figure. State the negative EV directly.
+- SMA positioning: use the Trend alignment field as authoritative. Do not infer "above" or
+  "below" SMA from price alone — use the supplied alignment value.
+- SMA values: only cite SMA figures from the SMA-8, SMA-21, SMA-50 values in MARKET CONTEXT.
+  Do not invent or approximate SMA values not present in the input.
+- Probabilities: if p_max_loss and p_max_profit are in the trade data, cite them verbatim.
+  Do not round, adjust, or substitute different probability figures.
 ```
 
 ### User Message Template (`DEEP_DIVE_USER`)

@@ -17,6 +17,7 @@ STRUCTURED OUTPUTS:
   Writes every call to agent_run_log.
 """
 
+import asyncio
 import json
 import logging
 import math
@@ -45,6 +46,8 @@ from app.models.schemas import (
 from app.skills.skill_loader import get_skill
 from app.agents.telemetry import invoke_with_tracing
 from app.analysis.black_scholes import compute_probability_matrix
+from app.models.session import async_session
+from app.validators.narrative_grounding import EvaluationFields, validate_narrative
 
 router = APIRouter(prefix="/evaluate", tags=["Trade Evaluation"])
 
@@ -133,6 +136,49 @@ def _assign_verdict(score: float) -> str:
         return "WAIT"
     else:
         return "PASS"
+
+
+async def _log_validator_event(
+    run_id: str,
+    symbol: str,
+    user_id,
+    validator_data: dict,
+    prompt_version: str,
+) -> None:
+    """
+    Fire-and-forget: write a narrative grounding validation failure to agent_run_log.
+    Uses its own session so the caller is never blocked.
+    """
+    try:
+        async with async_session() as db:
+            db.add(AgentRunLog(
+                run_id=run_id,
+                agent_name="narrative_grounding_validator",
+                stage="validate_narrative",
+                symbol=symbol,
+                user_id=user_id,
+                prompt_system="VALIDATOR",
+                prompt_user="VALIDATOR",
+                prompt_version=prompt_version,
+                market_snapshot=validator_data,
+                trade_snapshot={},
+                model_response_raw="",
+                verdict=None,
+                verdict_summary=(
+                    f"validator=narrative_grounding "
+                    f"errors={[e['code'] for e in validator_data.get('errors', [])]} "
+                    f"retry={validator_data.get('retry_triggered')} "
+                    f"fallback={validator_data.get('fallback_used')}"
+                ),
+                otel_trace_id=None,
+                input_tokens=0,
+                output_tokens=0,
+                model_name="none",
+                created_at=datetime.now(timezone.utc),
+            ))
+            await db.commit()
+    except Exception as exc:
+        logger.warning(f"_log_validator_event failed (non-fatal): {exc}")
 
 
 def _build_structured_user_message(
@@ -563,6 +609,112 @@ async def evaluate_structured(
     # Inject the pre-computed probability matrix into every card
     for card in evaluations:
         card.probability_matrix = pm_dict
+
+    # ─── Narrative Grounding Validation (OTA-504) ──────────────────────────────
+    # Validate claude_read prose against computed inputs before emission.
+    # Max 1 retry on failure; template fallback if retry also fails.
+    _raw_sma_8  = request.sma_alignment.get("sma_8")
+    _raw_sma_21 = request.sma_alignment.get("sma_21")
+    _raw_sma_50 = request.sma_alignment.get("sma_50")
+    _raw_ev     = request.trade.get("total_ev") if request.trade else None
+
+    def _to_float(v) -> float:
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return math.nan
+
+    _computed_fields = EvaluationFields(
+        price=request.current_price,
+        sma_8=_to_float(_raw_sma_8),
+        sma_21=_to_float(_raw_sma_21),
+        sma_50=_to_float(_raw_sma_50),
+        expected_value=_to_float(_raw_ev),
+    )
+
+    _grounding_errors = []
+    for card in evaluations:
+        if card.claude_read:
+            _grounding_errors.extend(validate_narrative(card.claude_read, _computed_fields))
+
+    _retry_triggered = False
+    _fallback_used = False
+
+    if _grounding_errors:
+        _retry_triggered = True
+        logger.warning(
+            f"Narrative grounding errors for {request.symbol} (run_id={run_id}): "
+            f"{[e.code for e in _grounding_errors]}"
+        )
+
+        # One retry — same prompt, same context
+        _retry_evals = None
+        try:
+            _retry_result = await adapter.chat(system_prompt, user_message, max_tokens=3000)
+            result["input_tokens"] += _retry_result["input_tokens"]
+            result["output_tokens"] += _retry_result["output_tokens"]
+            _retry_evals = _try_parse_cards(_retry_result["text"])
+        except Exception as _retry_exc:
+            logger.warning(f"Narrative grounding retry call failed: {_retry_exc}")
+
+        if _retry_evals is not None:
+            # Re-apply all post-parse fixes to retry cards
+            for card in _retry_evals:
+                if dte_warning_msg and 8 <= dte <= 13:
+                    card.score = max(0, card.score - 20)
+                    card.dte_warning = dte_warning_msg
+                _correct_verdict = _assign_verdict(card.score)
+                if card.verdict != _correct_verdict:
+                    card.verdict = _correct_verdict
+                if credit_pct_of_width is not None:
+                    card.credit_pct_of_width = credit_pct_of_width
+                if debit_pct_of_width is not None:
+                    card.debit_pct_of_width = debit_pct_of_width
+            for card in _retry_evals:
+                card.probability_matrix = pm_dict
+
+            # Re-validate retry output
+            _retry_errors = []
+            for card in _retry_evals:
+                if card.claude_read:
+                    _retry_errors.extend(validate_narrative(card.claude_read, _computed_fields))
+
+            if not _retry_errors:
+                evaluations = _retry_evals
+                logger.info(f"Narrative grounding retry succeeded for {request.symbol} (run_id={run_id})")
+            else:
+                _fallback_used = True
+                logger.warning(
+                    f"Narrative grounding fallback applied for {request.symbol} (run_id={run_id}): "
+                    f"retry errors={[e.code for e in _retry_errors]}"
+                )
+                for card in evaluations:
+                    card.claude_read = (
+                        "Structured evaluation complete. See computed fields for details. "
+                        "Narrative unavailable this cycle."
+                    )
+        else:
+            _fallback_used = True
+            logger.warning(f"Narrative grounding retry parse failed for {request.symbol} (run_id={run_id})")
+            for card in evaluations:
+                card.claude_read = (
+                    "Structured evaluation complete. See computed fields for details. "
+                    "Narrative unavailable this cycle."
+                )
+
+        # Fire-and-forget observability — never block emission
+        _validator_log = {
+            "validator": "narrative_grounding",
+            "errors": [
+                {"code": e.code, "field": e.field_context, "msg": e.message}
+                for e in _grounding_errors
+            ],
+            "retry_triggered": _retry_triggered,
+            "fallback_used": _fallback_used,
+        }
+        asyncio.create_task(
+            _log_validator_event(run_id, request.symbol, user_id, _validator_log, skill.prompt_version)
+        )
 
     # Write to agent_run_log
     verdicts_summary = ", ".join(f"{c.strategy_key}={c.verdict}" for c in evaluations)
