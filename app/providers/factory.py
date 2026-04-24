@@ -15,13 +15,22 @@ A CSV import might only support AccountProvider. The factory enforces this.
 import logging
 from typing import Optional
 
-from app.providers.base import MarketDataProvider, AccountProvider, TradingProvider
+from app.providers.base import MarketDataProvider, AccountProvider, TradingProvider, ContextSource
 from app.providers.tradier import TradierMarketData
 from app.providers.schwab import SchwabMarketData
+from app.providers.finnhub_earnings import FinnhubEarningsSource
 from app.core.secrets import SecretsManager
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Registry: source_id → factory function (no-arg callable → ContextSource instance)
+# Stateless sources (no injected provider) are registered here directly.
+# Sources that need an injected provider (e.g. SchwabPriceContextSource) are
+# registered at runtime via register_context_source() after the provider is ready.
+CONTEXT_SOURCE_REGISTRY: dict[str, ContextSource] = {
+    "finnhub_earnings": FinnhubEarningsSource(),
+}
 
 # Registry: provider name → (capabilities, factory function)
 # Each factory function takes (secrets_manager, user_id) and returns an adapter
@@ -134,6 +143,36 @@ class ProviderFactory:
             name: info["capabilities"]
             for name, info in PROVIDER_REGISTRY.items()
         }
+
+    def register_context_source(self, source: ContextSource) -> None:
+        """
+        Register a ContextSource instance by its source_id.
+
+        Used at startup to add sources that require injected providers
+        (e.g. SchwabPriceContextSource needs the live SchwabMarketData instance).
+        Stateless sources like FinnhubEarningsSource are pre-registered in
+        CONTEXT_SOURCE_REGISTRY at module load time.
+        """
+        CONTEXT_SOURCE_REGISTRY[source.source_id] = source
+        logger.info(f"ProviderFactory: context source registered — {source.source_id}")
+
+    def get_context_source(self, source_id: str) -> ContextSource:
+        """
+        Return a registered ContextSource by source_id.
+
+        Raises ValueError if the source_id is not registered.
+        """
+        source = CONTEXT_SOURCE_REGISTRY.get(source_id)
+        if source is None:
+            raise ValueError(
+                f"Unknown context source: '{source_id}'. "
+                f"Registered: {list(CONTEXT_SOURCE_REGISTRY.keys())}"
+            )
+        return source
+
+    def list_context_sources(self) -> list[str]:
+        """Return all registered context source IDs."""
+        return list(CONTEXT_SOURCE_REGISTRY.keys())
 
     async def clear_cache(self):
         """Close all cached provider instances."""

@@ -1,9 +1,9 @@
-# Options Analyzer — UI-GUIDANCE.md (Updated 2026-04-02 16:00)
+# Options Analyzer — UI-GUIDANCE.md (Updated 2026-04-11 22:00)
+# Epic: OTA-477 | Feature: OTA-486
 
 ## Options Trade Analyzer — Experience & Visual Contract
 
-_Version 3.2 — 04-02-2026_
-_Replaces: UI-DECISIONS.md (all prior content superseded)_
+_Version 3.3 — 04-11-2026_
 _Reference mockups: `ota-experience-mockups-v3.html` in project root_
 
 This document is the single source of truth for how the Options Trade Analyzer
@@ -12,6 +12,24 @@ architecture-plan.md, CLAUDE.md, inline code comments — this document wins.
 
 Claude Code must read this document before building or modifying any frontend
 component. No exceptions.
+
+## Table of Contents
+
+- [Part 1 — The Trader's Journey](#part-1--the-traders-journey)
+- [Part 2 — Navigation](#part-2--navigation)
+- [Part 3 — Design Tokens](#part-3--design-tokens)
+- [Part 4 — Number & Display Formatting Rules](#part-4--number--display-formatting-rules)
+- [Part 5 — Typography](#part-5--typography)
+- [Part 6 — Shared Components](#part-6--shared-components)
+  - [QuoteBar](#quotebar)
+  - [SMA Chart](#sma-chart)
+  - [ResultsTable](#resultstable)
+  - [Trade type badges](#trade-type-badges)
+- [Part 7 — Buttons](#part-7--buttons)
+- [Part 8 — Claude's Voice: Summary Advice & Strategy Tags](#part-8--claudes-voice-summary-advice--strategy-tags)
+- [Part 9 — Claude API Cost Guardrails](#part-9--claude-api-cost-guardrails)
+- [Part 10 — Screen Specifications](#part-10--screen-specifications)
+- [Part 11 — Rules for Claude Code](#part-11--rules-for-claude-code)
 
 ---
 
@@ -138,18 +156,20 @@ These apply everywhere, no exceptions.
 |-----------|--------|---------|-------|
 | Score | ##.00 | 71.00 | Always 0-100 scale |
 | Probability (computed) | ##.00% | 47.00%, 4.85% | Two decimal places always |
-| IV / IV Rank | ##.00% | 27.80%, 52.00% | Two decimal places always |
+| IV / IV Rank | ##.00% | 27.80%, 52.00% | Stored as decimal, display ×100. Two decimal places always |
 | Monetary value | ##.00 | 634.00, 3.66 | No $ prefix. Use .toFixed(2) |
 | Configuration % | ##% | 50%, 40% | No decimals (user-set whole numbers) |
 | Configuration multiplier | #× | 2× | |
 | Date | mm-dd-yyyy | 04-17-2026 | Via formatDate(). Never locale strings |
 | Date with time | mm-dd-yyyy hh:mm | 03-30-2026 21:53 | |
-| Health grade | Single letter | A, B, C, D, F | |
+| Health grade | Single letter | A, B, C, D, F | Color: A=green, B=teal, C=yellow, D=orange, F=red |
 | Delta | 0.#### | 0.1010 | Four decimal places |
 | Theta | ±0.#### | -0.0030 | Four decimal places, sign shown |
 | Ratio | #.##:1 | 1.73:1 | Two decimal places |
 | P&L display | ±##.00 (±##.00%) | +25.00 (+8.77%) | Sign always shown |
-| Trade type display | Title Case, spaces | Bear Put Debit | Never raw enums with underscores |
+| Trade type display | Title Case, spaces | Bear Put Debit | Never raw enums with underscores. Bull=green, Bear=red |
+| Position source | Title Case | Paper, Live | Never uppercase "PAPER"/"LIVE" |
+| Strategy pills | 2-letter abbreviation | SP, WG, TR, LT | With tooltip showing full name. CSS custom property colors |
 
 ---
 
@@ -187,6 +207,13 @@ CHG % · Day Range · 52W Range · Volume · Rel Vol · Earnings Date (if ≤60 
 amber if ≤14 days) · Dividend Date (if ≤60 days)
 
 Background: var(--bg2). Border: 1px solid var(--border). Border-radius: 4px.
+
+**Field rules:**
+- No `$` prefix on any value — house style
+- Earnings and dividend: if null or >60 days away, do not render the field at all
+- Earnings within 14 days: amber highlight badge — risk signal for options positions
+- This component is the ONLY place QuoteBar rendering logic lives
+- Every page that needs it imports `<QuoteBar />` — zero inline reimplementations
 
 ### SMA Chart
 Candlestick chart with configurable moving averages. Moving average periods and
@@ -302,21 +329,10 @@ strategy's color while the rest of the text stays white:
 
 | Abbr | Full name | Background | Text color |
 |------|-----------|------------|------------|
-| SP | Steady Paycheck | rgba(245,158,11,0.12) | var(--strategy-sp) |
-| WG | Weekly Grind | rgba(74,222,128,0.12) | var(--strategy-wg) |
-| TR | Trend Rider | rgba(96,165,250,0.12) | var(--strategy-tr) |
-| LT | Lottery Ticket | rgba(192,132,252,0.12) | var(--strategy-lt) |
-
-Strategy pill colors are **CSS custom properties** declared in the global stylesheet
-(`web/src/index.css`):
-```css
---strategy-sp: #f59e0b;   /* amber — Steady Paycheck */
---strategy-wg: #4ade80;   /* green — Weekly Grind */
---strategy-tr: #60a5fa;   /* blue  — Trend Rider */
---strategy-lt: #c084fc;   /* purple — Lottery Ticket */
-```
-Never use hardcoded hex or var(--amber) etc. for strategy colors — always use
-these dedicated custom properties so all pill instances stay in sync.
+| SP | Steady Paycheck | rgba(245,158,11,0.12) | var(--amber) |
+| WG | Weekly Grind | rgba(74,222,128,0.12) | var(--green) |
+| TR | Trend Rider | rgba(96,165,250,0.12) | var(--blue) |
+| LT | Lottery Ticket | rgba(192,132,252,0.12) | var(--purple) |
 
 Font: 9px bold. Padding: 2px 5px. Border-radius: 3px. Margin: 0 1px.
 A trade can show multiple pills.
@@ -324,7 +340,7 @@ A trade can show multiple pills.
 Tooltip on hover: var(--bg3) bg, 1px var(--border), 9px normal, 3px 8px padding.
 
 Strategy colors are consistent everywhere — pills, scoring weight bars, and
-strategy names inside advice badges all use the same CSS custom property per strategy.
+strategy names inside advice badges all use the same color per strategy.
 
 ---
 
@@ -348,32 +364,24 @@ strategy names inside advice badges all use the same CSS custom property per str
 
 ## Part 10 — Screen Specifications
 
-### Screen 1: Security Strategies (Watchlist)
+### Screen 1: Security Strategies (Scan)
 **Route:** /security-strategies · **No Config drawer.**
 
-- "Add Symbol" typeahead at top: same SymbolSearch component as TradesPage. Selecting
-  a symbol adds it to the watchlist (AppContext + localStorage). Never call it "scan list."
 - Filter bar: Source, Signal, Min score, Sort, "Scan now"
 - Card grid (min 280px): symbol + signal + NEW badge, price line, 4 strategy
   score bars (##.00 format), signal summary (italic muted, IV rank as ##.00%)
-- Signal (BULLISH/BEARISH/NEUTRAL) is **server-side computed** — returned as part of
-  the scorecard response from the backend. Frontend does not compute signal.
 - Click card → /trades?symbol={symbol}
-- "Scan now" runs scorecard for all watchlist symbols — not a fixed list, not a filtered
-  list. Uses the user's current watchlist (AppContext) as the symbol universe.
 
 ### Screen 2: Trades
 **Route:** /trades, /trades?symbol=XXX, /trades?strategy=XXX
-**File:** `TradesPage.jsx` — Sprint 4 unified terminal (VerticalsPage.jsx and LongCallsPage.jsx deleted)
+**File:** `TradesPage.jsx` — unified terminal
 
-- Symbol search (SymbolSearch component). **Searching any symbol auto-adds it to the
-  watchlist** (AppContext). No separate "add" action needed — the search IS the add.
-- QuoteBar, SMA chart (configurable)
+- Symbol search, QuoteBar, SMA chart (configurable)
 - Collapsible sections per trade structure, each with own ⚙ Config drawer (functional — Verticals→SP+WG, Puts & calls→TR+LT)
 - Row: chevron → score → spread/strike → type badge → data → pills (no row numbers)
 - Type badges use clean display names with bull=green / bear=red coloring
 - Sections: Vertical spreads (live — POST /api/v1/analyze/verticals), Puts & calls (live — POST /api/v1/analyze/long-calls), Iron condors (coming soon)
-- Click row → trade detail expansion (Sections A-C, E)
+- Click row → trade detail expansion (Sections A-E)
 
 ### Trade Detail Expansion
 Teal top border (2px solid rgba(45,212,191,0.35)).
@@ -381,13 +389,11 @@ Teal top border (2px solid rgba(45,212,191,0.35)).
 **A — Trade header:** Type badge (clean name, directional color) + context label +
 strikes, expiry, DTE, entry, max P/L, breakeven, R:R, triggers, time exit
 
-**B — Exit scenario table:** Default view shows **5 key rows only**:
-STOP · MONITOR LOSS · BREAK EVEN · MONITOR PROFIT · MAX PROFIT.
-"Show full analysis ▼" toggle expands to all $5-increment rows, with those 5
-key rows visually anchored in sequence among the full set (not duplicated — same rows,
-just visible in context). Loss zone: rgba(248,113,113,0.03). Footer: Total EV.
+**B — Exit scenario table:** $5 increments. Loss zone: rgba(248,113,113,0.03). Footer: Total EV.
 
 **C — Outcome summary:** P(max profit), P(breakeven+), P(partial), P(max loss), EV, EV % risk. Badge: POSITIVE/NEGATIVE EV.
+
+**D — Probability matrix:** Color zones, cumulative prob, highlighted rows. Live — ProbabilityMatrix component, B-S data from POST /api/v1/analyze/probability-matrix.
 
 **E — Claude's Read:** Verdict badge + summary advice (white badge, strategy name in color) + detailed analysis + key level + actions (Follow / Take Position / follow-up / Discard). Fully wired — evaluate → structured verdict → Follow/Take Position records to positions table → follow-up Q&A loop.
 
@@ -395,9 +401,7 @@ just visible in context). Loss zone: rgba(248,113,113,0.03). Footer: Total EV.
 **Route:** /strategies/{key}
 
 - Header, parameters (##% for config percentages), weights (read-only)
-- "Find trades →" → navigates to /trades?strategy={key} which runs the analysis
-  against **all watchlist symbols** (AppContext). Not a single symbol. The Trades page
-  consumes the `?strategy=` param to pre-filter results rows by strategy fit.
+- "Find trades →" → /trades?strategy={key}
 - Strategy positions (filtered, Refresh all with cost guardrail)
 
 ### Screen 4: Positions
@@ -413,32 +417,7 @@ just visible in context). Loss zone: rgba(248,113,113,0.03). Footer: Total EV.
 
 ---
 
-## Part 11 — What We Retired
-
-| Retired | Replaced by |
-|---------|------------|
-| VerticalsPage.jsx | Deleted — Trades "Vertical spreads" section |
-| LongCallsPage.jsx / NakedOptionsPage.jsx | Deleted — Trades "Puts & calls" section |
-| 4-column expansion panel | Trade detail Sections A-E |
-| Generic composite score | Strategy-specific scores |
-| Scoring weight sliders on Scan | Backend strategy definitions |
-| Config drawer on Scan page | Removed |
-| Config presets (Balanced/etc.) | Per-strategy parameters |
-| AskClaudePanel | Claude's Read (Section E) |
-| AskClaudePanel_v2.jsx | Deleted — file removed from codebase |
-| FavoritesPage | Positions page |
-| Top horizontal nav | Left rail |
-| Full-name strategy tags | Abbreviated pills with tooltip |
-| Row numbers in tables | Removed (chevron + score leads) |
-| Purple badge for Claude advice | White outlined badge |
-| Raw enum type names (BEAR_PUT_DEBIT) | Clean badge display (Bear Put Debit) |
-| Watchlist sidebar panel | Positions page + watchlist auto-add on TradesPage search |
-| ProbabilityMatrix display (frontend) | Removed from trade detail (Section D retired); backend B-S computation retained, passed to Claude as context |
-| Watchlist.jsx | Deleted — file removed from codebase |
-
----
-
-## Part 12 — Rules for Claude Code
+## Part 11 — Rules for Claude Code
 
 1. Read this document before any frontend work.
 2. Never add a fifth primary nav item.
@@ -457,8 +436,5 @@ just visible in context). Loss zone: rgba(248,113,113,0.03). Footer: Total EV.
 15. Claude API: confirmation when refreshing >1 position. One daily auto-refresh. No timers.
 16. Mockups in `ota-experience-mockups-v3.html` are visual ground truth.
 17. Type badges: clean display names (title case, spaces, no underscores). Bull = green, Bear = red. Frontend transforms enum at render time.
-18. Strategy pill colors: always `var(--strategy-sp/wg/tr/lt)` — never `var(--amber)` or hardcoded hex. Properties declared in `web/src/styles/global.css`.
-19. Watchlist: searching on TradesPage auto-adds to watchlist. SecurityStrategiesPage has "Add Symbol" typeahead (same component). Never say "scan list."
-20. Exit scenario table: default 5 key rows (STOP · MONITOR LOSS · BREAK EVEN · MONITOR PROFIT · MAX PROFIT). Toggle expands to full $5-increment table with the 5 rows in-place.
-21. ScanCard signal (BULLISH/BEARISH/NEUTRAL): computed server-side, returned in scorecard response. Frontend does not compute it.
-22. "Find trades →" on StrategyPage: scans all watchlist symbols. Never requires a single symbol first.
+18. Health grades: single letter (A/B/C/D/F) with color token per grade.
+19. Position source labels: "Paper" / "Live" — never uppercase.

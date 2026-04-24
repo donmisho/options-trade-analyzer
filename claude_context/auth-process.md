@@ -1,53 +1,64 @@
-# Options Analyzer — auth-process.md (Updated 2026-04-11 00:00)
+# Options Analyzer — auth-process.md (Updated 2026-04-12 10:00)
+# Epic: OTA-477 | Feature: OTA-482
 
-## Architecture Decision Record — BFF Identity Management
+## Table of Contents
 
-**Status:** Accepted
-**Decision Date:** 2026-04 (OTA-455 epic)
+- [ADR-1: BFF Identity Management](#adr-1-bff-identity-management)
+- [ADR-2: Unified Deployment](#adr-2-unified-deployment)
+- [Flow Diagrams](#flow-diagrams)
+- [Entra App Registration](#entra-app-registration)
+- [Session Lifecycle](#session-lifecycle)
+- [Multi-IdP Provider Registry](#multi-idp-provider-registry)
+- [Identity Credential Management](#identity-credential-management)
+- [Deployment Architecture](#deployment-architecture)
+- [Security Controls](#security-controls)
+  - [CSRF (Synchronizer Token Pattern)](#csrf-synchronizer-token-pattern)
+  - [Cookie Security Flags](#cookie-security-flags)
+  - [Token Encryption](#token-encryption)
+  - [OAuth State Parameter](#oauth-state-parameter)
+  - [PKCE (Proof Key for Code Exchange)](#pkce-proof-key-for-code-exchange)
+- [Troubleshooting](#troubleshooting)
+- [Files Reference](#files-reference)
 
-### Context
+---
 
-The original auth approach used MSAL.js as a browser-side OIDC client. Tokens were stored
-in localStorage and the SPA managed the full redirect flow via `handleRedirectPromise`.
-This caused recurring production failures:
+## ADR-1: BFF Identity Management
 
-- Redirect loops when `handleRedirectPromise` was called out of order or concurrently
-- Stale localStorage tokens after browser restarts or tab duplication
-- Timing issues between MSAL initialization and React rendering
-- Each new identity provider (Google, GitHub, AWS) would require additional browser-side SDK work
-- Tokens in localStorage are accessible to any JavaScript running in the page (XSS surface)
+**Decision Date:** 2026-04 (OTA-455)
+**Change Log:** Initial decision
 
-### Decision
+FastAPI acts as a confidential OIDC client using the Backend-for-Frontend (BFF)
+pattern.
 
-Backend-for-Frontend (BFF) pattern. FastAPI acts as a confidential OIDC client.
-
-- The React SPA never handles, stores, or sees tokens
+- The React SPA never handles, stores, or sees identity tokens
 - The backend exchanges authorization codes for tokens server-to-server
 - Tokens are encrypted at rest in Azure SQL (`user_sessions` table) using Fernet (AES-128-CBC)
 - The browser holds only an `HttpOnly` session cookie with a random 512-bit session ID
 - CSRF protection is provided by the Synchronizer Token Pattern (`X-CSRF-Token` header)
-
-**Credential type:** Entra uses certificate-based client assertions. Tenant policy blocks client
-secrets for confidential apps. The backend signs a JWT using a private key from the Key Vault
-certificate `entra-bff-cert`. Entra verifies it against the uploaded public key.
-
-### Alternatives Considered
-
-1. **Fix MSAL.js redirect bugs** — Tactical fix only. Root cause (tokens in browser, race conditions
-   in `handleRedirectPromise`) remains. Would recur on every Entra SDK update. Entra-only.
-2. **Third-party auth gateway (Auth0, Okta)** — Unnecessary cost (~$2/MAU). Solves browser-side
-   token management but adds an external dependency for all auth decisions. Doesn't solve the
-   multi-IdP server-side token coexistence problem (Schwab, Azure AI Foundry).
-
-### Consequences
-
+- Entra uses certificate-based client assertions (`entra-bff-cert` in Key Vault). Tenant policy blocks client secrets for confidential apps.
+- Adding a new IdP requires one config entry in `app/auth/providers.py` and zero frontend changes
 - All auth complexity lives server-side. Frontend auth code is ~50 lines total.
-- Adding a new IdP (Google, GitHub) requires one config entry in `app/auth/providers.py` and zero
-  frontend changes.
-- Session cookie requires CSRF protection — implemented via `CSRFMiddleware` and the
-  Synchronizer Token Pattern.
-- Tokens are never visible in browser DevTools, network logs, or error reports.
 - Session state is in Azure SQL — sessions survive server restarts and scale-out.
+
+This document covers **user identity** only. External service credentials (Schwab,
+Azure AI Foundry, future data providers) are managed by provider adapters under
+Pattern 1 in `architecture-plan.md`.
+
+---
+
+## ADR-2: Unified Deployment
+
+**Decision Date:** 2026-04 (OTA-455)
+**Change Log:** Initial decision
+
+FastAPI serves both the API (`/api/v1/*`) and the React SPA (from `static/`
+directory) from a single App Service on a single domain (`oa.tmtctech.ai`).
+Cloudflare provides CDN and edge caching. One GitHub Actions workflow handles
+build and deploy.
+
+- Same-origin cookies work natively — no proxy or CORS workarounds
+- Single deployment artifact and pipeline
+- Dev mode continues using Vite (port 5173) + FastAPI (port 8000) separately
 
 ---
 
@@ -126,34 +137,17 @@ Browser                  FastAPI                 Azure SQL
   | SPA clears state, redirects to /                 |
 ```
 
-### 5. Schwab Auth Coexistence
-
-```
-Browser                  FastAPI                 Schwab                  Key Vault
-  |                         |                      |                          |
-  | [user already has ota_session cookie]           |                          |
-  |-- GET /auth/schwab/login popup ----------------->|                        |
-  |                         | Schwab OAuth          |                          |
-  |-- GET /auth/schwab/callback?code= ------------->|                         |
-  |                         |-- POST /token -------->|                        |
-  |                         |<-- { access_token, refresh_token } -------------|
-  |                         |-- store in SchwabTokenManager ----------------->|
-  |   popup closes           |  (Key Vault in prod)  |                        |
-  |                         |                       |                         |
-  | All market data calls use Schwab tokens (server-side)
-  | All identity calls use ota_session cookie
-  | Both coexist — browser holds neither token
-```
-
 ---
 
 ## Entra App Registration
 
 **App type:** Web application (confidential client — NOT SPA)
 **Supported account types:** Accounts in this organizational directory only (single-tenant)
+**Client ID:** `f11ea8b8-bbce-474b-8d3f-758654245a73`
+
 **Redirect URIs:**
 - Dev: `https://127.0.0.1:8000/api/v1/auth/entra/callback`
-- Production: `https://options-analyzer-api-d7aqhsdmd6f2anbc.centralus-01.azurewebsites.net/api/v1/auth/entra/callback`
+- Production: `https://oa.tmtctech.ai/api/v1/auth/entra/callback`
 
 **API permissions (delegated):**
 - `openid` — OIDC sign-in
@@ -161,17 +155,9 @@ Browser                  FastAPI                 Schwab                  Key Vau
 - `email` — user email address
 - `User.Read` — read user profile from Microsoft Graph
 
-**Credential:** Certificate (not client secret). Tenant policy blocks client secrets for
-confidential apps. Certificate uploaded to app registration, private key stored in Key Vault
-as `entra-bff-cert`. Backend builds a JWT assertion signed with the private key on each
-token exchange.
-
-**Old SPA registration:** The previous MSAL.js app registration (SPA redirect URI type) is
-deprecated. It is kept in the tenant for rollback purposes only. New auth uses the Web
-(confidential) registration above.
-
-**Client secret management:** Certificate-based — no rotating secrets. Key Vault certificate
-`entra-bff-cert` is the credential. Key Vault versioning provides rollback.
+**Credential:** Certificate (`entra-bff-cert` in Key Vault). Private key stored in Key Vault;
+public key uploaded to app registration. Backend builds a JWT assertion signed with the private
+key on each token exchange. Key Vault versioning provides rollback.
 
 ---
 
@@ -233,32 +219,52 @@ Adding a new provider = adding one entry. Zero code changes to routes or session
 1. Add entry to `providers` dict in `app/auth/providers.py`
 2. Ensure the relevant settings exist in `app/core/config.py`
 3. Add a callback route for the provider if the authorization flow differs
-4. Add a "Sign in with X" button to `LoginPage.jsx` pointing to `/api/v1/auth/login?provider=<name>`
+4. Add a "Sign in with X" button to `LoginPage.jsx` pointing to `/api/v1/auth/login?provider=<n>`
 
 **Current providers:** `entra` (Microsoft Entra ID)
 **Future providers:** `google`, `github`, `azure_b2c`
 
 ---
 
-## Cross-Cloud Token Management
+## Identity Credential Management
 
-All credentials coexist server-side. The browser never stores or sees any of them.
+Credentials scoped to **user identity** (proving who the user is). External service
+credentials (Schwab, Foundry, future data providers) are managed under Pattern 1
+in `architecture-plan.md`.
 
-| Credential | Where Stored | Managed By | Notes |
-|------------|-------------|------------|-------|
-| Entra access_token | `user_sessions` table, Fernet-encrypted | `SessionManager` | Refreshed automatically when within 5min of expiry |
-| Entra refresh_token | `user_sessions` table, Fernet-encrypted | `SessionManager` | Used for transparent refresh; invalidated on logout |
-| Schwab access_token | In-memory (dev) / Key Vault (prod) | `SchwabTokenManager` | Independent of user session |
-| Schwab refresh_token | In-memory (dev) / Key Vault (prod) | `SchwabTokenManager` | `schwab-token-data` Key Vault secret |
-| Azure AI Foundry API key | Key Vault | `SecretsManager` | `anthropic-api-key` secret |
-| Session encryption key | Key Vault | `SessionManager` | `session-encryption-key` — auto-generated on first run |
-| Entra cert private key | Key Vault | `ClientAssertionBuilder` | `entra-bff-cert` certificate |
-| Future AWS | Key Vault | New provider adapter | IAM role key or service account |
-| Future Google | Key Vault | New provider adapter | Service account JSON |
+| Credential | Where Stored | Managed By |
+|------------|-------------|------------|
+| Entra access_token | `user_sessions` table, Fernet-encrypted | `SessionManager` — refreshed when within 5min of expiry |
+| Entra refresh_token | `user_sessions` table, Fernet-encrypted | `SessionManager` — invalidated on logout |
+| Session encryption key | Key Vault (`session-encryption-key`) | `SessionManager` — auto-generated on first run |
+| Entra cert private key | Key Vault (`entra-bff-cert`) | `ClientAssertionBuilder` |
 
-**Key principle:** The browser never sees or stores any token. All token management is
-a server-side concern. Adding a new cloud credential = add one Key Vault secret and one
-provider adapter.
+---
+
+## Deployment Architecture
+
+### Production
+
+Cloudflare → App Service (`options-analyzer-api`). FastAPI serves the API at `/api/v1/*`
+and the React SPA at `/` from the `static/` directory. One domain: `oa.tmtctech.ai`.
+One GitHub Actions workflow builds the React app and deploys both to App Service.
+
+Same-origin cookies work natively — the API and SPA share the same origin, so
+`SameSite=Lax` cookies are sent on every request without proxy workarounds.
+
+### Development
+
+Two terminals:
+- **Terminal 1:** FastAPI on port 8000 (`uvicorn app.main:app --reload --ssl-keyfile key.pem --ssl-certfile cert.pem`)
+- **Terminal 2:** Vite dev server on port 5173 (`cd web && npm run dev`)
+
+The Vite dev server proxies `/api/*` to the backend. The static file mount in FastAPI
+only activates when `static/index.html` exists (production builds only), so it does not
+interfere with the Vite dev server.
+
+**Dev redirect URI:** Must go through Vite proxy (`https://localhost:5173`), not direct
+to backend, because the auth callback redirects the browser to `/` which needs to serve
+the React app.
 
 ---
 

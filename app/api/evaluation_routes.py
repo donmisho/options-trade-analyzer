@@ -48,6 +48,13 @@ from app.agents.telemetry import invoke_with_tracing
 from app.analysis.black_scholes import compute_probability_matrix
 from app.models.session import async_session
 from app.validators.narrative_grounding import EvaluationFields, validate_narrative
+from app.analysis.hard_gates import evaluate_hard_gates, GateTradeContext
+from app.analysis.scoring_factors.asymmetry import (
+    asymmetry_penalty as _asymmetry_penalty,
+    asymmetry_ratio as _asymmetry_ratio,
+)
+from app.analysis.strategy_classifier import classify_best_strategy
+from app.analysis.strategy_scorer import StrategyScore
 
 router = APIRouter(prefix="/evaluate", tags=["Trade Evaluation"])
 
@@ -257,6 +264,7 @@ class StructuredEvaluationResponse(BaseModel):
     evaluations: List[TradeEvaluationCard]
     evaluated_at: str
     agent_run_id: str
+    strategy_fit: Optional[dict] = None   # OTA-506: classifier result + DTE metadata
 
 
 # ─── Request Schemas ─────────────────────────────────────────────
@@ -397,13 +405,60 @@ async def evaluate_structured(
             if computed > 0:
                 dte = computed
 
-    # ─── Pipeline Gate 1: DTE Hard Filter ─────────────────────────────────────
-    # Fires BEFORE any scoring logic. 0-7 DTE has binary gamma exposure.
+    # Capture nominal DTE before any gate override (OTA-506)
+    nominal_dte = dte
+
+    # ─── Hard Gate Evaluation (OTA-502+) ─────────────────────────────────────
+    # Runs BEFORE all inline gates. Registered gates are evaluated in order;
+    # first triggered gate forces PASS. Non-triggered gates may inject
+    # effective_dte_override and penalty_points used later in scoring.
     auto_pass_reason = None
     dte_warning_msg = None
     credit_pct_of_width = None
     debit_pct_of_width = None
+    _gate_result = None
+    _gate_penalty_points = 0
 
+    _expiry_date = None
+    if request.trade and request.trade.get("expiration"):
+        for _fmt in ("%Y-%m-%d", "%m-%d-%Y", "%m/%d/%Y"):
+            try:
+                _expiry_date = datetime.strptime(request.trade["expiration"], _fmt).date()
+                break
+            except ValueError:
+                continue
+
+    _gate_ev = None
+    if request.trade:
+        try:
+            _raw_ev = request.trade.get("total_ev")
+            _gate_ev = float(_raw_ev) if _raw_ev is not None else None
+        except (TypeError, ValueError):
+            _gate_ev = None
+
+    _gate_ctx = GateTradeContext(
+        symbol=request.symbol,
+        entry_date=date.today(),
+        expiry_date=_expiry_date,
+        dte=dte,
+        trade=request.trade,
+        db=db,
+        expected_value=_gate_ev,
+    )
+    _gate_result = await evaluate_hard_gates(_gate_ctx)
+
+    if _gate_result and _gate_result.triggered:
+        # Hard block — feed into the existing auto-pass short-circuit below
+        auto_pass_reason = _gate_result.reason
+    elif _gate_result and not _gate_result.triggered:
+        # Modifier-only result (e.g. earnings warning band)
+        if _gate_result.effective_dte_override is not None:
+            dte = _gate_result.effective_dte_override
+        if _gate_result.penalty_points:
+            _gate_penalty_points = _gate_result.penalty_points
+
+    # ─── Pipeline Gate 1: DTE Hard Filter ─────────────────────────────────────
+    # Fires BEFORE any scoring logic. 0-7 DTE has binary gamma exposure.
     if dte <= 7:
         auto_pass_reason = (
             f"Insufficient time remaining for active management. "
@@ -585,11 +640,36 @@ async def evaluate_structured(
         )
 
     # ─── Fix 3: Verdict Band Enforcement + Inject Pipeline Metrics ────────────
+    # Extract asymmetry inputs once — same trade data for all strategy cards.
+    _p_max_loss   = None
+    _p_max_profit = None
+    if request.trade:
+        try:
+            _raw_pml = request.trade.get("p_max_loss")
+            _raw_pmp = request.trade.get("p_max_profit")
+            _p_max_loss   = float(_raw_pml) if _raw_pml is not None else None
+            _p_max_profit = float(_raw_pmp) if _raw_pmp is not None else None
+        except (TypeError, ValueError):
+            pass  # leave as None → 0 penalty
+
+    _asym_penalty = _asymmetry_penalty(_p_max_loss, _p_max_profit)
+    _asym_ratio   = _asymmetry_ratio(_p_max_loss, _p_max_profit)
+
     for card in evaluations:
         # Apply DTE penalty for 8-13 DTE
         if dte_warning_msg and 8 <= dte <= 13:
             card.score = max(0, card.score - 20)
             card.dte_warning = dte_warning_msg
+
+        # Apply earnings gate penalty (OTA-502 — warning band, 8-13 biz days to earnings)
+        if _gate_penalty_points:
+            card.score = max(0, card.score - _gate_penalty_points)
+
+        # Apply probability asymmetry penalty (OTA-505 — graduated, post-score pre-band)
+        if _asym_penalty:
+            card.score = max(0, card.score - _asym_penalty)
+        card.asymmetry_penalty = _asym_penalty
+        card.asymmetry_ratio   = _asym_ratio
 
         # Enforce strict score band → verdict (ONLY place this happens)
         correct_verdict = _assign_verdict(card.score)
@@ -605,6 +685,9 @@ async def evaluate_structured(
             card.credit_pct_of_width = credit_pct_of_width
         if debit_pct_of_width is not None:
             card.debit_pct_of_width = debit_pct_of_width
+
+        # Export effective DTE for downstream consumers (OTA-506)
+        card.effective_dte = dte
 
     # Inject the pre-computed probability matrix into every card
     for card in evaluations:
@@ -663,6 +746,8 @@ async def evaluate_structured(
                 if dte_warning_msg and 8 <= dte <= 13:
                     card.score = max(0, card.score - 20)
                     card.dte_warning = dte_warning_msg
+                if _gate_penalty_points:
+                    card.score = max(0, card.score - _gate_penalty_points)
                 _correct_verdict = _assign_verdict(card.score)
                 if card.verdict != _correct_verdict:
                     card.verdict = _correct_verdict
@@ -670,6 +755,7 @@ async def evaluate_structured(
                     card.credit_pct_of_width = credit_pct_of_width
                 if debit_pct_of_width is not None:
                     card.debit_pct_of_width = debit_pct_of_width
+                card.effective_dte = dte
             for card in _retry_evals:
                 card.probability_matrix = pm_dict
 
@@ -716,6 +802,30 @@ async def evaluate_structured(
             _log_validator_event(run_id, request.symbol, user_id, _validator_log, skill.prompt_version)
         )
 
+    # ─── Strategy Classifier (OTA-506) ────────────────────────────────────────
+    # Run after Claude scoring is final. Uses effective DTE (post gate-override).
+    # Builds StrategyScore proxies from the evaluated cards so the classifier
+    # can filter by DTE eligibility and rank by Claude's scores.
+    _clf_candidates = [
+        StrategyScore(
+            strategy_key=card.strategy_key,
+            label=card.strategy_label,
+            score=card.score,
+            best_trade=None,
+            signal_summary="",
+            metric_scores={},
+        )
+        for card in evaluations
+    ]
+    _classification = classify_best_strategy(_clf_candidates, effective_dte=dte)
+    _strategy_fit = {
+        "best_fit":    _classification.best_fit,
+        "reason":      _classification.reason,
+        "nominal_dte": nominal_dte,
+        "effective_dte": dte,
+        "dte_source":  "earnings_in_window" if dte != nominal_dte else "nominal",
+    }
+
     # Write to agent_run_log
     verdicts_summary = ", ".join(f"{c.strategy_key}={c.verdict}" for c in evaluations)
     db.add(AgentRunLog(
@@ -728,7 +838,17 @@ async def evaluate_structured(
         prompt_user=user_message,
         prompt_version=skill.prompt_version,
         market_snapshot=market_snapshot,
-        trade_snapshot={"strategy_keys": request.strategy_keys, "trade": request.trade},
+        trade_snapshot={
+            "strategy_keys": request.strategy_keys,
+            "trade": request.trade,
+            "gate_result": {
+                "gate_id": _gate_result.gate_id,
+                "triggered": _gate_result.triggered,
+                "penalty_points": _gate_result.penalty_points,
+                "effective_dte_override": _gate_result.effective_dte_override,
+                "reason": _gate_result.reason,
+            } if _gate_result else None,
+        },
         model_response_raw=raw_text,
         verdict=None,
         verdict_summary=verdicts_summary,
@@ -744,6 +864,7 @@ async def evaluate_structured(
         evaluations=evaluations,
         evaluated_at=datetime.now(timezone.utc).isoformat(),
         agent_run_id=run_id,
+        strategy_fit=_strategy_fit,
     )
 
 

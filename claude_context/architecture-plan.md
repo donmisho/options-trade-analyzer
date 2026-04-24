@@ -1,172 +1,77 @@
-# Options Analyzer — architecture-plan.md (Updated 2026-04-11 00:00)
-## Options Trade Analyzer — Phase 2.6 and Forward
+# Options Analyzer — architecture-plan.md (Updated 2026-04-11 22:00)
+# Epic: OTA-477 | Feature: OTA-481
 
----
+## Table of Contents
 
-## Strategy Scorecard — Scoring Engine Data Inputs (Phase 2.9)
-
-`POST /api/v1/analyze/scorecard` — single chain fetch, four scores returned.
-
-All four scores are calculated live from the options chain for the requested symbol.
-There are no hardcoded values. Scores are 0–100, normalized with min-max scaling
-across all candidates per strategy.
-
-### Chain fetch
-- `provider.get_chain(symbol, min_dte=0, max_dte=70, strike_range_pct=20)`
-- Returns: `contracts[]`, `underlying_price`
-- One fetch per scorecard call regardless of strategy count.
-
-### Steady Paycheck — 25–50 DTE credit spreads
-| Metric | Weight | Source |
-|---|---|---|
-| `theta_margin_ratio` | 30% | `abs(net_theta) / max_loss` — theta collected per dollar at risk |
-| `probability_of_profit` | 25% | Delta-derived PoP from VerticalSpreadEngine |
-| `expected_value` | 20% | `(credit × PoP) - (max_loss × (1-PoP))` |
-| `reward_risk` | 15% | `credit / max_loss` |
-| `iv_rank` | 10% | Proxy: `atm_iv / 0.60` clamped 0–1 (ATM IV from nearest 5 calls) |
-
-### Weekly Grind — 5–16 DTE credit spreads
-| Metric | Weight | Source |
-|---|---|---|
-| `theta_gamma_ratio` | 35% | `abs(net_theta) / max_loss` proxy (true gamma not in ScoredSpread) |
-| `probability_of_profit` | 25% | Delta-derived PoP |
-| `credit_width_pct` | 20% | `(credit / spread_width) × 100` — premium quality |
-| `expected_value` | 15% | EV from VerticalSpreadEngine |
-| `liquidity` | 5% | `long_volume + short_volume + long_oi + short_oi` |
-
-### Trend Rider — 25–65 DTE long calls
-| Metric | Weight | Source |
-|---|---|---|
-| `sma_alignment_score` | 30% | Client-supplied float 0–1 via `user_config.sma_alignment_score`; defaults to 0.5 |
-| `delta_quality` | 25% | Proximity to 0.50–0.70 delta target range |
-| `expected_value` | 20% | `delta × underlying × 0.05 - mid_price` |
-| `iv_percentile_cost` | 15% | `1 - (iv_decimal / 1.0)` — lower IV = cheaper options for buyers |
-| `runway_score` | 10% | `theta_runway_days` from LongCallEngine |
-
-### Lottery Ticket — 1–8 DTE deep OTM calls
-| Metric | Weight | Source |
-|---|---|---|
-| `payout_ratio` | 45% | `(delta × price × 0.10 × 100) / premium_dollars` — return on 10% move |
-| `delta_otm_score` | 25% | `1 - (delta / 0.25)` — lower delta = more OTM = higher score |
-| `bid_ask_tightness` | 20% | `1 - (bid_ask_spread_pct / 100)` — fill quality |
-| `open_interest` | 10% | Raw OI on the contract |
-
-### Why scores differ meaningfully per symbol
-- **High-IV symbols** (SQQQ, leveraged ETFs): more premium available → higher Steady Paycheck / Weekly Grind scores
-- **Trending symbols** with clean SMA stacks: `sma_alignment_score` driven by frontend SMA state → higher Trend Rider
-- **Low-price / illiquid symbols**: fewer candidates in DTE windows → scores may be 0 (no candidates)
-- **ATM IV proxy**: computed from the actual chain, so a symbol with 15% IV scores very differently from one with 60% IV
+- [What This Document Is](#what-this-document-is)
+- [Core Architectural Patterns](#core-architectural-patterns)
+  - [Pattern 1: Provider Adapter Pattern](#pattern-1-provider-adapter-pattern)
+  - [External Credential Management](#external-credential-management)
+  - [Pattern 2: Skill-Driven Prompt Architecture](#pattern-2-skill-driven-prompt-architecture)
+  - [Pattern 3: Two-Track Observability](#pattern-3-two-track-observability)
+  - [Pattern 4: Unified Position Model](#pattern-4-unified-position-model)
+  - [Pattern 5: Generic Insight Engine](#pattern-5-generic-insight-engine)
+  - [Pattern 6: Backend-for-Frontend Identity](#pattern-6-backend-for-frontend-identity)
+  - [Pattern 7: Unified Deployment](#pattern-7-unified-deployment)
+- [The Three-Layer Architecture](#the-three-layer-architecture)
+  - [Layer 1 — Execution](#layer-1--execution)
+  - [Layer 2 — Orchestration](#layer-2--orchestration)
+  - [Layer 3 — Management (Agent 365)](#layer-3--management-agent-365)
+- [System Structure](#system-structure)
+  - [Backend Structure](#backend-structure)
+  - [Frontend Structure](#frontend-structure)
+- [Data Models (Azure SQL)](#data-models-azure-sql)
+- [Key API Endpoints](#key-api-endpoints)
+- [End-to-End Data Flow](#end-to-end-data-flow)
+- [The Strategy System](#the-strategy-system)
+  - [What a Strategy Is](#what-a-strategy-is)
+  - [Strategy Config Schema Pattern](#strategy-config-schema-pattern)
+- [The Positions System](#the-positions-system)
+  - [Position Lifecycle](#position-lifecycle)
+  - [Health Grade Computation](#health-grade-computation)
+- [The Insight Engine](#the-insight-engine)
+  - [Architecture](#architecture)
+  - [Insight Data Model](#insight-data-model)
+  - [SKILL.md Structure](#skillmd-structure)
+  - [Dashboard Feed](#dashboard-feed)
+- [The Market Intelligence Aggregator](#the-market-intelligence-aggregator)
+  - [Symbol Context Store](#symbol-context-store)
+  - [Position Monitor Agent](#position-monitor-agent)
+- [Black-Scholes Probability Matrix](#black-scholes-probability-matrix)
+- [Claude Structured Evaluation](#claude-structured-evaluation)
+  - [Evaluation Flow](#evaluation-flow)
+  - [Entry Points](#entry-points)
+- [Observability](#observability)
+- [Agent Inventory](#agent-inventory)
+  - [Agent CLAUDE.md Convention](#agent-claudemd-convention)
+- [The Multi-Agent Future](#the-multi-agent-future)
+- [Agent 365 Readiness](#agent-365-readiness)
+- [Azure Resources Summary](#azure-resources-summary)
+- [Phase History](#phase-history)
 
 ---
 
 ## What This Document Is
 
-This is the architectural specification for how AI agents are built, deployed, observed,
-and governed in the Options Trade Analyzer. It is the companion to SKILL.md files under
-`app/skills/`.
+This is the architectural specification for the Options Trade Analyzer. It describes
+why the system is designed the way it is, how data flows through it, and how agents
+are built, deployed, observed, and governed.
 
 Read this document to understand **why** the pattern is designed the way it is.
-Read the SKILL.md files when you're actually building.
-
----
-
-## Critical Shared UI Components
-
-These components must be implemented ONCE and reused identically across every page.
-Never reimplement them inline. See `UI-DECISIONS.md` for the complete visual contract.
-
-### Navigation Bar — Final Tab Order
-
-```
-Dashboard | Security Strategies | Verticals | Puts & Calls | Positions
-```
-
-"Security Strategies" is named deliberately — "Security" alone is ambiguous with
-login/firewall security. Clicking a watchlist symbol navigates to Security Strategies
-for that symbol. The nav tab uses the currently active symbol.
-
-Strategy tabs (Steady Paycheck, Weekly Grind, Trend Rider, Lottery Ticket) do NOT
-appear as top-level navigation. They are scoring lenses, not pages.
-
-### QuoteBar — Universal Symbol Header
-
-**Used on**: SecurityStrategies, OptionsTerminal (Verticals), OptionsTerminal (Puts & Calls),
-and any future page that displays a symbol context.
-
-**File**: `web/src/components/QuoteBar.jsx`
-
-**Required fields in this exact order**:
-| Field | Notes |
-|-------|-------|
-| Symbol | Large, bold |
-| SIGNAL badge | BULLISH / BEARISH / MIXED — from SMA alignment |
-| Last Analyzed | Timestamp of last analysis run |
-| Price | Current last price |
-| CHG | Dollar change, red if negative |
-| CHG % | Percent change, red if negative |
-| Day Range | Low – High |
-| 52W Range | 52-week Low – High |
-| Volume | Formatted (35.6M) |
-| Rel Vol | Relative volume (0.8x) |
-| Earnings Date | Show if within 60 days, highlight if within 14 days. Hide if none known. |
-| Dividend Date | Show if within 60 days. Hide if none known. |
-
-**Rules**:
-- No `$` prefix on any value — house style applies everywhere
-- Earnings and dividend: if null or >60 days away, do not render the field at all
-- Earnings within 14 days: amber highlight badge — risk signal for options positions
-- This component is the ONLY place QuoteBar rendering logic lives
-- Every page that needs it imports `<QuoteBar />` — zero inline reimplementations
-
-**Why this keeps getting lost**: Each new page build tends to create a simplified inline
-version of the header rather than importing the shared component. Both `UI-DECISIONS.md`
-and `CLAUDE.md` call this out explicitly to prevent it.
-
----
-
-## The Core Problem Being Solved
-
-The original Ask Claude panel was a dead end architecturally:
-- One trade in, one response out, nothing stored
-- No way to know if Claude's recommendations were good over time
-- No connection between evaluations, positions, and outcomes
-- When Agent 365 arrives, there's nothing to plug in
-
-The redesign (Phases 2.6 onward) solves all of these simultaneously by building
-a coherent system from symbol lookup → strategy scoring → follow/trade → outcome tracking
-→ aggregate validation.
-
----
-
-## The Three-Layer Architecture
-
-Think of agents in this project as living across three layers, like floors of a building.
-You build from the bottom up, but the design considers all three from the start.
-
-### Layer 1 — Execution (what you build now)
-Your FastAPI backend, Python agent code, and SKILL.md prompt files.
-Each agent is a focused specialist that does one thing well.
-
-### Layer 2 — Orchestration (what you add as you grow)
-Azure AI Foundry Agent Service. This is where agents are registered, where multi-agent
-workflows are defined, and where handoffs between agents are managed.
-
-### Layer 3 — Management (what arrives with Agent 365)
-Microsoft is building Agent 365 as the enterprise management surface for all agents
-running in your tenant. By building correctly in Layers 1 and 2 — with Foundry-registered
-agents, Entra identities, and standard OpenTelemetry traces — everything you build today
-will appear in Agent 365 automatically when it becomes generally available.
+Read `CLAUDE.md` for **how** to work in the repo.
+Read `business-rules.md` for **what** the system calculates and enforces.
+Read `UI-GUIDANCE.md` for **what the UI looks like** and user journeys.
+Read `auth-process.md` for **how auth works** (flows, sessions, security).
 
 ---
 
 ## Core Architectural Patterns
 
-These patterns are established principles that ALL new features must follow.
-They are not phase-specific — they are permanent foundations.
+These patterns are permanent foundations. ALL new features must follow them.
 
 ### Pattern 1: Provider Adapter Pattern
 
-All external data sources — market data, AI models, brokerages, and future signal
+All external data sources — market data, AI models, brokerages, and signal
 sources — implement a standard interface. Adding a new source requires writing one
 adapter class. Zero changes to engines, routes, or frontend.
 
@@ -182,6 +87,24 @@ class ContextSource(ABC):
     def normalize(self, raw: dict) -> ContextSignal
     def ttl_seconds(self) -> int   # how long this signal stays fresh
 ```
+
+### External Credential Management
+
+Each provider adapter owns its credential lifecycle. The calling code (engines,
+routes, agents) calls `provider.fetch()` and never knows how the credential was
+obtained. OAuth, federation, API key, service account — the adapter chooses
+whatever is appropriate for its source. All credentials are stored and managed
+server-side.
+
+| Credential | Auth Method | Where Stored | Managed By |
+|------------|------------|-------------|------------|
+| Schwab market data | OAuth 2.0 (authorization code) | In-memory (dev) / Key Vault (prod) | `SchwabTokenManager` |
+| Azure AI Foundry | API key | Key Vault | `SecretsManager` |
+| Future brokerage (Fidelity, etc.) | OAuth or API key (source-dependent) | Key Vault | New provider adapter |
+| Future data (Bloomberg, Census, etc.) | Federation, API key, or service account | Key Vault | New provider adapter |
+
+Adding a new external credential = one Key Vault secret + one provider adapter.
+The connectivity layer is uniform; the auth method is source-specific.
 
 ### Pattern 2: Skill-Driven Prompt Architecture
 
@@ -206,28 +129,15 @@ The SQL record links back to the OTel trace via `trace_id`. This allows correlat
 
 Paper follows and live trades share an identical data model. The only distinguishing
 fields are `source` (PAPER | LIVE) and `status` (FOLLOWING | LIVE | CLOSED).
-This means the Positions page, monitoring agent, and aggregate analytics work
-identically for both. Live execution in Phase 5 flips `source` from PAPER to LIVE
-without touching any other infrastructure.
-
-### Pattern 6: Backend-for-Frontend Identity
-
-All user authentication flows through FastAPI as a confidential OIDC client.
-The React SPA never handles tokens — it uses HttpOnly session cookies set by
-the backend. Adding a new identity provider (Google, GitHub) requires one
-config entry in `app/auth/providers.py` and zero frontend changes.
-
-See `auth-process.md` for full details: flow diagrams, session lifecycle,
-multi-IdP registry, and cross-cloud token management.
-
-**Established flows:** Entra ID (OIDC, certificate-based assertions), Schwab (OAuth 2.0 market data)
-**Future flows:** Google, GitHub, AWS IAM, Google Cloud service accounts
+The Positions page, monitoring agent, and aggregate analytics work identically
+for both. Live execution flips `source` from PAPER to LIVE without touching any
+other infrastructure.
 
 ### Pattern 5: Generic Insight Engine
 
 The Insight Engine is a domain-agnostic pattern for detect → score → communicate
-anomalies. It is deployed first in the options domain but is explicitly designed
-to be reused in manufacturing, customer health, and any other monitoring scenario.
+anomalies. It is deployed first in the options domain but is designed to be reused
+in manufacturing, customer health, and any other monitoring scenario.
 
 The domain-specific parts are:
 1. The `ObservationSource` adapter (what to watch)
@@ -236,14 +146,272 @@ The domain-specific parts are:
 Everything else — deviation detection, insight data model, dashboard rendering,
 dismissal flow — is generic and reused across domains.
 
+### Pattern 6: Backend-for-Frontend Identity
+
+FastAPI is the OIDC confidential client. The browser never holds tokens — only
+HttpOnly session cookies. Multi-IdP support via a provider registry. Certificate-based
+credentials (tenant blocks secrets).
+
+See `auth-process.md` for full implementation details including session lifecycle,
+security controls, and Entra app registration.
+
+### Pattern 7: Unified Deployment
+
+FastAPI serves both the API (`/api/v1/*`) and the React SPA (from `static/`
+directory) from a single App Service on a single domain (`oa.tmtctech.ai`).
+Cloudflare provides CDN and edge caching. One GitHub Actions workflow handles build
+and deploy.
+
+In development, the frontend and backend run as separate processes: FastAPI on port
+8000 and Vite dev server on port 5173. The static mount in FastAPI only activates when
+`static/index.html` exists (production builds only).
+
 ---
 
-## The Full Data Flow (End to End)
+## The Three-Layer Architecture
+
+Agents live across three layers. Build from the bottom up, but design for all three.
+
+### Layer 1 — Execution
+FastAPI backend, Python agent code, and SKILL.md prompt files. Each agent is a
+focused specialist that does one thing well.
+
+### Layer 2 — Orchestration
+Azure AI Foundry Agent Service. Agents are registered here, multi-agent workflows
+are defined, and handoffs between agents are managed.
+
+### Layer 3 — Management (Agent 365)
+Microsoft Agent 365 is the enterprise management surface for agents running in a
+tenant. By building correctly in Layers 1 and 2 — with Foundry-registered agents,
+Entra identities, and standard OpenTelemetry traces — everything built today
+appears in Agent 365 automatically when it becomes generally available.
+
+---
+
+## System Structure
+
+### Backend Structure
+
+```
+app/
+├── main.py                          # FastAPI entry point, lifespan context, CORS
+├── core/
+│   ├── config.py                   # Pydantic Settings (from .env)
+│   └── secrets.py                  # SecretsManager (Azure Key Vault + .env fallback)
+├── auth/
+│   ├── service.py                  # BFF auth: OIDC, sessions, token exchange
+│   └── dependencies.py             # require_tier1/2/3 FastAPI dependencies
+├── models/
+│   ├── database.py                 # SQLAlchemy models
+│   ├── session.py                  # Async DB engine and session factory
+│   └── schemas.py                  # Pydantic request/response schemas
+├── providers/
+│   ├── base.py                     # Abstract interfaces (MarketData, ContextSource)
+│   ├── tradier.py                  # Tradier adapter (fallback)
+│   ├── schwab.py                   # Schwab adapter (primary)
+│   ├── schwab_token_manager.py     # OAuth token lifecycle
+│   ├── factory.py                  # ProviderFactory
+│   └── ai.py                       # AnthropicAdapter + FoundryAdapter
+├── analysis/
+│   ├── vertical_engine.py          # Bull call / bear put spread scoring
+│   ├── long_call_engine.py         # Naked calls/puts scoring
+│   ├── directional_engine.py       # SMA momentum + directional scoring
+│   ├── black_scholes.py            # Probability matrix computation
+│   ├── strategy_scorer.py          # Multi-strategy scorecard engine
+│   └── strategy_definitions.py     # Strategy parameter definitions (thresholds, weights)
+├── agents/
+│   ├── position_monitor.py         # Daily position health agent
+│   ├── insight_engine.py           # Generic insight detection + generation
+│   └── skill_loader.py             # Loads SKILL.md files, fills variables
+├── skills/
+│   ├── claude-trade-agent/
+│   │   └── SKILL.md
+│   ├── position-monitor/
+│   │   └── SKILL.md
+│   └── insight-engine/
+│       ├── SKILL.md                # Generic pattern
+│       └── domains/
+│           └── options/
+│               └── SKILL.md        # Options-specific vocabulary
+└── api/
+    ├── auth_routes.py              # BFF auth endpoints (login, callback, session, logout)
+    ├── market_routes.py
+    ├── config_routes.py
+    ├── analysis_routes.py
+    ├── schwab_auth_routes.py
+    ├── evaluation_routes.py        # Structured output
+    ├── dashboard_routes.py         # Dashboard layout GET/PUT + media SAS URLs
+    ├── position_routes.py          # Position CRUD, follow, take-position
+    └── insight_routes.py           # Insight feed, dismiss
+```
+
+### Frontend Structure
+
+```
+web/
+├── .env.production                      # Production API base URL (HTTPS)
+
+web/src/
+├── App.jsx                              # Routes + activeStrategy state
+├── main.jsx                             # React root
+├── context/
+│   └── AppContext.jsx                   # activeSymbol, watchlist, favorites, prices
+├── api/
+│   └── client.js                        # API client functions (uses cookie auth)
+├── strategy-configs/                    # Strategy plugin system
+│   ├── index.js                         # Registry: maps key → config object
+│   ├── verticals.config.js
+│   ├── long-calls.config.js
+│   ├── steady-paycheck.config.js
+│   ├── weekly-grind.config.js
+│   ├── trend-rider.config.js
+│   └── lottery-ticket.config.js
+├── components/
+│   ├── Layout.jsx                       # Left rail + watchlist toggle + Outlet
+│   ├── Watchlist.jsx
+│   ├── QuoteBar.jsx
+│   ├── ConfigDrawer.jsx                 # Strategy-aware config schema
+│   ├── StrategyScorecard.jsx            # Multi-strategy score display
+│   ├── TradeEvaluationCard.jsx          # Structured Claude output card
+│   ├── ProbabilityMatrix.jsx            # B-S probability table
+│   ├── PositionHealthBadge.jsx          # A-F grade indicator
+│   ├── InsightCard.jsx                  # Dashboard insight feed card
+│   └── ...
+└── pages/
+    ├── TradesPage.jsx                   # Unified trades terminal — Sections A-E
+    ├── SecurityStrategiesPage.jsx       # Scan screen
+    ├── StrategyPage.jsx                 # Per-strategy detail
+    ├── PositionsPage.jsx                # Positions with health grades
+    └── DashboardPage.jsx                # Insight feed + widgets
+```
+
+---
+
+## Data Models (Azure SQL)
+
+All tables use UNIQUEIDENTIFIER PKs and DATETIME2 timestamps.
+
+### positions
+
+```sql
+CREATE TABLE positions (
+    position_id           UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+    user_id               UNIQUEIDENTIFIER NOT NULL,
+    symbol                NVARCHAR(20) NOT NULL,
+    strategy_key          NVARCHAR(50) NOT NULL,       -- 'steady-paycheck', 'trend-rider'
+    trade_structure       NVARCHAR(MAX) NOT NULL,      -- JSON: legs, strikes, expiry
+    source                NVARCHAR(10) NOT NULL,       -- 'PAPER' | 'LIVE'
+    status                NVARCHAR(20) NOT NULL,       -- 'FOLLOWING'|'LIVE'|'CLOSED'
+    entry_price           DECIMAL(10,4),
+    entry_date            DATETIME2 NOT NULL,
+    entry_greeks          NVARCHAR(MAX),               -- JSON: delta, gamma, theta, vega
+    entry_iv_rank         DECIMAL(5,2),
+    entry_sma_alignment   NVARCHAR(MAX),               -- JSON: SMA values + signal
+    entry_underlying_price DECIMAL(10,4),
+    claude_probability_matrix NVARCHAR(MAX),           -- JSON: B-S matrix at entry
+    claude_exit_levels    NVARCHAR(MAX),               -- JSON: warning, scale_out, stop
+    claude_verdict        NVARCHAR(MAX),               -- JSON: full evaluation card
+    claude_score          INT,                         -- 0-100
+    health_grade          NVARCHAR(2),                 -- 'A'|'B'|'C'|'D'|'F'
+    current_price         DECIMAL(10,4),               -- updated by monitor agent
+    current_pnl           DECIMAL(10,4),               -- updated by monitor agent
+    last_monitored_at     DATETIME2,
+    exit_price            DECIMAL(10,4),
+    exit_date             DATETIME2,
+    exit_reason           NVARCHAR(50),                -- TARGET|WARNING|STOP|EXPIRED|MANUAL
+    outcome_pnl           DECIMAL(10,4),
+    created_at            DATETIME2 DEFAULT GETUTCDATE(),
+    updated_at            DATETIME2 DEFAULT GETUTCDATE()
+)
+```
+
+### symbol_context
+
+```sql
+CREATE TABLE symbol_context (
+    context_id    UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+    symbol        NVARCHAR(20) NOT NULL,
+    source_id     NVARCHAR(50) NOT NULL,
+    signal_type   NVARCHAR(50) NOT NULL,
+    signal_value  NVARCHAR(MAX) NOT NULL,
+    captured_at   DATETIME2 DEFAULT GETUTCDATE(),
+    expires_at    DATETIME2 NOT NULL
+)
+```
+
+### insights
+
+```sql
+CREATE TABLE insights (
+    insight_id          UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+    domain              NVARCHAR(50) NOT NULL,
+    entity_id           NVARCHAR(100) NOT NULL,
+    entity_label        NVARCHAR(200) NOT NULL,
+    observation         NVARCHAR(MAX) NOT NULL,
+    baseline            NVARCHAR(MAX) NOT NULL,
+    deviation_score     INT NOT NULL,
+    deviation_type      NVARCHAR(50) NOT NULL,
+    title               NVARCHAR(200) NOT NULL,
+    body                NVARCHAR(1000) NOT NULL,
+    severity            NVARCHAR(20) NOT NULL,
+    recommended_actions NVARCHAR(MAX),
+    status              NVARCHAR(20) DEFAULT 'ACTIVE',
+    source_signals      NVARCHAR(MAX),
+    agent_run_id        UNIQUEIDENTIFIER,
+    created_at          DATETIME2 DEFAULT GETUTCDATE(),
+    dismissed_at        DATETIME2,
+    acted_on_at         DATETIME2
+)
+```
+
+### agent_run_log
+
+Every AI agent invocation writes one row. Never deleted. Contains full prompt text,
+full model response, market snapshot, prompt version, and OTel `trace_id`.
+
+### user_sessions
+
+See `auth-process.md` for schema and session lifecycle.
+
+---
+
+## Key API Endpoints
+
+### Strategy Scoring
+- `POST /api/v1/analyze/scorecard` — runs all strategies for a symbol, returns 0-100 per strategy
+- `POST /api/v1/analyze/probability-matrix` — Black-Scholes matrix for a trade
+
+### Structured Evaluation
+- `POST /api/v1/evaluate/structured` — Claude deep dive, returns structured cards
+
+### Positions
+- `POST /api/v1/positions/follow` — create paper position from evaluation
+- `POST /api/v1/positions/take` — create live position (records intent, not yet wired to Schwab)
+- `GET /api/v1/positions` — list with filters: status, source, symbol, strategy
+- `PATCH /api/v1/positions/{id}/close` — close position, record outcome
+- `GET /api/v1/positions/aggregate` — stats by strategy group
+
+### Position Monitor
+- `POST /api/v1/agents/position-monitor/run` — on-demand trigger (also runs on schedule)
+
+### Insights
+- `GET /api/v1/insights` — active insights feed, filtered by domain='options'
+- `PATCH /api/v1/insights/{id}/dismiss` — dismiss insight
+
+### Auth (BFF)
+- `GET /api/v1/auth/entra/login` — initiate OIDC login
+- `GET /api/v1/auth/entra/callback` — handle OIDC callback
+- `GET /api/v1/auth/session` — session info (from cookie)
+- `POST /api/v1/auth/logout` — destroy session
+
+---
+
+## End-to-End Data Flow
 
 ```
 User pulls up MSFT
     ↓
-Security Dashboard loads
+Security Strategies page loads
     ├── Fetches current quote + SMA data (Schwab)
     ├── Runs all strategy scoring engines (backend)
     ├── Reads active insights for MSFT (insight feed)
@@ -285,45 +453,16 @@ Position Monitor Agent runs daily (after market close)
 
 ### What a Strategy Is
 
-A strategy is a named configuration of:
-- **Trade structure**: vertical spread, long call, iron condor, etc.
-- **DTE window**: 0-7, 7-14, 30-45, etc.
-- **Scoring weights**: which metrics matter most for this objective
-- **Filter thresholds**: what gets excluded before scoring
-- **Config schema**: the parameters the user can adjust in ConfigDrawer
-- **Greek targets**: delta range, theta/gamma ratio, IV rank thresholds
+A strategy is a named configuration of trade structure, DTE window, scoring weights,
+filter thresholds, config schema (user-adjustable parameters), and Greek targets.
 
-### Initial Four Strategies
-
-**1. Steady Paycheck** — Income, 30-45 DTE credit spreads
-- Primary objective: maximize theta per dollar at risk
-- Key metrics: Theta/Margin ratio, IV Rank (min 40), Probability of Profit
-- Short strike delta: 0.20-0.30
-- Exit at 50% of max profit, stop at 2x credit received
-
-**2. Weekly Grind** — Income, 7-14 DTE credit spreads
-- Primary objective: high-frequency theta capture
-- Key metrics: Theta/Gamma ratio (critical — Gamma explodes near expiry), credit/width %
-- Short strike delta: 0.20-0.25 (tighter — less room for error)
-- Requires more active management than Steady Paycheck
-
-**3. Trend Rider** — Directional, 30-60 DTE long calls or bull call spreads
-- Primary objective: capture directional move with defined risk
-- Key metrics: Delta, SMA alignment score, runway vs expected move
-- Long strike delta: 0.50-0.70
-- Entry requires bullish SMA alignment (8 > 21 > 50)
-
-**4. Lottery Ticket** — Speculative, 1-7 DTE deep OTM
-- Primary objective: asymmetric payout on a credible catalyst
-- Key metrics: Cost/max payout ratio (min 5:1), catalyst presence
-- Delta range: 0.05-0.15
-- Scoring formula is inverted — optimizes for payout ratio, not probability
+See `business-rules.md` for the complete strategy definitions including DTE ranges,
+delta targets, exit rules, and scoring weight formulas per strategy.
 
 ### Strategy Config Schema Pattern
 
 Each strategy defines a `configSchema` in its config file. ConfigDrawer renders
-whatever schema the active strategy defines. This replaces the static 14-field
-system variables approach with a dynamic, strategy-aware parameter set.
+whatever schema the active strategy defines — a dynamic, strategy-aware parameter set.
 
 ```javascript
 configSchema: [
@@ -340,6 +479,9 @@ configSchema: [
 
 ### Position Lifecycle
 
+See `business-rules.md` for the full position lifecycle state machine, exit reasons,
+and aggregate analysis rules.
+
 ```
 CREATED (Follow or Take Position action)
     ↓
@@ -354,31 +496,13 @@ CLOSED (user action or expiration)
 
 ### Health Grade Computation
 
-Computed by Position Monitor Agent daily. NOT a Claude call — pure math.
-
-| Grade | Meaning |
-|-------|---------|
-| A | Within projected range, P&L at or above expected pace |
-| B | Slightly outside range, no warnings triggered |
-| C | Approaching exit warning level |
-| D | Exit warning breached or significant adverse move |
-| F | Hard stop hit or thesis completely invalidated |
-
-For closed positions, grade reflects actual vs projected outcome at entry.
-
-### Positions Page Filters
-
-Four composable filters:
-- **Status**: Active | Historical | All
-- **Type**: Paper | Live | All
-- **Symbol**: typeahead from watchlist
-- **Strategy**: all or select one
-
-Aggregate stats bar recalculates against active filter combination.
+See `business-rules.md` for grade definitions and computation rules. Grades are
+computed by the Position Monitor Agent daily using deterministic math against
+Claude's exit levels stored at position entry. Not a Claude call.
 
 ---
 
-## The Insight Engine (Generic Pattern)
+## The Insight Engine
 
 ### Architecture
 
@@ -399,30 +523,9 @@ InsightEngine
 
 ### Insight Data Model
 
-```sql
-CREATE TABLE insights (
-    insight_id        UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
-    domain            NVARCHAR(50) NOT NULL,      -- 'options' | 'manufacturing'
-    entity_id         NVARCHAR(100) NOT NULL,     -- position_id, machine_id, etc.
-    entity_label      NVARCHAR(200) NOT NULL,     -- human-readable label
-    observation       NVARCHAR(MAX) NOT NULL,     -- JSON: what was measured
-    baseline          NVARCHAR(MAX) NOT NULL,     -- JSON: what was expected
-    deviation_score   INT NOT NULL,              -- 0-100
-    deviation_type    NVARCHAR(50) NOT NULL,     -- THRESHOLD|TREND|ANOMALY|CORRELATION
-    title             NVARCHAR(200) NOT NULL,
-    body              NVARCHAR(1000) NOT NULL,
-    severity          NVARCHAR(20) NOT NULL,     -- INFO|WARNING|CRITICAL
-    recommended_actions NVARCHAR(MAX),           -- JSON array of action objects
-    status            NVARCHAR(20) DEFAULT 'ACTIVE', -- ACTIVE|DISMISSED|ACTED_ON
-    source_signals    NVARCHAR(MAX),             -- JSON: which sources triggered
-    agent_run_id      UNIQUEIDENTIFIER,          -- FK to agent_run_log
-    created_at        DATETIME2 DEFAULT GETUTCDATE(),
-    dismissed_at      DATETIME2,
-    acted_on_at       DATETIME2
-)
-```
+See [Data Models (Azure SQL)](#data-models-azure-sql) for the `insights` table schema.
 
-### SKILL.md Structure for Insight Engine
+### SKILL.md Structure
 
 ```
 app/skills/
@@ -449,19 +552,8 @@ and "Dismiss" (marks status=DISMISSED, removes from feed).
 
 ### Symbol Context Store
 
-All signal sources write to a single normalized table:
-
-```sql
-CREATE TABLE symbol_context (
-    context_id     UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
-    symbol         NVARCHAR(20) NOT NULL,
-    source_id      NVARCHAR(50) NOT NULL,       -- 'schwab_quotes', 'social_sentiment'
-    signal_type    NVARCHAR(50) NOT NULL,        -- PRICE|SENTIMENT|FUNDAMENTAL|TECHNICAL|NEWS
-    signal_value   NVARCHAR(MAX) NOT NULL,       -- normalized JSON blob
-    captured_at    DATETIME2 DEFAULT GETUTCDATE(),
-    expires_at     DATETIME2 NOT NULL            -- source-specific freshness window
-)
-```
+All signal sources write to a single normalized table (`symbol_context`). See
+[Data Models](#data-models-azure-sql) for the schema.
 
 Freshness windows by signal type:
 - PRICE: 5 minutes
@@ -484,9 +576,8 @@ Responsibilities:
 6. Write health grade updates and insight records to SQL
 7. Log full run to `agent_run_log`
 
-This is built agent-first: it has its own SKILL.md, its own Foundry registration,
-and its own Entra Agent ID. It is the first of what will become a fleet of
-monitoring specialists.
+This agent has its own SKILL.md, its own Foundry registration, and its own Entra
+Agent ID. It is the first of what will become a fleet of monitoring specialists.
 
 ---
 
@@ -496,28 +587,26 @@ The probability matrix shown in Claude's structured evaluation is computed by th
 backend using Black-Scholes, NOT by Claude. Claude receives the pre-computed matrix
 as context and uses it for qualitative commentary.
 
-Backend endpoint: `POST /api/v1/analysis/probability-matrix`
+Backend endpoint: `POST /api/v1/analyze/probability-matrix`
 
-Inputs: current price, IV, DTE, risk-free rate, price range (+/- 10% in $10 steps)
+Inputs: current price, IV, DTE, risk-free rate, price range (±10% in $10 steps)
 Output: probability of price being at each level on dates: expiry-3, expiry-6, expiry-9, expiry
 
-Why backend math, not Claude? The matrix must be consistent, auditable, and fast.
+The matrix must be consistent, auditable, and fast.
 Claude's role is judgment and communication, not arithmetic.
 
 ---
 
-## Claude Structured Evaluation (Replaces AskClaudePanel)
+## Claude Structured Evaluation
 
-### What Changed
-
-`AskClaudePanel` is retired. Claude is no longer a chat interface. Claude is a
-structured analytical engine that returns consistent, comparable output cards.
+Claude is a structured analytical engine that returns consistent, comparable output
+cards. Each strategy returns a structured card:
 
 ### Evaluation Flow
 
-1. User selects strategies on Security Dashboard or expands a trade row
+1. User selects strategies on Security Strategies page or expands a trade row
 2. Single "Evaluate" button triggers one Claude call per selected strategy
-3. Each strategy returns a structured card:
+3. Each strategy returns:
 
 ```json
 {
@@ -542,14 +631,14 @@ structured analytical engine that returns consistent, comparable output cards.
 ### Entry Points
 
 The same evaluation flow is accessible from two places:
-- **Security Dashboard**: trade is null, Claude finds best trade per strategy
-- **Trade row expansion** (OptionsTerminal): trade is pre-populated, Claude evaluates it through each strategy lens
+- **Security Strategies page**: trade is null, Claude finds best trade per strategy
+- **Trade row expansion** (TradesPage): trade is pre-populated, Claude evaluates it through each strategy lens
 
 Same component (`StrategyScorecard`), same Claude output format, two contexts.
 
 ---
 
-## How Observability Works
+## Observability
 
 Every time Claude evaluates a trade, two things happen in parallel:
 
@@ -563,6 +652,26 @@ When Power BI and Microsoft Fabric are connected (future milestone), `agent_run_
 joined with the `positions` table answers: "For every EXECUTE recommendation,
 what was the actual outcome?" That question is only answerable because both records
 are stored permanently.
+
+---
+
+## Agent Inventory
+
+| Agent | Directory | Trigger | Purpose |
+|-------|-----------|---------|---------|
+| QA-UX | `agents/qa-ux/` | Post-build (Level 1-2) | Visual regression against ticket acceptance criteria |
+| QA-Data | `agents/qa-data/` | Post-build (Level 2) | Data accuracy across 64-config matrix |
+| Identity & Security | `agents/identity-security/` | Post-auth-change | Auth flow validation, session lifecycle |
+| Position Monitor | `app/agents/position_monitor.py` | Daily (4:15pm ET) + on-demand | Health grades, threshold crossings, insight generation |
+| Trade Evaluation | `app/skills/claude-trade-agent/` | User-initiated | Structured Claude analysis per strategy |
+
+### Agent CLAUDE.md Convention
+
+Every agent directory contains its own `CLAUDE.md` with agent-specific instructions,
+thresholds, and behavioral rules. These are subordinate to the root `CLAUDE.md` and
+must stay in sync with QA gate levels defined there. When modifying QA behavior,
+update all five files: root `CLAUDE.md`, `qa-ux/CLAUDE.md`, `qa-data/CLAUDE.md`,
+`fe-dev/CLAUDE.md`, `be-dev/CLAUDE.md`.
 
 ---
 
@@ -592,20 +701,18 @@ Choices made now that make Agent 365 adoption a configuration step:
 
 ## Azure Resources Summary
 
-| Resource | Name | Status | Purpose |
-|----------|------|--------|---------|
-| AI Foundry | `ota-foundry-resource` | Existing | Agent deployment, model gateway |
-| Application Insights | `ota-insights` | New (Phase 2.6) | OTel trace sink |
-| Log Analytics Workspace | `ota-logs` | New (Phase 2.6) | Backend for App Insights |
-| Azure SQL | `options-analyzer-db` | Existing | All persistent data |
-| Key Vault | (existing) | Existing | All secrets |
+| Resource | Name | Purpose |
+|----------|------|---------|
+| App Service | `options-analyzer-api` | API + SPA hosting |
+| AI Foundry | `ota-foundry-resource` | Agent deployment, model gateway |
+| Application Insights | `ota-insights` | OTel trace sink |
+| Log Analytics Workspace | `ota-logs` | Backend for App Insights |
+| Azure SQL | `options-analyzer-db` | All persistent data |
+| Key Vault | `options-analyzer` | All secrets |
+| Storage | `otaunstructured` | Dashboard media, documents, backtest exports |
 
-New SQL tables by phase:
-- Phase 2.6: `agent_run_log`, `trade_recommendations`
-- Phase 2.9: `strategy_configs`
-- Phase 2.10: `positions`
-- Phase 3.5: `symbol_context`
-- Phase 3.6: `insights`
+SQL tables: `agent_run_log`, `trade_recommendations`, `strategy_configs`, `positions`,
+`symbol_context`, `insights`, `user_sessions`.
 
 ---
 
@@ -621,11 +728,12 @@ New SQL tables by phase:
 - **Phase 2.9**: Security Dashboard + Strategy Scorecard ✅
 - **Phase 2.10**: Positions Page + Follow/Take Position ✅
 - **Phase 2.11**: Claude Structured Evaluation + Probability Matrix ✅
-- **Phase 3**: Azure Deployment ✅ (live 2026-03-04 — App Service + Static Web App)
+- **Phase 3**: Azure Deployment ✅ (live 2026-03-04 — App Service, unified deployment)
 - **Phase 3.5**: Market Intelligence Aggregator + Position Monitor Agent ✅
 - **Phase 3.6**: Insight Engine (Generic) + Options Domain ✅
-- **Sprint 4**: Trades page unification — TradesPage.jsx replaces VerticalsPage + LongCallsPage, Sections A-E fully wired, Puts & calls live, per-section Config drawers, SecurityStrategiesPage v3 ✅
-- **Sprint 5**: Integration, polish & cleanup — regression fixes (evaluate payload, pill colors, dropdown, watchlist auto-add, exit scenarios condensed to 5 key rows), scorecard API enriched with quote + SMA signal, scan page caching, CSS custom properties for strategy colors, Strategies column reordered, Section D (ProbabilityMatrix) retired from trade detail frontend, dead files deleted (AskClaudePanel_v2.jsx, Watchlist.jsx), alert → Toast migration, RefreshConfirmDialog consolidated ✅
-- **Identity Management Foundation**: BFF pattern migration — OTA-455 epic ✅
+- **Sprint 4**: Trades page unification, SecurityStrategiesPage v3 ✅
+- **Sprint 5**: Regression cycle, startup visibility, MSAL fix ✅
+- **Identity Management Foundation**: BFF identity, MSAL removal, certificate auth ✅
+- **Unified Deployment**: SWA removed, FastAPI serves API + SPA, Cloudflare CDN ✅
 - **Phase 4**: MCP Integration 🔲
-- **Phase 5**: Live Trading Execution 🔲 (positions/take records intent only — Schwab order entry not yet wired)
+- **Phase 5**: Live Trading Execution 🔲

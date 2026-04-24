@@ -326,6 +326,9 @@ class TradeEvaluationCard(BaseModel):
     dte_warning: Optional[str] = None        # set when DTE is 8-13 (below recommended minimum)
     credit_pct_of_width: Optional[float] = None   # credit spreads only (credit / spread_width)
     debit_pct_of_width: Optional[float] = None    # debit spreads only (debit / spread_width)
+    effective_dte: Optional[int] = None      # DTE used for scoring (may differ from nominal if gate override applied)
+    asymmetry_penalty: Optional[int] = None    # OTA-505: points deducted for probability skew (0, 8, 15, or 25)
+    asymmetry_ratio: Optional[float] = None    # OTA-505: p_max_loss / p_max_profit diagnostic (None if undefined)
 
     @field_validator("verdict")
     @classmethod

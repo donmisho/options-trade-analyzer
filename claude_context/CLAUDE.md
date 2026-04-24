@@ -1,4 +1,4 @@
-﻿# Options Analyzer — CLAUDE.md (Updated 2026-04-11 00:00)
+# Options Analyzer — CLAUDE.md (Updated 2026-04-11 22:00)
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -29,9 +29,10 @@ ordered by status ascending (so 1-To Do appears before 2-In Review, etc.).
 the Board view. The board is sprint-based and will appear empty.
 List view URL: https://tmtctech-team.atlassian.net/jira/software/projects/OTA/list
 
-**Atlassian MCP status (as of April 2026):** Atlassian MCP tools ARE now available
-and surfacing in Claude.ai tool_search. Use `mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql`
-and `mcp__claude_ai_Atlassian__transitionJiraIssue` directly. No curl workaround needed.
+**Atlassian MCP workaround (as of March 2026):** Atlassian MCP tools do not surface
+in Claude.ai tool_search. Workaround: export Jira CSV manually, or use Claude in
+Chrome to navigate the list view URL above. When MCP tools become available, update
+this protocol to use them directly instead of browser automation.
 
 ## Jira Workflow — Status Definitions
 
@@ -313,20 +314,6 @@ pytest --cov=app                # With coverage
 
 Note: Test infrastructure is minimal. Most validation happens via Swagger UI at /docs.
 
-### Identity Management
-
-```bash
-# Login: navigate to https://localhost:5173 and click "Sign in with Microsoft"
-# Session cookie: ota_session (HttpOnly — not visible in browser JS console)
-# Auth check:
-curl -k -b cookies.txt https://127.0.0.1:8000/api/v1/auth/me
-# CSRF: all POST/PATCH/DELETE require X-CSRF-Token header (value from /auth/me response)
-# Session status:
-curl -k -b cookies.txt https://127.0.0.1:8000/api/v1/auth/session/status
-```
-
-See `claude_context/auth-process.md` for the full auth architecture.
-
 ### Zombie Process Warning (Windows)
 
 Before restarting the backend, always kill existing processes first:
@@ -339,243 +326,20 @@ requests silently, making new route registrations invisible and causing confusin
 
 ---
 
-## Architecture
 
-### Provider Adapter Pattern
+## Architecture Summary
 
-ALL external sources — market data, AI models, signal providers — implement a standard
-abstract interface. Adding a new source = writing one adapter class. Zero changes to
-engines, routes, or frontend.
+See `architecture-plan.md` for full details including directory structure, data models, API endpoints, and agent inventory. Key patterns:
 
-**Rule**: Never hardcode a provider name in API routes. Always use `_get_provider()`
-or `settings.default_market_data_provider`.
+1. Provider Adapter Pattern — all external sources implement a standard interface
+2. Skill-Driven Prompt Architecture — all AI prompts live in SKILL.md files
+3. Two-Track Observability — OTel traces + SQL business records
+4. Unified Position Model — paper follows and live trades share identical data model
+5. Generic Insight Engine — domain-agnostic detect → score → communicate
+6. Backend-for-Frontend Identity — FastAPI is the OIDC confidential client, cookies only
+7. Unified Deployment — FastAPI serves API + React SPA from one App Service
 
-**Current providers**:
-- `SchwabMarketData` — primary market data, OAuth-based
-- `TradierMarketData` — fallback only, dev/testing without Schwab
-- `AnthropicAdapter` — direct Claude API
-- `FoundryAdapter` — Azure-hosted Claude (preferred)
-
-**Future providers** (implement `ContextSource` interface):
-- `SocialSentimentProvider`
-- `FundamentalsProvider`
-- `AlternateBrokerageProvider`
-
-### Backend Structure
-
-```
-app/
-├── main.py                          # FastAPI entry point, lifespan context, CORS
-├── core/
-│   ├── config.py                   # Pydantic Settings (from .env)
-│   └── secrets.py                  # SecretsManager (Azure Key Vault + .env fallback)
-├── auth/
-│   ├── service.py                  # JWT, passwords, TOTP, trade challenges
-│   ├── session_manager.py          # [BFF] Server-side session CRUD, token encryption
-│   ├── providers.py                # [BFF] IdP registry — OIDC config per provider
-│   ├── client_assertion.py         # [BFF] JWT client assertions (cert-based, no secret)
-│   └── dependencies.py             # require_tier1/2/3 + get_session_user FastAPI deps
-├── models/
-│   ├── database.py                 # SQLAlchemy models
-│   ├── session.py                  # Async DB engine and session factory
-│   └── schemas.py                  # Pydantic request/response schemas
-├── providers/
-│   ├── base.py                     # Abstract interfaces (MarketData, ContextSource)
-│   ├── tradier.py                  # Tradier adapter (fallback)
-│   ├── schwab.py                   # Schwab adapter (primary)
-│   ├── schwab_token_manager.py     # OAuth token lifecycle
-│   ├── factory.py                  # ProviderFactory
-│   └── ai.py                       # AnthropicAdapter + FoundryAdapter
-├── analysis/
-│   ├── vertical_engine.py          # Bull call / bear put spread scoring
-│   ├── long_call_engine.py         # Naked calls/puts scoring
-│   ├── directional_engine.py       # SMA momentum + directional scoring
-│   ├── black_scholes.py            # [NEW 2.11] Probability matrix computation
-│   ├── strategy_scorer.py          # [NEW 2.9] Multi-strategy scorecard engine
-│   └── strategy_definitions.py     # Strategy parameter definitions (thresholds, weights)
-├── agents/
-│   ├── position_monitor.py         # [NEW 3.5] Daily position health agent
-│   ├── insight_engine.py           # [NEW 3.6] Generic insight detection + generation
-│   └── skill_loader.py             # Loads SKILL.md files, fills variables
-├── skills/
-│   ├── claude-trade-agent/
-│   │   └── SKILL.md
-│   ├── position-monitor/
-│   │   └── SKILL.md                # [NEW 3.5]
-│   └── insight-engine/
-│       ├── SKILL.md                # [NEW 3.6] Generic pattern
-│       └── domains/
-│           └── options/
-│               └── SKILL.md        # [NEW 3.6] Options-specific vocabulary
-├── middleware/
-│   └── csrf.py                     # [BFF] CSRF Synchronizer Token Pattern middleware
-└── api/
-    ├── auth_routes.py
-    ├── identity_routes.py          # [BFF] OIDC login, callback, me, logout, session/status
-    ├── market_routes.py
-    ├── config_routes.py
-    ├── analysis_routes.py
-    ├── schwab_auth_routes.py
-    ├── evaluation_routes.py        # [UPDATED 2.11] Structured output, replaces AskClaude
-    ├── dashboard_routes.py         # [NEW 2.3] Dashboard layout GET/PUT + media SAS URLs
-    ├── position_routes.py          # [NEW 2.10] Position CRUD, follow, take-position
-    └── insight_routes.py           # [NEW 3.6] Insight feed, dismiss
-```
-
-### Frontend Structure
-
-```
-web/
-├── .env.production                      # Production API base URL (HTTPS)
-├── staticwebapp.config.json             # Azure Static Web Apps routing fallback
-
-web/src/
-├── App.jsx                              # Routes + activeStrategy state
-├── main.jsx                             # React root
-├── context/
-│   └── AppContext.jsx                   # activeSymbol, watchlist, favorites, prices
-├── api/
-│   └── client.js                        # API client functions
-├── strategy-configs/                    # Strategy plugin system
-│   ├── index.js                         # Registry: maps key → config object
-│   ├── verticals.config.js
-│   ├── long-calls.config.js
-│   ├── steady-paycheck.config.js        # [NEW 2.9]
-│   ├── weekly-grind.config.js           # [NEW 2.9]
-│   ├── trend-rider.config.js            # [NEW 2.9]
-│   └── lottery-ticket.config.js         # [NEW 2.9]
-├── components/
-│   ├── Layout.jsx                           # Left rail + watchlist toggle + Outlet
-│   ├── Header.jsx                           # RETIRED — replaced by Layout.jsx left rail
-│   ├── Watchlist.jsx
-│   ├── QuoteBar.jsx
-│   ├── ConfigDrawer.jsx                 # [UPDATED 2.9] Strategy-aware config schema
-│   ├── StrategyScorecard.jsx            # [NEW 2.9] Multi-strategy score display
-│   ├── TradeEvaluationCard.jsx          # [NEW 2.11] Structured Claude output card
-│   ├── ProbabilityMatrix.jsx            # [NEW 2.11] B-S probability table
-│   ├── PositionHealthBadge.jsx          # [NEW 2.10] A-F grade indicator
-│   ├── InsightCard.jsx                  # [NEW 3.6] Dashboard insight feed card
-│   ├── AskClaudePanel.jsx               # DEPRECATED — remove after 2.11 ships
-│   └── ...
-└── pages/
-    ├── TradesPage.jsx                   # [NEW Sprint 4] Unified trades terminal — Sections A-E fully wired
-    ├── SecurityStrategiesPage.jsx       # [NEW Sprint 4] Scan screen — no Config drawer
-    ├── StrategyPage.jsx                 # Per-strategy detail — parameters, weights, positions, Find trades
-    ├── PositionsPage.jsx                # [NEW 2.10] Positions with health grades, versioned re-reads
-    ├── DashboardPage.jsx                # [UPDATED 3.6] Adds insight feed
-    ├── OptionsTerminal.jsx              # RETIRED — replaced by TradesPage.jsx (file kept, not routed)
-    ├── SecurityDashboard.jsx            # RETIRED — replaced by SecurityStrategiesPage.jsx (file kept, not routed)
-    └── DirectionalPage.jsx              # LEGACY — redirects to /dashboard
-```
-
----
-
-## Data Models (Azure SQL)
-
-All tables use UNIQUEIDENTIFIER PKs and DATETIME2 timestamps.
-
-### positions (Phase 2.10)
-
-```sql
-CREATE TABLE positions (
-    position_id           UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
-    user_id               UNIQUEIDENTIFIER NOT NULL,
-    symbol                NVARCHAR(20) NOT NULL,
-    strategy_key          NVARCHAR(50) NOT NULL,       -- 'steady-paycheck', 'trend-rider'
-    trade_structure       NVARCHAR(MAX) NOT NULL,      -- JSON: legs, strikes, expiry
-    source                NVARCHAR(10) NOT NULL,       -- 'PAPER' | 'LIVE'
-    status                NVARCHAR(20) NOT NULL,       -- 'FOLLOWING'|'LIVE'|'CLOSED'
-    entry_price           DECIMAL(10,4),
-    entry_date            DATETIME2 NOT NULL,
-    entry_greeks          NVARCHAR(MAX),               -- JSON: delta, gamma, theta, vega
-    entry_iv_rank         DECIMAL(5,2),
-    entry_sma_alignment   NVARCHAR(MAX),               -- JSON: SMA values + signal
-    entry_underlying_price DECIMAL(10,4),
-    claude_probability_matrix NVARCHAR(MAX),           -- JSON: B-S matrix at entry
-    claude_exit_levels    NVARCHAR(MAX),               -- JSON: warning, scale_out, stop
-    claude_verdict        NVARCHAR(MAX),               -- JSON: full evaluation card
-    claude_score          INT,                         -- 0-100
-    health_grade          NVARCHAR(2),                 -- 'A'|'B'|'C'|'D'|'F'
-    current_price         DECIMAL(10,4),               -- updated by monitor agent
-    current_pnl           DECIMAL(10,4),               -- updated by monitor agent
-    last_monitored_at     DATETIME2,
-    exit_price            DECIMAL(10,4),
-    exit_date             DATETIME2,
-    exit_reason           NVARCHAR(50),                -- TARGET|WARNING|STOP|EXPIRED|MANUAL
-    outcome_pnl           DECIMAL(10,4),
-    created_at            DATETIME2 DEFAULT GETUTCDATE(),
-    updated_at            DATETIME2 DEFAULT GETUTCDATE()
-)
-```
-
-### symbol_context (Phase 3.5)
-
-```sql
-CREATE TABLE symbol_context (
-    context_id    UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
-    symbol        NVARCHAR(20) NOT NULL,
-    source_id     NVARCHAR(50) NOT NULL,
-    signal_type   NVARCHAR(50) NOT NULL,
-    signal_value  NVARCHAR(MAX) NOT NULL,
-    captured_at   DATETIME2 DEFAULT GETUTCDATE(),
-    expires_at    DATETIME2 NOT NULL
-)
-```
-
-### insights (Phase 3.6)
-
-```sql
-CREATE TABLE insights (
-    insight_id          UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
-    domain              NVARCHAR(50) NOT NULL,
-    entity_id           NVARCHAR(100) NOT NULL,
-    entity_label        NVARCHAR(200) NOT NULL,
-    observation         NVARCHAR(MAX) NOT NULL,
-    baseline            NVARCHAR(MAX) NOT NULL,
-    deviation_score     INT NOT NULL,
-    deviation_type      NVARCHAR(50) NOT NULL,
-    title               NVARCHAR(200) NOT NULL,
-    body                NVARCHAR(1000) NOT NULL,
-    severity            NVARCHAR(20) NOT NULL,
-    recommended_actions NVARCHAR(MAX),
-    status              NVARCHAR(20) DEFAULT 'ACTIVE',
-    source_signals      NVARCHAR(MAX),
-    agent_run_id        UNIQUEIDENTIFIER,
-    created_at          DATETIME2 DEFAULT GETUTCDATE(),
-    dismissed_at        DATETIME2,
-    acted_on_at         DATETIME2
-)
-```
-
-### agent_run_log (Phase 2.6 — existing)
-
-Every AI agent invocation writes one row. Never deleted.
-
----
-
-## Key API Endpoints (New/Updated)
-
-### Phase 2.9 — Strategy Scoring
-- `POST /api/v1/analyze/scorecard` — runs all strategies for a symbol, returns 0-100 per strategy
-- `POST /api/v1/analyze/probability-matrix` — Black-Scholes matrix for a trade
-
-### Phase 2.11 — Structured Evaluation
-- `POST /api/v1/evaluate/structured` — Claude deep dive, returns structured cards
-- Replaces: `POST /api/v1/evaluate/trade` (deprecated)
-
-### Phase 2.10 — Positions
-- `POST /api/v1/positions/follow` — create paper position from evaluation
-- `POST /api/v1/positions/take` — create live position (records intent, not yet wired to Schwab)
-- `GET /api/v1/positions` — list with filters: status, source, symbol, strategy
-- `PATCH /api/v1/positions/{id}/close` — close position, record outcome
-- `GET /api/v1/positions/aggregate` — stats by strategy group
-
-### Phase 3.5 — Position Monitor
-- `POST /api/v1/agents/position-monitor/run` — on-demand trigger (also runs on schedule)
-
-### Phase 3.6 — Insights
-- `GET /api/v1/insights` — active insights feed, filtered by domain='options'
-- `PATCH /api/v1/insights/{id}/dismiss` — dismiss insight
+**Provider routing rule:** Never hardcode a provider name in API routes. Always use `_get_provider()` or `settings.default_market_data_provider`.
 
 ---
 
@@ -612,25 +376,10 @@ Every AI agent invocation writes one row. Never deleted.
 
 ## Important Implementation Details
 
-### BFF Auth Pattern
-
-The app uses a Backend-for-Frontend identity pattern. FastAPI is the confidential OIDC
-client. The React SPA holds only an `HttpOnly` session cookie (`ota_session`) — no tokens
-ever reach the browser.
-
-Key files: `app/auth/session_manager.py`, `app/auth/providers.py`, `app/api/identity_routes.py`,
-`app/middleware/csrf.py`.
-
-See `claude_context/auth-process.md` for full details: ADR, flow diagrams, session lifecycle,
-multi-IdP registry, CSRF controls, and troubleshooting guide.
-
-**Never store tokens in localStorage or React state.** Token management is server-side only.
-
 ### Schwab OAuth Flow
 
 Schwab requires HTTPS. Backend must run on https://127.0.0.1:8000 with self-signed certs.
-Schwab tokens are stored server-side in `SchwabTokenManager` (Key Vault in prod).
-See `claude_context/auth-process.md` — Section 5 (Schwab Coexistence) for the flow diagram.
+See SCHWAB-LOGIN-PROCESS.md for full details.
 
 ### Black-Scholes Probability Matrix
 
@@ -689,9 +438,8 @@ Key decisions summarized (v3.2 — 04-02-2026):
 - RefreshConfirmDialog.jsx — reusable confirmation dialog for multi-position Claude API refresh. Used on both PositionsPage and StrategyPage.
 - PositionsPage.jsx — v3 design with StrategyPill (abbreviated 2-letter pills), health grade letter badges (A-F), versioned re-reads with white outlined Claude advice badge, exit plan levels, group by strategy/symbol/health.
 - Claude API cost guardrail: Refresh all shows confirmation dialog when >1 position. Single position refresh runs without confirmation. One daily auto-refresh per position after market close. Never on page load or timers.
-- Trade detail Sections A-C, E fully wired in TradesPage (Sprint 4 + Sprint 5): Section D (ProbabilityMatrix) retired from frontend; Section E fully wired evaluate → verdict → Follow/Take Position → follow-up.
+- Trade detail Sections A-E fully wired in TradesPage (Sprint 4): Section D uses live B-S probability matrix; Section E fully wired evaluate → verdict → Follow/Take Position → follow-up.
 - Security Strategies page: Config drawer removed (Part 11). SMA periods fixed at 8/21/50.
-- Sprint 5 (April 2026): regression fixes (evaluate payload, pill colors, dropdown, watchlist auto-add, exit scenarios condensed to 5 key rows), scorecard API enriched with quote data + SMA signal, scan page caching, CSS custom properties for strategy colors (`--strategy-sp/wg/tr/lt` in global.css), Strategies column reordered to index 1 in both column configs, dead file cleanup (AskClaudePanel_v2.jsx, Watchlist.jsx deleted), alert → Toast migration, RefreshConfirmDialog consolidated. ✅
 
 ---
 

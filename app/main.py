@@ -267,6 +267,15 @@ async def lifespan(app: FastAPI):
             "/evaluate/structured will return 503"
         )
 
+    # 6c. Register hard gates (OTA-502+). Gates must be registered ONCE at startup,
+    #     in evaluation order. First triggered gate wins (first-match-wins).
+    from app.analysis.hard_gates import register_gate
+    from app.analysis.hard_gates.earnings_gate import EarningsInWindowGate
+    from app.analysis.hard_gates.negative_ev_gate import NegativeEVGate
+    register_gate(EarningsInWindowGate())   # OTA-502: earnings-in-window (first — catalyst risk)
+    register_gate(NegativeEVGate())         # OTA-503: negative EV (second — math quality gate)
+    logger.info("Hard gates registered: earnings_in_window, negative_ev (OTA-502/503)")
+
     # 7. Initialize OpenTelemetry → Application Insights (agent observability)
     appinsights_cs = secrets_manager.get("applicationinsights-connection-string")
     init_agent_telemetry(appinsights_cs)
