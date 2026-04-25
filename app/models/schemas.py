@@ -223,7 +223,7 @@ class TradeExecuteResponse(BaseModel):
 
 class ProviderConnectRequest(BaseModel):
     """Connect a brokerage provider."""
-    provider: str  # "tradier" or "schwab"
+    provider: str  # "schwab"
     role: str  # "market_data", "account", "trading"
     # Provider-specific config
     config: dict  # e.g., {"token": "...", "environment": "sandbox"}

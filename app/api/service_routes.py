@@ -39,14 +39,6 @@ _SERVICE_REGISTRY = [
         "auth_type": "oauth",
         "login_url": "/api/v1/auth/schwab/login",
     },
-    {
-        "id": "tradier",
-        "name": "Tradier",
-        "description": "Market Data (Deprecated)",
-        "active": False,
-        "auth_type": "api_key",
-        "login_url": None,
-    },
 ]
 
 

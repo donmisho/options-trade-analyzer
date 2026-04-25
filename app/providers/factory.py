@@ -8,7 +8,6 @@ right adapter instance. This is how the system stays flexible — adding a
 new provider means registering it here and writing its adapter class.
 
 REGISTRATION: Each provider registers what interfaces it supports.
-Tradier supports MarketDataProvider + AccountProvider + TradingProvider.
 A CSV import might only support AccountProvider. The factory enforces this.
 """
 
@@ -16,7 +15,6 @@ import logging
 from typing import Optional
 
 from app.providers.base import MarketDataProvider, AccountProvider, TradingProvider, ContextSource
-from app.providers.tradier import TradierMarketData
 from app.providers.schwab import SchwabMarketData
 from app.providers.finnhub_earnings import FinnhubEarningsSource
 from app.core.secrets import SecretsManager
@@ -35,17 +33,6 @@ CONTEXT_SOURCE_REGISTRY: dict[str, ContextSource] = {
 # Registry: provider name → (capabilities, factory function)
 # Each factory function takes (secrets_manager, user_id) and returns an adapter
 PROVIDER_REGISTRY = {
-    "tradier": {
-        "capabilities": ["market_data", "account", "trading"],
-        "market_data": lambda secrets, user_id, env: TradierMarketData(
-            token=secrets.get("tradier-api-token", user_id=user_id)
-                    or secrets.get("tradier-api-token"),
-            environment=env or settings.tradier_environment,
-        ),
-        # Account and Trading adapters will be added later
-        # "account": lambda secrets, user_id, env: TradierAccount(...),
-        # "trading": lambda secrets, user_id, env: TradierTrading(...),
-    },
     "schwab": {
         "capabilities": ["market_data"],
         "market_data": None,  # Set at runtime by init — needs token_manager
@@ -61,7 +48,7 @@ class ProviderFactory:
         factory = ProviderFactory(secrets_manager)
         
         # Get the market data provider for a user
-        provider = factory.get_market_data("tradier", user_id="don")
+        provider = factory.get_market_data("schwab", user_id="don")
         chain = await provider.get_chain("QQQ")
     """
 

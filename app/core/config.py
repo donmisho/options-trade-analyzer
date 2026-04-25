@@ -49,9 +49,6 @@ class Settings(BaseSettings):
     default_account_provider: Optional[str] = None
     default_trading_provider: Optional[str] = None
 
-    # --- Tradier (non-secret settings) ---
-    tradier_environment: str = "sandbox"  # "sandbox" or "production"
-
     # --- Schwab (non-secret settings) ---
     # App key and secret come from Key Vault ("schwab-app-key", "schwab-app-secret")
     schwab_callback_url: str = "https://127.0.0.1:8000/api/v1/auth/schwab/callback"

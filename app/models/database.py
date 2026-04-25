@@ -47,7 +47,7 @@ class User(Base):
     mfa_verified = Column(Boolean, default=False)  # True after first successful TOTP verify
 
     # Provider assignments for this user
-    market_data_provider = Column(String(50), default="tradier")
+    market_data_provider = Column(String(50), default="schwab")
     account_provider = Column(String(50), nullable=True)
     trading_provider = Column(String(50), nullable=True)
     trading_enabled = Column(Boolean, default=False)  # Kill switch per user
