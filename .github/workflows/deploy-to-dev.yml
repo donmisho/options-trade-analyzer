@@ -48,3 +48,54 @@ jobs:
           app-name: 'options-analyzer-api-dev'
           slot-name: 'Production'
           package: .
+
+      - name: Smoke test dev deploy
+        id: smoke
+        shell: bash
+        run: |
+          DEV_URL="https://oa-dev.tmtctech.ai"
+          HEALTH_STATUS=""
+          # Retry loop: B1 cold start can take 60-90 seconds after deploy
+          for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+            HEALTH_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "$DEV_URL/api/v1/health" || echo "000")
+            if [ "$HEALTH_STATUS" = "200" ]; then
+              echo "Health check passed on attempt $i"
+              break
+            fi
+            echo "Attempt $i: health=$HEALTH_STATUS, sleeping 10s..."
+            sleep 10
+          done
+          if [ "$HEALTH_STATUS" != "200" ]; then
+            echo "::error::Health check failed after 12 attempts (~2 minutes). Final status: $HEALTH_STATUS"
+            exit 1
+          fi
+
+          SPA_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$DEV_URL/")
+          if [ "$SPA_STATUS" != "200" ]; then
+            echo "::error::SPA root returned $SPA_STATUS (expected 200)"
+            exit 1
+          fi
+
+          # Auth endpoint reachability — non-5xx means routing works
+          AUTH_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$DEV_URL/api/v1/auth/me")
+          if [[ "$AUTH_STATUS" =~ ^5 ]]; then
+            echo "::error::Auth endpoint returned 5xx ($AUTH_STATUS) — app crashed"
+            exit 1
+          fi
+
+          echo "Smoke test passed."
+          echo "dev_url=$DEV_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Notify pre-prod ready
+        shell: bash
+        run: |
+          echo "::notice::Smoke test passed. Verify dev manually at ${{ steps.smoke.outputs.dev_url }}"
+          echo "## ✅ Dev deploy verified" >> $GITHUB_STEP_SUMMARY
+          echo "Smoke tests passed. Build artifact verified on dev environment." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Dev URL:** ${{ steps.smoke.outputs.dev_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Next steps:**" >> $GITHUB_STEP_SUMMARY
+          echo "1. Verify dev manually in browser at the URL above" >> $GITHUB_STEP_SUMMARY
+          echo "2. If good, run **deploy-to-prod.yml** with confirm_deploy=DEPLOY to ship to production" >> $GITHUB_STEP_SUMMARY
+          echo "3. If bad, the bad build stays on dev (prod unaffected) — fix forward or roll back dev with deploy-to-dev.yml" >> $GITHUB_STEP_SUMMARY

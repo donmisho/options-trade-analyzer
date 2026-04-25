@@ -1,0 +1,71 @@
+name: Rollback production
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_rollback:
+        description: 'Type ROLLBACK to deploy a previous build to production'
+        required: true
+        default: ''
+      build_run_id:
+        description: 'Run ID of the build-on-push.yml run whose artifact should be deployed (find in GitHub Actions UI)'
+        required: true
+        default: ''
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+      actions: read
+
+    steps:
+      - name: Validate confirm_rollback
+        run: |
+          if [ "${{ github.event.inputs.confirm_rollback }}" != "ROLLBACK" ]; then
+            echo "::error::confirm_rollback must equal 'ROLLBACK'. Got: '${{ github.event.inputs.confirm_rollback }}'"
+            exit 1
+          fi
+
+      - name: Validate build_run_id
+        run: |
+          if [ -z "${{ github.event.inputs.build_run_id }}" ]; then
+            echo "::error::build_run_id is required. Find the run ID in the Actions UI under build-on-push.yml."
+            exit 1
+          fi
+
+      - name: Download artifact from specified build run
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          workflow: build-on-push.yml
+          run_id: ${{ github.event.inputs.build_run_id }}
+          name: deployment-package
+          path: ./deployment-package
+
+      - name: Unzip deployment artifact
+        run: unzip ./deployment-package/deployment-package.zip -d ./deployment-package/unpacked
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_E4C4A364847749A6AD6322E92E0BC195 }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_8EE24AB74B6F4F9DB8156F19D3827F6E }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_5B5DBA52E1624F41AA812BFD64B8B490 }}
+
+      - name: Deploy artifact to production
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: 'options-analyzer-api'
+          slot-name: 'Production'
+          package: ./deployment-package/unpacked
+
+      - name: Log rollback result
+        shell: bash
+        run: |
+          echo "## ↩️ Rollback complete" >> $GITHUB_STEP_SUMMARY
+          echo "Production now serving the artifact from build run ID: ${{ github.event.inputs.build_run_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Important:** No automatic verification follows this step. Manually verify oa.tmtctech.ai is healthy." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**RTO:** ~3-5 minutes (deploy time). For faster recovery in the future, consider upgrading to S1 + slot-swap design." >> $GITHUB_STEP_SUMMARY
