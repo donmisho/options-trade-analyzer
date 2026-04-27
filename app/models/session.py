@@ -48,17 +48,28 @@ if database_url.startswith("mssql+pyodbc://"):
 
     SQL_COPT_SS_ACCESS_TOKEN = 1256  # pyodbc constant for AAD token injection
 
-    # Singleton credential — one object shared across all pool connections.
-    # DefaultAzureCredential caches tokens internally (~1hr TTL), so all
-    # connections reuse the same token rather than each making a separate
-    # MSI HTTP round-trip. The previous per-connection instantiation caused
-    # concurrent cold-start requests to each race to the MSI endpoint,
-    # exhausting the connection pool before any connection was established.
-    from azure.identity import DefaultAzureCredential
-    _azure_credential = DefaultAzureCredential()
+    # Singleton credential — lazily initialized on first DB connection.
+    # WHY singleton: DefaultAzureCredential caches tokens internally (~1hr TTL),
+    # so all pool connections share one token rather than each making a separate
+    # MSI HTTP round-trip. The original per-connection instantiation caused
+    # concurrent cold-start requests to race to the MSI endpoint, exhausting
+    # the pool before any connection was established.
+    # WHY lazy (not module-level): DefaultAzureCredential() can block during
+    # construction in some Azure environments. Running it at import time blocks
+    # the main thread and hangs uvicorn startup. Lazy init defers construction
+    # to the first do_connect call, which runs in a background thread.
+    import threading as _threading
+    _azure_credential = None
+    _azure_credential_lock = _threading.Lock()
 
     def _get_azure_token_attr() -> dict:
         """Get a fresh AAD token for Azure SQL and pack it for pyodbc."""
+        global _azure_credential
+        if _azure_credential is None:
+            with _azure_credential_lock:
+                if _azure_credential is None:
+                    from azure.identity import DefaultAzureCredential
+                    _azure_credential = DefaultAzureCredential()
         token = _azure_credential.get_token("https://database.windows.net/.default")
         token_bytes = token.token.encode("UTF-16-LE")
         token_struct = struct.pack(f"<I{len(token_bytes)}s", len(token_bytes), token_bytes)
