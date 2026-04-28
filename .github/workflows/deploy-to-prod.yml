@@ -48,3 +48,28 @@ jobs:
           app-name: 'options-analyzer-api'
           slot-name: 'Production'
           package: .
+
+      - name: Smoke test prod deploy
+        env:
+          PROD_URL: "https://options-analyzer-api.azurewebsites.net"
+        run: |
+          for i in {1..12}; do
+            response=$(curl -s -w "\n%{http_code}" "$PROD_URL/api/v1/health/detailed")
+            http_code=$(echo "$response" | tail -n1)
+            body=$(echo "$response" | sed '$d')
+
+            if [ "$http_code" = "200" ] && \
+               echo "$body" | grep -q '"database":{"status":"connected"' && \
+               echo "$body" | grep -q '"schwab":{"status":"connected"'; then
+              echo "Smoke test passed on attempt $i"
+              echo "Response: $body"
+              exit 0
+            fi
+
+            echo "Attempt $i: http=$http_code, body=$body, sleeping 10s..."
+            sleep 10
+          done
+          echo "Error: Smoke test failed after 12 attempts (~2 minutes)."
+          echo "Final http_code: $http_code"
+          echo "Final body: $body"
+          exit 1
