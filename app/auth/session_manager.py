@@ -24,7 +24,7 @@ from typing import Optional, TYPE_CHECKING
 
 import httpx
 from cryptography.fernet import Fernet
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 
 from app.core.config import settings
 from app.models.database import UserSession
@@ -154,12 +154,18 @@ class SessionManager:
         Look up an active session by session_id.
 
         Returns None if not found or expired.
-        Updates last_active_at on each successful access.
         Schedules a background token refresh if the token is within 5 minutes
         of expiry (fire-and-forget — does not block the request).
+
+        last_active_at is updated via a fire-and-forget atomic conditional UPDATE
+        (WHERE last_active_at < now - 5 min). This prevents concurrent SPA requests
+        from contending on a row write lock — only the first request in any 5-minute
+        window actually writes; the rest are no-ops. The SELECT here is read-only
+        (shared lock) and releases its connection before the UPDATE fires.
         """
         now = datetime.utcnow()
 
+        # --- SELECT: read-only, shared lock, connection released immediately ---
         async with make_session() as db:
             result = await db.execute(
                 select(UserSession)
@@ -171,17 +177,11 @@ class SessionManager:
             if session is None:
                 return None
 
-            session.last_active_at = now
-
-            # Schedule background token refresh if token is about to expire
-            if session.token_expires_at is not None:
-                token_exp = session.token_expires_at
-                if (token_exp - now) < timedelta(minutes=5):
-                    asyncio.create_task(self.refresh_tokens(session_id))
-
-            await db.commit()
-
-            return {
+            needs_refresh = (
+                session.token_expires_at is not None
+                and (session.token_expires_at - now) < timedelta(minutes=5)
+            )
+            session_data = {
                 "user_id": session.user_id,
                 "email": session.email or "",
                 "display_name": session.display_name or "",
@@ -189,6 +189,35 @@ class SessionManager:
                 "csrf_token": session.csrf_token,
                 "session_expires_at": session.expires_at.isoformat() + "Z",
             }
+
+        # --- Fire-and-forget: atomic conditional UPDATE ---
+        # Connection from the SELECT is already returned to the pool before this fires.
+        asyncio.create_task(self._touch_last_active(session_id, now))
+
+        if needs_refresh:
+            asyncio.create_task(self.refresh_tokens(session_id))
+
+        return session_data
+
+    async def _touch_last_active(self, session_id: str, now: datetime) -> None:
+        """
+        Atomic conditional UPDATE of last_active_at. Fire-and-forget safe.
+
+        The WHERE threshold (5-minute window) means concurrent requests are
+        no-ops — only the first request in any 5-minute window actually acquires
+        a write lock and updates the row.
+        """
+        try:
+            async with make_session() as db:
+                await db.execute(
+                    update(UserSession)
+                    .where(UserSession.session_id == session_id)
+                    .where(UserSession.last_active_at < now - timedelta(minutes=5))
+                    .values(last_active_at=now)
+                )
+                await db.commit()
+        except Exception as e:
+            logger.debug(f"SessionManager: _touch_last_active failed (non-fatal): {e}")
 
     async def refresh_tokens(self, session_id: str) -> bool:
         """

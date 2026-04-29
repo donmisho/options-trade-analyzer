@@ -82,8 +82,8 @@ if database_url.startswith("mssql+pyodbc://"):
         echo=settings.debug,
         pool_pre_ping=True,
         pool_recycle=1800,
-        pool_size=5,
-        max_overflow=10,
+        pool_size=10,
+        max_overflow=20,
     )
 
     # WHY do_connect event: connect_args would bake in a token once at startup
