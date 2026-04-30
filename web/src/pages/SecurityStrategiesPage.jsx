@@ -145,7 +145,13 @@ export default function SecurityStrategiesPage() {
 
   function handleSourceChange(source) {
     setSelectedSource(source);
-    // Clear stale results when source changes
+    // Only clear results when switching to a different source.
+    // On initial auto-select the new source ID matches the cached source ID,
+    // so we skip the wipe and the restored cache stays visible.
+    try {
+      const cached = JSON.parse(localStorage.getItem('ota_scan_results') || '{}');
+      if (source?.id === cached.sourceId) return;
+    } catch { /* corrupt cache — fall through and clear */ }
     setResults([]);
     setErrors([]);
     setHasScanned(false);
@@ -289,7 +295,7 @@ export default function SecurityStrategiesPage() {
 
     // Persist results for instant display on return
     try {
-      localStorage.setItem('ota_scan_results', JSON.stringify({ results: finalResults, timestamp: Date.now() }));
+      localStorage.setItem('ota_scan_results', JSON.stringify({ results: finalResults, sourceId: selectedSource?.id, timestamp: Date.now() }));
     } catch { /* storage full — skip */ }
   };
 
