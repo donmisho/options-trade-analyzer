@@ -979,10 +979,12 @@ export default function TradesPage() {
         await followTrade({
           symbol,
           strategy_key: strategyKeys[0],
-          source: 'PAPER',
-          trade_structure: JSON.stringify(trade),
+          trade_structure: trade,
           entry_price: getEntryPrice(trade),
-          entry_date: new Date().toISOString(),
+          entry_underlying_price: underlying,
+          entry_greeks: { delta: trade.delta ?? null, gamma: trade.gamma ?? null, theta: trade.theta ?? null, vega: trade.vega ?? null },
+          entry_iv_rank: trade.iv_rank ?? trade.iv ?? 0,
+          entry_sma_alignment: smaAlign || {},
         });
         showToast({ type: 'success', message: `Position followed (Paper) — ${symbol} ${tradeLabel(trade)}`, link: { text: 'View Positions', to: '/positions' }, duration: 4000 });
       } catch (err) {
@@ -995,10 +997,12 @@ export default function TradesPage() {
         await takeTrade({
           symbol,
           strategy_key: strategyKeys[0],
-          source: 'LIVE',
-          trade_structure: JSON.stringify(trade),
+          trade_structure: trade,
           entry_price: getEntryPrice(trade),
-          entry_date: new Date().toISOString(),
+          entry_underlying_price: underlying,
+          entry_greeks: { delta: trade.delta ?? null, gamma: trade.gamma ?? null, theta: trade.theta ?? null, vega: trade.vega ?? null },
+          entry_iv_rank: trade.iv_rank ?? trade.iv ?? 0,
+          entry_sma_alignment: smaAlign || {},
         });
         showToast({ type: 'success', message: `Position taken (Live) — ${symbol} ${tradeLabel(trade)}`, link: { text: 'View Positions', to: '/positions' }, duration: 4000 });
       } catch (err) {
