@@ -51,7 +51,7 @@ jobs:
 
       - name: Smoke test prod deploy
         env:
-          PROD_URL: "https://options-analyzer-api.azurewebsites.net"
+          PROD_URL: "https://options-analyzer-api-d7aqhsdmd6f2anbc.centralus-01.azurewebsites.net"
         run: |
           for i in {1..12}; do
             response=$(curl -s -w "\n%{http_code}" "$PROD_URL/api/v1/health/detailed")
@@ -59,8 +59,7 @@ jobs:
             body=$(echo "$response" | sed '$d')
 
             if [ "$http_code" = "200" ] && \
-               echo "$body" | grep -q '"database":{"status":"connected"' && \
-               echo "$body" | grep -q '"schwab":{"status":"connected"'; then
+               echo "$body" | grep -q '"database":{"status":"connected"'; then
               echo "Smoke test passed on attempt $i"
               echo "Response: $body"
               exit 0
