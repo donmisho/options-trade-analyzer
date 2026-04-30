@@ -7,10 +7,10 @@
  * Passing it as props through 4+ levels of components would be messy.
  * Context makes it available to any component that needs it via useApp().
  *
- * WHY localStorage for favorites and watchlist?
- * Both need to survive page refreshes and browser restarts.
+ * WHY localStorage for favorites?
+ * Favorites need to survive page refreshes and browser restarts.
  * localStorage is the simplest persistence layer for client-side data.
- * In a future phase, we could sync to the database via an API endpoint.
+ * Watchlist is persisted in Azure SQL via /api/v1/watchlist.
  */
 
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
@@ -149,19 +149,23 @@ export function AppProvider({ children }) {
     // Don't clear trades/context on close — allow re-open to same state
   }
 
-  // Load watchlist from DB on mount; fall back to STARTER_WATCHLIST if empty or API fails
+  // Load watchlist from DB on mount; fall back to STARTER_WATCHLIST if empty or API fails.
+  // fetchPrices is called explicitly here (and only here) for the initial price load —
+  // NOT via a [fetchPrices] useEffect dependency, which would re-fire on every mutation.
   useEffect(() => {
     getWatchlist()
       .then(data => {
         const symbols = data?.symbols ?? (Array.isArray(data) ? data : []);
-        if (symbols.length > 0) {
-          setWatchlist(symbols.map(s => ({ symbol: s, name: SYMBOL_NAMES[s] || '' })));
-        } else {
-          setWatchlist(STARTER_WATCHLIST);
-        }
+        const items = symbols.length > 0
+          ? symbols.map(s => ({ symbol: s, name: SYMBOL_NAMES[s] || '' }))
+          : STARTER_WATCHLIST;
+        setWatchlist(items);
+        fetchPrices(items.map(w => w.symbol));
       })
-      .catch(() => {
+      .catch(err => {
+        console.error('[AppContext] getWatchlist failed, using starter:', err);
         setWatchlist(STARTER_WATCHLIST);
+        fetchPrices(STARTER_WATCHLIST.map(w => w.symbol));
       });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -172,21 +176,36 @@ export function AppProvider({ children }) {
   // Ref to prevent duplicate fetches if component re-renders during load
   const fetchingRef = useRef(false);
 
+  // Mirror of watchlist as a ref so fetchPrices can read current symbols
+  // without closing over watchlist state (which would force a new callback
+  // identity on every mutation and re-trigger any effect that deps on it).
+  const watchlistRef = useRef([]);
+  useEffect(() => {
+    watchlistRef.current = watchlist.map(w => w.symbol);
+  }, [watchlist]);
+
   /**
-   * Fetch live quotes for all watchlist symbols.
+   * Fetch live quotes for the given symbols (or all watchlist symbols if
+   * called with no argument — preserving the no-arg contract used by
+   * Header.jsx and Layout.jsx without closing over watchlist state).
+   *
+   * WHY empty dep array + watchlistRef?
+   * fetchPrices must be stable so no useEffect can dep on it and re-fire
+   * on every watchlist mutation. watchlistRef.current always reflects the
+   * latest watchlist without introducing a dep.
    *
    * WHY parallel fetch instead of one-by-one?
-   * Calling getQuote for 6 symbols sequentially would take ~6 seconds
-   * (each call waits for the previous). Promise.all fires them all at
-   * once, so it takes as long as the slowest single call (~1 second).
+   * Promise.all fires all quote requests simultaneously, so the latency
+   * is the slowest single call (~1s) rather than N calls in series (~Ns).
    */
-  const fetchPrices = useCallback(async (symbolList) => {
+  const fetchPrices = useCallback(async (symbols) => {
+    const list = symbols ?? watchlistRef.current;
+    if (!list || list.length === 0) return;
     if (fetchingRef.current) return;
     fetchingRef.current = true;
     setPricesLoading(true);
     try {
-      const symbols = symbolList || watchlist.map(w => w.symbol);
-      const quotes = await getQuotes(symbols);
+      const quotes = await getQuotes(list);
       setPrices(prev => {
         const updated = { ...prev };
         for (const [symbol, q] of Object.entries(quotes)) {
@@ -200,13 +219,13 @@ export function AppProvider({ children }) {
         }
         return updated;
       });
-    } catch {
-      // Silently fail — stale prices are better than crashing
+    } catch (err) {
+      console.error('[AppContext] fetchPrices failed:', err);
     } finally {
       setPricesLoading(false);
       fetchingRef.current = false;
     }
-  }, [watchlist]);
+  }, []);
 
   /**
    * Add a symbol to the watchlist (or move it to the top if already there).
@@ -242,11 +261,6 @@ export function AppProvider({ children }) {
     setWatchlist(prev => prev.filter(w => w.symbol !== sym));
     removeWatchlistSymbol(sym).catch(() => {});
   }, []);
-
-  // Fetch prices on initial load
-  useEffect(() => {
-    fetchPrices();
-  }, [fetchPrices]);
 
   // Favorites — loaded from backend on mount, localStorage as fallback
   const [favorites, setFavorites] = useState(loadFavorites);
