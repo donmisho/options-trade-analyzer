@@ -11,6 +11,7 @@ AZURE SQL vs SQLITE:
 - The connection string format determines which driver is used
 """
 
+import asyncio
 import struct
 import urllib.parse
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
@@ -150,11 +151,19 @@ async def init_db():
             has_app_tables = await conn.run_sync(_any_app_table_exists)
 
         if has_app_tables and not has_version_table:
+            _db_url = settings.database_url
+            _parsed = urllib.parse.urlparse(_db_url)
+            _target_server = _parsed.hostname or "(unknown host)"
+            _target_db = _parsed.path.lstrip("/") or "(unknown db)"
             raise RuntimeError(
                 "Database has application tables but no alembic_version table. "
                 "This is a pre-Alembic (unmanaged) database. "
-                "Run `alembic stamp f9e59a180957` from the project root to register "
-                "the current schema as the baseline, then restart the app."
+                f"\n\nTarget that needs stamping:\n"
+                f"  Server:   {_target_server}\n"
+                f"  Database: {_target_db}\n\n"
+                "Run `alembic stamp f9e59a180957` from the project root "
+                "WITH ENV VARS POINTED AT THIS SERVER, "
+                "then restart the app."
             )
 
         # Run migrations — no-op if already at head, creates all tables if empty.
@@ -164,7 +173,13 @@ async def init_db():
 
         alembic_ini = Path(__file__).resolve().parent.parent.parent / "alembic.ini"
         alembic_cfg = Config(str(alembic_ini))
-        alembic_command.upgrade(alembic_cfg, "head")
+        # WHY asyncio.to_thread: alembic_command.upgrade() is synchronous and
+        # calls asyncio.run() internally (via env.py run_migrations_online).
+        # Calling asyncio.run() from within a running event loop raises
+        # "RuntimeError: This event loop is already running."
+        # Running in a thread-pool worker gives alembic a clean thread with no
+        # active event loop, so asyncio.run() can create its own.
+        await asyncio.to_thread(alembic_command.upgrade, alembic_cfg, "head")
         logger.info("Database migrations applied (alembic upgrade head)")
 
     except RuntimeError:
