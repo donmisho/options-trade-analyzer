@@ -16,7 +16,7 @@ WHY this bridge pattern:
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -177,7 +177,7 @@ async def exchange_entra_token(
         if user.username != name[:50] or user.email != email:
             user.username = name[:50]
             user.email = email
-            user.updated_at = datetime.utcnow()
+            user.updated_at = datetime.now(timezone.utc)
             await db.commit()
 
     if not user.is_active:

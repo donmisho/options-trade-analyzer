@@ -12,7 +12,7 @@ authenticated user's ID.
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import (
     Column, Integer, String, Float, Boolean, DateTime, Date, Text, Numeric,
     ForeignKey, JSON, Index, UniqueConstraint
@@ -52,8 +52,8 @@ class User(Base):
     trading_provider = Column(String(50), nullable=True)
     trading_enabled = Column(Boolean, default=False)  # Kill switch per user
 
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     # Relationships
     config = relationship("UserConfig", back_populates="user", uselist=False)
@@ -104,7 +104,7 @@ class UserConfig(Base):
     # Any settings not in dedicated columns go here
     extra_settings = Column(JSON, default=dict)
 
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     # Relationships
     user = relationship("User", back_populates="config")
@@ -146,7 +146,7 @@ class TradeLog(Base):
     # Audit
     session_id = Column(String(100))
     ip_address = Column(String(45))
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     user = relationship("User", back_populates="trades")
@@ -176,7 +176,7 @@ class AuditLog(Base):
     detail = Column(JSON, nullable=True)  # Event-specific data
     ip_address = Column(String(45), nullable=True)
     session_id = Column(String(100), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     user = relationship("User", back_populates="audit_events")
@@ -202,7 +202,7 @@ class UserWatchlist(Base):
     symbol = Column(String(10), nullable=False)
     name = Column(String(100), nullable=True)
     position = Column(Integer, nullable=False, default=0)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         UniqueConstraint("user_id", "symbol", name="uq_user_watchlist_symbol"),
@@ -229,7 +229,7 @@ class UserFavorite(Base):
     label = Column(String(300), nullable=True)        # Display name
     strategy = Column(String(50), nullable=True)      # bull_call_spread, long_call, etc.
     trade_data = Column(JSON, nullable=False)          # Full trade snapshot
-    saved_at = Column(DateTime, default=datetime.utcnow)
+    saved_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         UniqueConstraint("user_id", "trade_id", name="uq_user_favorites_trade"),
@@ -265,8 +265,8 @@ class SchwabToken(Base):
     refresh_expires_at = Column(DateTime, nullable=False)
 
     # Metadata
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     # Relationships
     user = relationship("User", backref="schwab_token")
@@ -319,7 +319,7 @@ class AgentRunLog(Base):
     latency_ms = Column(Integer, nullable=True)
     model_name = Column(String(100), nullable=True)
 
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         Index("ix_agent_run_log_run_id", "run_id"),
@@ -362,8 +362,8 @@ class TradeRecommendation(Base):
     run_id = Column(String(36), nullable=True)      # links back to agent_run_log
     prompt_version = Column(String(50), nullable=True)
 
-    evaluated_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    evaluated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         UniqueConstraint("user_id", "trade_key", name="uq_trade_recommendations_user_key"),
@@ -396,7 +396,7 @@ class SymbolQuote(Base):
     volume = Column(Integer, nullable=True)
     provider = Column(String(50), nullable=True)
 
-    captured_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    captured_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
     __table_args__ = (
         Index("ix_symbol_quotes_user_symbol_time", "user_id", "symbol", "captured_at"),
@@ -421,7 +421,7 @@ class OptionChainSnapshot(Base):
     provider = Column(String(50), nullable=True)
     contract_count = Column(Integer, nullable=True)  # len(contracts) for quick filtering
     chain_data = Column(JSON, nullable=False)          # full list of contracts
-    captured_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    captured_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
     __table_args__ = (
         Index("ix_option_chain_snapshots_user_symbol", "user_id", "symbol", "captured_at"),
@@ -461,7 +461,7 @@ class AnalysisRun(Base):
     result_count = Column(Integer, nullable=True)   # rows returned to frontend (capped)
     total_valid = Column(Integer, nullable=True)    # total that passed filters before cap
 
-    ran_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    ran_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
     # Relationships
     analyzed_trades = relationship("AnalyzedTrade", back_populates="run")
@@ -534,7 +534,7 @@ class AnalyzedTrade(Base):
     # score_breakdown shape (naked):     {delta_score, theta_score, iv_score, rr_score, liquidity_score}
     scoring_weights = Column(JSON, nullable=False)  # weights used (duplicated from run for self-contained rows)
 
-    captured_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    captured_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
     # Relationships
     run = relationship("AnalysisRun", back_populates="analyzed_trades")
@@ -568,7 +568,7 @@ class SymbolContext(Base):
     source_id   = Column(String(50), nullable=False)   # e.g. "schwab_quotes"
     signal_type = Column(String(50), nullable=False)   # PRICE | SENTIMENT | FUNDAMENTAL | TECHNICAL | NEWS
     signal_value = Column(Text, nullable=False)        # JSON blob — shape defined by source
-    captured_at = Column(DateTime, default=datetime.utcnow)
+    captured_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     expires_at  = Column(DateTime, nullable=False)
 
     __table_args__ = (
@@ -608,7 +608,7 @@ class Insight(Base):
     status              = Column(String(20), default="ACTIVE")   # ACTIVE|DISMISSED|ACTED_ON
     source_signals      = Column(Text)                           # JSON: which sources triggered
     agent_run_id        = Column(String(36))                     # FK to agent_run_log
-    created_at          = Column(DateTime, default=datetime.utcnow)
+    created_at          = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     dismissed_at        = Column(DateTime)
     acted_on_at         = Column(DateTime)
 
@@ -641,7 +641,7 @@ class ValidationAssessment(Base):
     verdict         = Column(String(20), nullable=False)   # 'EXECUTE' | 'WATCH' | 'PASS'
     agreement       = Column(Boolean, nullable=False)      # True = agree, False = disagree
     notes           = Column(String(500), nullable=True)
-    created_at      = Column(DateTime, default=datetime.utcnow)
+    created_at      = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         Index("ix_validation_assessments_ticket", "jira_ticket"),
@@ -663,8 +663,8 @@ class StrategyConfig(Base):
     user_id      = Column(String(36), nullable=False)
     strategy_key = Column(String(50), nullable=False)   # 'steady-paycheck' etc.
     config_json  = Column(Text, nullable=False)          # JSON: user overrides to defaults
-    created_at   = Column(DateTime, default=datetime.utcnow)
-    updated_at   = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at   = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at   = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         Index("ix_strategy_configs_user_key", "user_id", "strategy_key"),
@@ -718,8 +718,8 @@ class Position(Base):
     exit_reason = Column(String(50))
     outcome_pnl = Column(Numeric(10, 4))
 
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         Index("ix_positions_user_status", "user_id", "status"),
@@ -751,7 +751,7 @@ class PositionAssessment(Base):
     exit_levels    = Column(Text)                           # JSON: take_profit, warning, hard_stop, calendar_exit
     market_snapshot = Column(Text)                          # JSON: underlying_price, iv, delta, spread_mark
     agent_run_id   = Column(String(36))                    # FK to agent_run_log (nullable)
-    created_at     = Column(DateTime, default=datetime.utcnow)
+    created_at     = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         Index("ix_position_assessments_position", "position_id", "created_at"),
@@ -776,8 +776,8 @@ class DashboardLayout(Base):
     user_id = Column(String(36), nullable=False, unique=True, index=True)
     layout_json = Column(Text, nullable=False)
     widgets_json = Column(Text, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
 
 class DashboardMedia(Base):
@@ -794,7 +794,7 @@ class DashboardMedia(Base):
     blob_name = Column(String(500), nullable=False)
     caption = Column(String(200), nullable=True)
     sort_order = Column(Integer, nullable=False, default=0)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         Index("ix_dashboard_media_widget", "widget_id", "sort_order"),
@@ -851,8 +851,8 @@ class NamedWatchlist(Base):
     name       = Column(String(100), nullable=False)
     user_id    = Column(String(255), nullable=False)
     is_default = Column(Boolean, default=False, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     symbols = relationship(
         "WatchlistEntry",
@@ -881,7 +881,7 @@ class WatchlistEntry(Base):
         nullable=False,
     )
     symbol   = Column(String(20), nullable=False)
-    added_at = Column(DateTime, default=datetime.utcnow)
+    added_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     watchlist = relationship("NamedWatchlist", back_populates="symbols")
 
@@ -918,9 +918,9 @@ class UserSession(Base):
     id_token                = Column(Text)
     token_expires_at        = Column(DateTime)
     csrf_token              = Column(String(128), nullable=False)
-    created_at              = Column(DateTime, default=datetime.utcnow)
+    created_at              = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     expires_at              = Column(DateTime, nullable=False)
-    last_active_at          = Column(DateTime, default=datetime.utcnow)
+    last_active_at          = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         Index("ix_user_sessions_expires_at", "expires_at"),

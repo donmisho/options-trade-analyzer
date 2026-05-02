@@ -151,7 +151,7 @@ async def save_layout(
     if record:
         record.layout_json = layout_json
         record.widgets_json = widgets_json
-        record.updated_at = datetime.utcnow()
+        record.updated_at = datetime.now(timezone.utc)
     else:
         record = DashboardLayout(
             user_id=current_user["sub"],

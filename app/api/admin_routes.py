@@ -12,7 +12,7 @@ settings.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -124,7 +124,7 @@ async def update_user(
         user.is_active = payload.is_active
 
     if changes:
-        user.updated_at = datetime.utcnow()
+        user.updated_at = datetime.now(timezone.utc)
         db.add(AuditLog(
             user_id=admin["sub"],
             event_type="admin_user_update",

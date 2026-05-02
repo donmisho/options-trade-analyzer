@@ -100,7 +100,7 @@ class SessionManager:
         """
         session_id = secrets.token_urlsafe(64)
         csrf_token = secrets.token_urlsafe(32)
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         expires_at = now + timedelta(hours=settings.session_ttl_hours)
 
         await self._ensure_fernet()
@@ -163,7 +163,7 @@ class SessionManager:
         window actually writes; the rest are no-ops. The SELECT here is read-only
         (shared lock) and releases its connection before the UPDATE fires.
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         # --- SELECT: read-only, shared lock, connection released immediately ---
         async with make_session() as db:
@@ -280,7 +280,7 @@ class SessionManager:
                 return False
 
             token_data = resp.json()
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
 
         except Exception as e:
             logger.error(f"SessionManager: Token refresh error: {e}")
@@ -313,7 +313,7 @@ class SessionManager:
 
     async def cleanup_expired(self) -> int:
         """Delete all expired sessions. Returns count deleted. Fire-and-forget safe."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         try:
             async with make_session() as db:
                 result = await db.execute(
