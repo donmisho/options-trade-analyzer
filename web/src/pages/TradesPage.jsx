@@ -75,7 +75,8 @@ function generateCandles(price, count = 120) {
 function inferStrategies(spreadType, dte) {
   if (!spreadType) return [];
   const type = spreadType.toLowerCase();
-  const isCredit = type.includes('credit');
+  const isCredit = type === 'bull_put' || type === 'bear_call';
+  const isDebit  = type === 'bull_call' || type === 'bear_put';
   if (isCredit) {
     if (dte == null) return ['SP'];
     if (dte >= 5 && dte < 25) return ['WG'];
@@ -838,7 +839,11 @@ export default function TradesPage() {
     try {
       const data = await analyzeVerticals({
         symbol: sym,
-        spread_types: ['bull_call', 'bear_put'],
+        spread_types: ['bull_call', 'bear_put', 'bull_put', 'bear_call'],
+        // TODO(OTA-512): remove min_dte override once per-strategy DTE windows are
+        // honored by the backend per-strategy user_config routing.
+        // Interim override: backend default min_dte=14 excludes WG's 5-13 DTE window.
+        min_dte: 3,
         max_results: 20,
         ...config,
       });
