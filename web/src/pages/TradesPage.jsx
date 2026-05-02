@@ -76,7 +76,6 @@ function inferStrategies(spreadType, dte) {
   if (!spreadType) return [];
   const type = spreadType.toLowerCase();
   const isCredit = type === 'bull_put' || type === 'bear_call';
-  const isDebit  = type === 'bull_call' || type === 'bear_put';
   if (isCredit) {
     if (dte == null) return ['SP'];
     if (dte >= 5 && dte < 25) return ['WG'];
