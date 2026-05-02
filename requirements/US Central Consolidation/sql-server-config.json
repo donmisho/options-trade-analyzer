@@ -1,0 +1,40 @@
+{
+  "administratorLogin": "CloudSA3ccacb01",
+  "administratorLoginPassword": null,
+  "administrators": {
+    "administratorType": "ActiveDirectory",
+    "azureAdOnlyAuthentication": true,
+    "login": "don.mishory@tmtctech.ai",
+    "principalType": "User",
+    "sid": "6232a881-23e9-4954-8ed0-6303ea7fd188",
+    "tenantId": "690badde-2c05-4887-8be4-e079e8bc55df"
+  },
+  "createMode": null,
+  "externalGovernanceStatus": "Disabled",
+  "federatedClientId": null,
+  "fullyQualifiedDomainName": "options-analyzer-sql.database.windows.net",
+  "id": "/subscriptions/0f394f87-c8b1-429a-8c86-7e5305042eb9/resourceGroups/options-analyzer-rg/providers/Microsoft.Sql/servers/options-analyzer-sql",
+  "identity": null,
+  "isIPv6Enabled": null,
+  "keyId": null,
+  "kind": "v12.0",
+  "location": "westus2",
+  "minimalTlsVersion": "1.2",
+  "name": "options-analyzer-sql",
+  "primaryUserAssignedIdentityId": null,
+  "privateEndpointConnections": [],
+  "publicNetworkAccess": "Enabled",
+  "resourceGroup": "options-analyzer-rg",
+  "restrictOutboundNetworkAccess": "Disabled",
+  "retentionDays": -1,
+  "state": "Ready",
+  "tags": {
+    "component": "database",
+    "environment": "dev",
+    "owner": "don",
+    "project": "options-trade-analyzer"
+  },
+  "type": "Microsoft.Sql/servers",
+  "version": "12.0",
+  "workspaceFeature": null
+}

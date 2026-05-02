@@ -1,0 +1,36 @@
+[
+  {
+    "azureResourceName": null,
+    "azureResourceType": null,
+    "customHostNameDnsRecordType": null,
+    "domainId": null,
+    "hostNameType": "Verified",
+    "id": "/subscriptions/0f394f87-c8b1-429a-8c86-7e5305042eb9/resourceGroups/options-analyzer-rg/providers/Microsoft.Web/sites/options-analyzer-api/hostNameBindings/options-analyzer-api-d7aqhsdmd6f2anbc.centralus-01.azurewebsites.net",
+    "kind": null,
+    "location": "Central US",
+    "name": "options-analyzer-api-d7aqhsdmd6f2anbc.centralus-01.azurewebsites.net",
+    "resourceGroup": "options-analyzer-rg",
+    "siteName": "options-analyzer-api",
+    "sslState": null,
+    "thumbprint": null,
+    "type": "Microsoft.Web/sites/hostNameBindings",
+    "virtualIp": null
+  },
+  {
+    "azureResourceName": null,
+    "azureResourceType": null,
+    "customHostNameDnsRecordType": null,
+    "domainId": null,
+    "hostNameType": "Verified",
+    "id": "/subscriptions/0f394f87-c8b1-429a-8c86-7e5305042eb9/resourceGroups/options-analyzer-rg/providers/Microsoft.Web/sites/options-analyzer-api/hostNameBindings/oa.tmtctech.ai",
+    "kind": null,
+    "location": "Central US",
+    "name": "oa.tmtctech.ai",
+    "resourceGroup": "options-analyzer-rg",
+    "siteName": "options-analyzer-api",
+    "sslState": "SniEnabled",
+    "thumbprint": "FC4F5BCEFF5C5532B2CB0860C8B906B0221F9C17",
+    "type": "Microsoft.Web/sites/hostNameBindings",
+    "virtualIp": null
+  }
+]

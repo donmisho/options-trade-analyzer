@@ -1,0 +1,66 @@
+[
+  {
+    "endIpAddress": "0.0.0.0",
+    "id": "/subscriptions/0f394f87-c8b1-429a-8c86-7e5305042eb9/resourceGroups/options-analyzer-rg/providers/Microsoft.Sql/servers/options-analyzer-sql/firewallRules/AllowAllWindowsAzureIps",
+    "name": "AllowAllWindowsAzureIps",
+    "resourceGroup": "options-analyzer-rg",
+    "startIpAddress": "0.0.0.0",
+    "type": "Microsoft.Sql/servers/firewallRules"
+  },
+  {
+    "endIpAddress": "20.118.255.255",
+    "id": "/subscriptions/0f394f87-c8b1-429a-8c86-7e5305042eb9/resourceGroups/options-analyzer-rg/providers/Microsoft.Sql/servers/options-analyzer-sql/firewallRules/AppService-CentralUS-20-118",
+    "name": "AppService-CentralUS-20-118",
+    "resourceGroup": "options-analyzer-rg",
+    "startIpAddress": "20.118.0.0",
+    "type": "Microsoft.Sql/servers/firewallRules"
+  },
+  {
+    "endIpAddress": "20.221.255.255",
+    "id": "/subscriptions/0f394f87-c8b1-429a-8c86-7e5305042eb9/resourceGroups/options-analyzer-rg/providers/Microsoft.Sql/servers/options-analyzer-sql/firewallRules/AppService-CentralUS-20-221",
+    "name": "AppService-CentralUS-20-221",
+    "resourceGroup": "options-analyzer-rg",
+    "startIpAddress": "20.221.0.0",
+    "type": "Microsoft.Sql/servers/firewallRules"
+  },
+  {
+    "endIpAddress": "255.255.255.255",
+    "id": "/subscriptions/0f394f87-c8b1-429a-8c86-7e5305042eb9/resourceGroups/options-analyzer-rg/providers/Microsoft.Sql/servers/options-analyzer-sql/firewallRules/AzureServices-AllIPs",
+    "name": "AzureServices-AllIPs",
+    "resourceGroup": "options-analyzer-rg",
+    "startIpAddress": "0.0.0.0",
+    "type": "Microsoft.Sql/servers/firewallRules"
+  },
+  {
+    "endIpAddress": "46.183.108.81",
+    "id": "/subscriptions/0f394f87-c8b1-429a-8c86-7e5305042eb9/resourceGroups/options-analyzer-rg/providers/Microsoft.Sql/servers/options-analyzer-sql/firewallRules/Local-20260306",
+    "name": "Local-20260306",
+    "resourceGroup": "options-analyzer-rg",
+    "startIpAddress": "46.183.108.81",
+    "type": "Microsoft.Sql/servers/firewallRules"
+  },
+  {
+    "endIpAddress": "45.21.75.255",
+    "id": "/subscriptions/0f394f87-c8b1-429a-8c86-7e5305042eb9/resourceGroups/options-analyzer-rg/providers/Microsoft.Sql/servers/options-analyzer-sql/firewallRules/LocalDev-20260427",
+    "name": "LocalDev-20260427",
+    "resourceGroup": "options-analyzer-rg",
+    "startIpAddress": "45.21.72.0",
+    "type": "Microsoft.Sql/servers/firewallRules"
+  },
+  {
+    "endIpAddress": "94.140.11.81",
+    "id": "/subscriptions/0f394f87-c8b1-429a-8c86-7e5305042eb9/resourceGroups/options-analyzer-rg/providers/Microsoft.Sql/servers/options-analyzer-sql/firewallRules/NordVPN-Hotel-20260306",
+    "name": "NordVPN-Hotel-20260306",
+    "resourceGroup": "options-analyzer-rg",
+    "startIpAddress": "94.140.11.81",
+    "type": "Microsoft.Sql/servers/firewallRules"
+  },
+  {
+    "endIpAddress": "45.21.72.65",
+    "id": "/subscriptions/0f394f87-c8b1-429a-8c86-7e5305042eb9/resourceGroups/options-analyzer-rg/providers/Microsoft.Sql/servers/options-analyzer-sql/firewallRules/query-editor-77cdd8",
+    "name": "query-editor-77cdd8",
+    "resourceGroup": "options-analyzer-rg",
+    "startIpAddress": "45.21.72.65",
+    "type": "Microsoft.Sql/servers/firewallRules"
+  }
+]

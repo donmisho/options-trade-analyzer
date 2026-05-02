@@ -33,3 +33,8 @@ key.pem
 # React build output — populated during CI/CD, never committed
 static/
 web/dist/
+
+# Local dev artifacts — not for repo
+startup.log
+scratch/
+data/

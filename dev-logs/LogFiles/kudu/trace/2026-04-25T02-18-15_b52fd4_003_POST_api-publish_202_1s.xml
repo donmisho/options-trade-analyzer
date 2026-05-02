@@ -1,0 +1,16 @@
+<step title="Incoming Request" date="2026-04-25T02:18:15.465" instance="b52fd4" url="/api/publish?async=true&amp;deployer=GITHUB_ONE_DEPLOY&amp;type=zip&amp;message=%7B%22type%22%3A%22deployment%22%2C%22sha%22%3A%2256b4480a33ffd5e6ad5394e9bfd8cff664d63222%22%2C%22repoName%22%3A%22donmisho%2Foptions-trade-analyzer%22%2C%22actor%22%3A%22donmisho%22%2C%22slotName%22%3A%22Production%22%2C%22commitMessage%22%3A%22%22%7D" method="POST" type="request" pid="833,1,5" Host="options-analyzer-api-dev.scm.azurewebsites.net" User-Agent="GITHUBACTIONS_DeployWebAppToAzure_1bd1602789aca716c3c81b5ca9bda9083498146f9beb184d5235b4f819e2b272_v3.0.8" Authorization="Bea..." Content-Type="application/octet-stream" Cookie="ARRAffinity=b52fd4878e83028273a1fd3a3fc9c0fb04eaea3948373313411f771b6a8bd977; ARRAffinitySameSite=b52fd4878e83028273a1fd3a3fc9c0fb04eaea3948373313411f771b6a8bd977" Transfer-Encoding="chunked" X-ARR-LOG-ID="e8a81df2-857a-4319-9eca-09ba2ca49efe" CLIENT-IP="52.161.82.96:5120" X-SITE-DEPLOYMENT-ID="options-analyzer-api-dev" WAS-DEFAULT-HOSTNAME="options-analyzer-api-dev.scm.azurewebsites.net" X-Forwarded-Proto="https" X-AppService-Proto="https" X-Forwarded-TlsVersion="1.3" X-WAWS-Unencoded-URL="/api/publish?async=true&amp;deployer=GITHUB_ONE_DEPLOY&amp;type=zip&amp;message=%7B%22type%22%3A%22deployment%22%2C%22sha%22%3A%2256b4480a33ffd5e6ad5394e9bfd8cff664d63222%22%2C%22repoName%22%3A%22donmisho%2Foptions-trade-analyzer%22%2C%22actor%22%3A%22donmisho%22%2C%22slotName%22%3A%22Production%22%2C%22commitMessage%22%3A%22%22%7D" X-Client-IP="52.161.82.96" X-Client-Port="5120" >
+  <step title="OneDeploy" date="2026-04-25T02:18:15.677" >
+    <step title="None repository commit" date="2026-04-25T02:18:15.691" >
+      <step title="Commit id: cae15ea8-10b3-43f8-822d-80f7f9df3a8b" date="2026-04-25T02:18:15.694" Message="N/A" AuthorName="N/A" AuthorEmail="N/A" /><!-- duration: 9ms -->
+    </step><!-- duration: 22ms -->
+    <step title="Starting PushDeployAsync" date="2026-04-25T02:18:15.717" /><!-- duration: 2ms -->
+    <step title="Writing artifact to /tmp/zipdeploy/a16f47af-6663-40d5-af9a-6f042b08be85.zip" date="2026-04-25T02:18:15.762" >
+      <step title="Writing multipart request body to /tmp/zipdeploy/a16f47af-6663-40d5-af9a-6f042b08be85.zip" date="2026-04-25T02:18:15.782" /><!-- duration: 10ms -->
+    </step><!-- duration: 195ms -->
+    <step title="Start deployment in the background" date="2026-04-25T02:18:15.972" >
+      <step title="Acquiring Deployment Lock" date="2026-04-25T02:18:16.005" /><!-- duration: 15ms -->
+      <step title="Acquired Deployment Lock" date="2026-04-25T02:18:16.087" /><!-- duration: 11ms -->
+    </step><!-- duration: 358ms -->
+  </step><!-- duration: 675ms -->
+  <step title="Outgoing response" date="2026-04-25T02:18:16.382" type="response" statusCode="202" statusText="Accepted" /><!-- duration: 48ms -->
+</step><!-- duration: 996ms -->

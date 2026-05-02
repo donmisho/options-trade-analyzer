@@ -1,0 +1,13 @@
+# Agent test results — generated per run, not version controlled
+qa-ux/test-results/
+qa-data/test-results/
+
+# Jira extract — snapshot, regenerated before each run
+qa-context/jira-extract.json
+
+# Agent run log fallback — only used when DB unavailable
+qa-context/agent-run-log.jsonl
+
+# Baseline screenshots — tracked separately or in LFS
+# Uncomment if using Git LFS:
+# qa-context/baseline-screenshots/

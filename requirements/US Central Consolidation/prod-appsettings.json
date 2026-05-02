@@ -1,0 +1,72 @@
+[
+  {
+    "name": "AI_PROVIDER",
+    "slotSetting": false,
+    "value": "foundry"
+  },
+  {
+    "name": "APP_ENV",
+    "slotSetting": false,
+    "value": "production"
+  },
+  {
+    "name": "AZURE_KEYVAULT_URL",
+    "slotSetting": false,
+    "value": "https://options-analyzer.vault.azure.net"
+  },
+  {
+    "name": "DATABASE_URL",
+    "slotSetting": false,
+    "value": "mssql+pyodbc://options-analyzer-sql.database.windows.net:1433/options-analyzer-db?driver=ODBC+Driver+18+for+SQL+Server&Encrypt=yes&TrustServerCertificate=no&authentication=ActiveDirectoryMsi"
+  },
+  {
+    "name": "DEBUG",
+    "slotSetting": false,
+    "value": "false"
+  },
+  {
+    "name": "ENTRA_CLIENT_ID",
+    "slotSetting": false,
+    "value": "f11ea8b8-bbce-474b-8d3f-758654245a73"
+  },
+  {
+    "name": "ENTRA_REDIRECT_URI_PROD",
+    "slotSetting": false,
+    "value": "https://oa.tmtctech.ai/api/v1/auth/entra/callback"
+  },
+  {
+    "name": "ENTRA_TENANT_ID",
+    "slotSetting": false,
+    "value": "690badde-2c05-4887-8be4-e079e8bc55df"
+  },
+  {
+    "name": "FOUNDRY_ENDPOINT",
+    "slotSetting": false,
+    "value": "https://ota-foundry-resource.services.ai.azure.com/anthropic/v1/messages"
+  },
+  {
+    "name": "FOUNDRY_RESOURCE",
+    "slotSetting": false,
+    "value": "ota-foundry-resource"
+  },
+  {
+    "name": "SCHWAB_CALLBACK_URL",
+    "slotSetting": false,
+    "value": "https://options-analyzer-api-d7aqhsdmd6f2anbc.centralus-01.azurewebsites.net/api/v1/auth/schwab/callback"
+  },
+  {
+    "name": "SCM_DO_BUILD_DURING_DEPLOYMENT",
+    "slotSetting": false,
+    "value": "true"
+  },
+  {
+    "name": "SKIP_AUTH",
+    "slotSetting": false,
+    "value": "false"
+  },
+  {
+    "name": "WEBSITE_HTTPLOGGING_RETENTION_DAYS",
+    "slotSetting": false,
+    "value": "3"
+  }
+]

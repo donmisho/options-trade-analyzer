@@ -1,0 +1,1239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OTA — Positions Page Prototype</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --bg2: #161b22;
+    --bg3: #21262d;
+    --border: #30363d;
+    --teal: #2dd4bf;
+    --green: #4ade80;
+    --amber: #f59e0b;
+    --red: #f87171;
+    --blue: #60a5fa;
+    --purple: #c084fc;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --verdict-bg: #0a0f15;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    font-size: 11px;
+    line-height: 1.5;
+  }
+
+  /* ═══ LEFT NAV RAIL ═══ */
+  .layout { display: flex; min-height: 100vh; }
+  .nav-rail {
+    width: 220px;
+    min-width: 220px;
+    background: var(--bg);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    padding: 16px 0;
+  }
+  .nav-logo {
+    padding: 0 16px 20px;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--teal);
+    letter-spacing: 0.5px;
+  }
+  .nav-item {
+    padding: 9px 16px;
+    font-size: 12px;
+    color: var(--muted);
+    cursor: pointer;
+    border-left: 3px solid transparent;
+    transition: all 0.12s;
+  }
+  .nav-item:hover { color: var(--text); }
+  .nav-item.active {
+    border-left: 3px solid var(--teal);
+    color: var(--teal);
+    background: rgba(45,212,191,0.08);
+  }
+  .nav-bottom {
+    margin-top: auto;
+    padding: 12px 16px;
+    border-top: 1px solid var(--border);
+  }
+  .schwab-status {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 10px; color: var(--muted);
+  }
+  .schwab-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--green);
+  }
+
+  /* ═══ MAIN CONTENT ═══ */
+  .main-content {
+    flex: 1;
+    padding: 20px 24px;
+    overflow-x: auto;
+    min-width: 0;
+  }
+
+  /* ═══ PAGE HEADER ═══ */
+  .page-header {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .page-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .page-count {
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  /* ═══ FILTER BAR ═══ */
+  .filter-bar {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    padding: 10px 14px;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+  .filter-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .filter-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .filter-select {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 10px;
+    padding: 4px 8px;
+    cursor: pointer;
+    min-width: 80px;
+  }
+  .filter-select:focus { border-color: var(--teal); outline: none; }
+  .filter-input {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 10px;
+    padding: 4px 8px;
+    width: 140px;
+  }
+  .filter-input::placeholder { color: rgba(139,148,158,0.5); }
+  .filter-input:focus { border-color: var(--teal); outline: none; }
+
+  .group-by-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--muted);
+    margin-left: auto;
+  }
+
+  /* ═══ GROUP HEADER ═══ */
+  .group-header {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 10px 0 6px;
+  }
+  .group-name {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--teal);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+  .group-count {
+    font-size: 10px;
+    color: var(--muted);
+  }
+
+  /* ═══ TABLE ═══ */
+  table { width: 100%; border-collapse: collapse; }
+  thead th {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--muted);
+    text-align: right;
+    padding: 8px 8px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+    z-index: 1;
+  }
+  thead th:first-child { text-align: left; width: 20px; }
+  thead th:nth-child(2) { text-align: left; } /* symbol */
+  thead th:nth-child(3) { text-align: left; } /* position type */
+  thead th:nth-child(4) { text-align: left; } /* strategy */
+  thead th:nth-child(5) { text-align: left; } /* structure */
+  thead th:nth-child(6) { text-align: left; } /* type */
+
+  .sort-indicator { color: var(--teal); margin-left: 2px; font-size: 9px; }
+
+  tbody tr {
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+  tbody tr:hover { background: rgba(45,212,191,0.02); }
+  tbody td {
+    font-size: 11px;
+    padding: 7px 8px;
+    text-align: right;
+    border-bottom: 1px solid rgba(48,54,61,0.4);
+    white-space: nowrap;
+  }
+  tbody td:first-child { text-align: left; width: 20px; color: var(--muted); font-size: 9px; }
+  tbody td:nth-child(2) { text-align: left; font-weight: 600; color: var(--teal); }
+  tbody td:nth-child(3) { text-align: left; }
+  tbody td:nth-child(4) { text-align: left; }
+  tbody td:nth-child(5) { text-align: left; }
+  tbody td:nth-child(6) { text-align: left; }
+
+  /* Pills and badges */
+  .pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+  }
+  .pill-paper { background: rgba(96,165,250,0.12); color: var(--blue); border: 1px solid rgba(96,165,250,0.25); }
+  .pill-live { background: rgba(74,222,128,0.12); color: var(--green); border: 1px solid rgba(74,222,128,0.25); }
+  .pill-strategy { background: rgba(45,212,191,0.08); color: var(--teal); border: 1px solid rgba(45,212,191,0.2); }
+  .pill-type-bear { background: rgba(248,113,113,0.1); color: var(--red); border: 1px solid rgba(248,113,113,0.2); }
+  .pill-type-bull { background: rgba(74,222,128,0.1); color: var(--green); border: 1px solid rgba(74,222,128,0.2); }
+
+  /* Performance dot */
+  .perf-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    display: inline-block;
+    vertical-align: middle;
+  }
+  .perf-green { background: var(--green); box-shadow: 0 0 4px rgba(74,222,128,0.4); }
+  .perf-amber { background: var(--amber); box-shadow: 0 0 4px rgba(245,158,11,0.4); }
+  .perf-red { background: var(--red); box-shadow: 0 0 4px rgba(248,113,113,0.4); }
+
+  /* ═══ EXPANDED ROW ═══ */
+  .expanded-row { background: rgba(45,212,191,0.03); }
+  .expansion-cell { padding: 0 !important; border-bottom: 1px solid var(--border) !important; }
+  .expansion-panel {
+    border-top: 2px solid rgba(45,212,191,0.35);
+  }
+
+  /* ═══ ANALYSIS VERSION ═══ */
+  .analysis-stack {
+    padding: 0;
+  }
+  .analysis-version {
+    border-bottom: 1px solid var(--border);
+  }
+  .analysis-version:last-child { border-bottom: none; }
+
+  .analysis-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    cursor: pointer;
+    transition: background 0.1s;
+    background: var(--bg2);
+  }
+  .analysis-header:hover { background: rgba(45,212,191,0.04); }
+  .analysis-chevron {
+    font-size: 9px;
+    color: var(--muted);
+    width: 14px;
+    transition: transform 0.15s;
+  }
+  .analysis-chevron.open { transform: rotate(90deg); }
+
+  .analysis-badge {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    padding: 2px 8px;
+    border-radius: 3px;
+  }
+  .analysis-badge.original {
+    background: rgba(96,165,250,0.12);
+    color: var(--blue);
+    border: 1px solid rgba(96,165,250,0.25);
+  }
+  .analysis-badge.update {
+    background: rgba(192,132,252,0.12);
+    color: var(--purple);
+    border: 1px solid rgba(192,132,252,0.25);
+  }
+  .analysis-date {
+    font-size: 10px;
+    color: var(--muted);
+  }
+  .analysis-verdict {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .verdict-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-weight: 700;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+  .verdict-execute { background: rgba(74,222,128,0.15); color: var(--green); }
+  .verdict-wait { background: rgba(245,158,11,0.15); color: var(--amber); }
+  .verdict-pass { background: rgba(248,113,113,0.15); color: var(--red); }
+
+  .analysis-score {
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  /* ═══ 4-COLUMN EXPANSION (matches Verticals) ═══ */
+  .analysis-body {
+    display: none;
+  }
+  .analysis-body.open { display: block; }
+
+  .four-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 1fr;
+    border-bottom: 1px solid var(--border);
+  }
+  .four-col > div {
+    padding: 14px 16px;
+    border-right: 1px solid var(--bg3);
+  }
+  .four-col > div:last-child { border-right: none; }
+
+  .col-title {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--muted);
+    margin-bottom: 12px;
+  }
+
+  /* Score Breakdown (Col 1) */
+  .metric-row {
+    margin-bottom: 10px;
+  }
+  .metric-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 3px;
+  }
+  .metric-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .metric-name { font-size: 11px; font-weight: 600; }
+  .metric-weight {
+    font-size: 9px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: rgba(139,148,158,0.1);
+    color: var(--muted);
+  }
+  .metric-formula {
+    font-size: 9px;
+    color: rgba(139,148,158,0.6);
+    font-style: italic;
+    margin-left: 12px;
+    margin-bottom: 4px;
+  }
+  .metric-bar-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: 12px;
+  }
+  .metric-bar-track {
+    flex: 1;
+    height: 3px;
+    background: rgba(48,54,61,0.5);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .metric-bar-fill {
+    height: 100%;
+    border-radius: 2px;
+  }
+
+  /* Actual Calculation (Col 2) */
+  .calc-item {
+    margin-bottom: 10px;
+  }
+  .calc-label {
+    font-size: 9px;
+    color: var(--muted);
+    margin-bottom: 3px;
+  }
+  .calc-box {
+    background: var(--bg2);
+    border-left: 2px solid var(--border);
+    padding: 4px 8px;
+    font-size: 10px;
+    margin-bottom: 4px;
+    border-radius: 0 3px 3px 0;
+  }
+  .norm-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 9px;
+    color: var(--muted);
+  }
+  .norm-bar {
+    width: 60px;
+    height: 3px;
+    background: rgba(48,54,61,0.5);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .norm-fill {
+    height: 100%;
+    border-radius: 2px;
+  }
+  .calc-total {
+    border-top: 1px solid var(--border);
+    padding-top: 8px;
+    margin-top: 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .calc-total-label { font-size: 9px; color: var(--muted); }
+  .calc-total-value { font-size: 14px; font-weight: 700; }
+
+  /* Strategy Fit (Col 3) */
+  .strategy-row {
+    padding: 6px 8px;
+    border-radius: 4px;
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+  .strategy-row:hover { background: rgba(45,212,191,0.04); }
+  .strategy-row.active {
+    background: rgba(45,212,191,0.06);
+    border-left: 2px solid var(--teal);
+    padding-left: 6px;
+  }
+  .strategy-name { font-size: 10px; flex: 1; }
+  .strategy-score-bar {
+    width: 50px; height: 4px;
+    background: rgba(48,54,61,0.5);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .strategy-score-fill { height: 100%; border-radius: 2px; }
+  .strategy-score-num { font-size: 12px; font-weight: 700; width: 28px; text-align: right; }
+  .strategy-why {
+    font-size: 9px;
+    font-style: italic;
+    color: rgba(139,148,158,0.6);
+    margin: 0 0 4px 10px;
+  }
+
+  /* Strategy Details (Col 4) */
+  .detail-strategy-name {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--teal);
+    margin-bottom: 2px;
+  }
+  .detail-subtitle {
+    font-size: 9px;
+    color: var(--muted);
+    margin-bottom: 14px;
+  }
+  .param-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px 16px;
+    margin-bottom: 14px;
+  }
+  .param-item {}
+  .param-key {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    color: var(--muted);
+  }
+  .param-val {
+    font-size: 11px;
+  }
+  .param-pass { color: var(--green); }
+  .param-fail { color: var(--red); }
+
+  .signal-box {
+    background: var(--bg2);
+    border-radius: 4px;
+    padding: 8px 10px;
+  }
+  .signal-title {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  .signal-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+    font-size: 9px;
+  }
+  .signal-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  /* ═══ VERDICT CARD (below 4-col) ═══ */
+  .verdict-card {
+    background: var(--verdict-bg);
+    border-top: 2px solid rgba(74,222,128,0.4);
+  }
+  .verdict-card.wait-border { border-top-color: rgba(245,158,11,0.4); }
+
+  .verdict-card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--bg3);
+  }
+  .verdict-strategy-pill {
+    background: rgba(192,132,252,0.12);
+    color: var(--purple);
+    border: 1px solid rgba(192,132,252,0.3);
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 10px;
+  }
+  .verdict-trade-ref {
+    font-size: 10px;
+    color: var(--muted);
+  }
+  .verdict-timestamp {
+    font-size: 9px;
+    color: #444d56;
+    margin-left: auto;
+  }
+
+  .verdict-body {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr 1fr;
+    min-height: 120px;
+  }
+  .verdict-body > div {
+    padding: 12px 16px;
+  }
+  .verdict-body > div + div {
+    border-left: 1px solid var(--bg3);
+  }
+  .verdict-section-label {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .claude-read-text {
+    font-size: 10px;
+    color: #c9d1d9;
+    line-height: 1.65;
+  }
+  .claude-read-text p { margin-bottom: 8px; }
+  .claude-bullets {
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px dashed rgba(48,54,61,0.6);
+  }
+  .claude-bullet {
+    font-size: 9px;
+    color: var(--muted);
+    margin-bottom: 3px;
+    padding-left: 10px;
+    position: relative;
+  }
+  .claude-bullet::before {
+    content: '•';
+    position: absolute;
+    left: 0;
+    color: var(--muted);
+  }
+
+  /* Exit plan */
+  .exit-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 5px 0;
+  }
+  .exit-row + .exit-row { border-top: 1px dashed rgba(48,54,61,0.6); }
+  .exit-label { font-size: 10px; color: var(--muted); }
+  .exit-sublabel { font-size: 8px; color: rgba(139,148,158,0.5); }
+  .exit-price { font-size: 11px; font-weight: 600; }
+
+  /* Pre-screen checks */
+  .check-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 5px;
+    font-size: 9px;
+  }
+  .check-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .risk-budget-box {
+    background: var(--bg2);
+    border-radius: 4px;
+    padding: 8px 10px;
+    margin-top: 10px;
+  }
+  .risk-budget-title {
+    font-size: 9px;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+  .risk-budget-value {
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .risk-budget-pct {
+    font-size: 9px;
+    color: var(--muted);
+  }
+
+  /* ═══ VERDICT ACTION ROW ═══ */
+  .verdict-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    border-top: 1px solid var(--bg3);
+  }
+  .btn {
+    padding: 7px 16px;
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 11px;
+    cursor: pointer;
+    width: auto;
+    white-space: nowrap;
+  }
+  .btn-teal {
+    background: rgba(45,212,191,0.1);
+    border: 1px solid rgba(45,212,191,0.4);
+    color: var(--teal);
+  }
+  .btn-green {
+    background: rgba(74,222,128,0.12);
+    border: 1px solid rgba(74,222,128,0.45);
+    color: var(--green);
+    font-weight: 700;
+  }
+  .btn-neutral {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted);
+  }
+  .btn-red {
+    background: transparent;
+    border: 1px solid rgba(248,113,113,0.3);
+    color: var(--red);
+  }
+  .followup-input {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 10px;
+    padding: 7px 12px;
+  }
+  .followup-input::placeholder { color: rgba(139,148,158,0.4); }
+
+  /* ═══ POSITION ACTION ROW ═══ */
+  .position-actions {
+    display: flex;
+    gap: 8px;
+    padding: 10px 16px;
+    background: rgba(13,17,23,0.5);
+    border-top: 1px solid var(--border);
+  }
+</style>
+</head>
+<body>
+
+<div class="layout">
+  <!-- LEFT NAV -->
+  <nav class="nav-rail">
+    <div class="nav-logo">◇ Options Analyzer</div>
+    <div class="nav-item">Dashboard</div>
+    <div class="nav-item">Security Strategies</div>
+    <div class="nav-item">Verticals</div>
+    <div class="nav-item">Puts & Calls</div>
+    <div class="nav-item active">Positions</div>
+    <div class="nav-bottom">
+      <div class="schwab-status"><span class="schwab-dot"></span> Schwab Connected</div>
+    </div>
+  </nav>
+
+  <!-- MAIN CONTENT -->
+  <div class="main-content">
+    <!-- PAGE HEADER -->
+    <div class="page-header">
+      <span class="page-title">◇ Positions</span>
+      <span class="page-count">5 active</span>
+    </div>
+
+    <!-- FILTER BAR -->
+    <div class="filter-bar">
+      <div class="filter-group">
+        <span class="filter-label">Status</span>
+        <select class="filter-select" multiple style="height:24px;">
+          <option selected>Active</option>
+          <option>Archived</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <span class="filter-label">Type</span>
+        <select class="filter-select">
+          <option selected>All</option>
+          <option>Paper</option>
+          <option>Live</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <span class="filter-label">Strategy</span>
+        <select class="filter-select">
+          <option selected>All</option>
+          <option>Steady Paycheck</option>
+          <option>Weekly Grind</option>
+          <option>Trend Rider</option>
+          <option>Lottery Ticket</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <span class="filter-label">Symbol</span>
+        <input type="text" class="filter-input" placeholder="e.g. META or Meta Platforms">
+      </div>
+      <div class="filter-group" style="margin-left: auto;">
+        <span class="filter-label">Group by</span>
+        <select class="filter-select" style="min-width:100px;">
+          <option selected>Strategy</option>
+          <option>Symbol</option>
+          <option>Position Type</option>
+          <option>Structure</option>
+          <option>Type</option>
+          <option>DTE</option>
+          <option>Performance</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- ═══ STRATEGY GROUP: LOTTERY TICKET ═══ -->
+    <div class="group-header">
+      <span class="group-name">Lottery Ticket</span>
+      <span class="group-count">2 active</span>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th></th>
+          <th>Symbol</th>
+          <th>Pos Type</th>
+          <th>Strategy</th>
+          <th>Structure</th>
+          <th>Type</th>
+          <th>Analyzed</th>
+          <th>Strike/Spread</th>
+          <th>Premium</th>
+          <th>Current</th>
+          <th>P&L</th>
+          <th>DTE</th>
+          <th>Perf <span class="sort-indicator">▼</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <!-- ═══ META ROW — EXPANDED ═══ -->
+        <tr class="expanded-row">
+          <td>▼</td>
+          <td>META</td>
+          <td><span class="pill pill-paper">Paper</span></td>
+          <td><span class="pill pill-strategy">Lottery Ticket</span></td>
+          <td>Vertical</td>
+          <td><span class="pill pill-type-bear">Bear Put</span></td>
+          <td>03-20-2026</td>
+          <td>590/580</td>
+          <td>3.82</td>
+          <td>4.10</td>
+          <td style="color:var(--green);">+28.00 <span style="font-size:9px;color:var(--muted);">(7.3%)</span></td>
+          <td>23</td>
+          <td><span class="perf-dot perf-green"></span></td>
+        </tr>
+
+        <!-- EXPANSION PANEL -->
+        <tr>
+          <td colspan="13" class="expansion-cell">
+            <div class="expansion-panel">
+              <div class="analysis-stack">
+
+                <!-- ═══ ANALYSIS VERSION 2: UPDATE (most recent, expanded) ═══ -->
+                <div class="analysis-version">
+                  <div class="analysis-header" onclick="this.nextElementSibling.classList.toggle('open'); this.querySelector('.analysis-chevron').classList.toggle('open');">
+                    <span class="analysis-chevron open">▶</span>
+                    <span class="analysis-badge update">Update</span>
+                    <span class="analysis-date">03-24-2026 09:45</span>
+                    <div class="analysis-verdict">
+                      <span class="verdict-badge verdict-execute">Execute</span>
+                      <span class="analysis-score" style="color:var(--green);">71.00</span>
+                    </div>
+                  </div>
+                  <div class="analysis-body open">
+
+                    <!-- 4-Column Grid (matches Verticals exactly) -->
+                    <div class="four-col">
+                      <!-- Col 1: Score Breakdown -->
+                      <div>
+                        <div class="col-title">Score Breakdown</div>
+
+                        <div class="metric-row">
+                          <div class="metric-header">
+                            <span class="metric-dot" style="background:var(--blue)"></span>
+                            <span class="metric-name">Expected Value</span>
+                            <span class="metric-weight">35%</span>
+                          </div>
+                          <div class="metric-formula">(prob × maxProfit) − (1-prob) × maxLoss</div>
+                          <div class="metric-bar-row">
+                            <div class="metric-bar-track"><div class="metric-bar-fill" style="width:62%;background:var(--blue)"></div></div>
+                          </div>
+                        </div>
+
+                        <div class="metric-row">
+                          <div class="metric-header">
+                            <span class="metric-dot" style="background:var(--teal)"></span>
+                            <span class="metric-name">Reward : Risk</span>
+                            <span class="metric-weight">25%</span>
+                          </div>
+                          <div class="metric-formula">maxProfit / maxLoss</div>
+                          <div class="metric-bar-row">
+                            <div class="metric-bar-track"><div class="metric-bar-fill" style="width:45%;background:var(--teal)"></div></div>
+                          </div>
+                        </div>
+
+                        <div class="metric-row">
+                          <div class="metric-header">
+                            <span class="metric-dot" style="background:var(--amber)"></span>
+                            <span class="metric-name">Probability</span>
+                            <span class="metric-weight">20%</span>
+                          </div>
+                          <div class="metric-formula">≈ long leg delta</div>
+                          <div class="metric-bar-row">
+                            <div class="metric-bar-track"><div class="metric-bar-fill" style="width:46%;background:var(--amber)"></div></div>
+                          </div>
+                        </div>
+
+                        <div class="metric-row">
+                          <div class="metric-header">
+                            <span class="metric-dot" style="background:var(--purple)"></span>
+                            <span class="metric-name">Liquidity</span>
+                            <span class="metric-weight">15%</span>
+                          </div>
+                          <div class="metric-formula">volume + open interest (both legs)</div>
+                          <div class="metric-bar-row">
+                            <div class="metric-bar-track"><div class="metric-bar-fill" style="width:78%;background:var(--purple)"></div></div>
+                          </div>
+                        </div>
+
+                        <div class="metric-row">
+                          <div class="metric-header">
+                            <span class="metric-dot" style="background:var(--red)"></span>
+                            <span class="metric-name">Theta Efficiency</span>
+                            <span class="metric-weight">5%</span>
+                          </div>
+                          <div class="metric-formula">net_theta / max_loss (inverted)</div>
+                          <div class="metric-bar-row">
+                            <div class="metric-bar-track"><div class="metric-bar-fill" style="width:35%;background:var(--red)"></div></div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <!-- Col 2: Actual Calculation -->
+                      <div>
+                        <div class="col-title">Actual Calculation</div>
+                        <div class="calc-item">
+                          <div class="calc-label">Expected Value</div>
+                          <div class="calc-box"><span style="color:var(--blue)">(0.46×618) − (0.54×382) = +75</span></div>
+                          <div class="norm-row">
+                            norm <div class="norm-bar"><div class="norm-fill" style="width:62%;background:var(--blue)"></div></div>
+                            <span style="color:var(--blue)">+31.63</span>
+                          </div>
+                        </div>
+                        <div class="calc-item">
+                          <div class="calc-label">Reward : Risk</div>
+                          <div class="calc-box"><span style="color:var(--teal)">618 / 382 = 1.62</span></div>
+                          <div class="norm-row">
+                            norm <div class="norm-bar"><div class="norm-fill" style="width:45%;background:var(--teal)"></div></div>
+                            <span style="color:var(--teal)">+2.86</span>
+                          </div>
+                        </div>
+                        <div class="calc-item">
+                          <div class="calc-label">Probability</div>
+                          <div class="calc-box"><span style="color:var(--amber)">45.7% prob of profit</span></div>
+                          <div class="norm-row">
+                            norm <div class="norm-bar"><div class="norm-fill" style="width:46%;background:var(--amber)"></div></div>
+                            <span style="color:var(--amber)">+16.87</span>
+                          </div>
+                        </div>
+                        <div class="calc-item">
+                          <div class="calc-label">Liquidity</div>
+                          <div class="calc-box"><span style="color:var(--purple)">volume + open interest</span></div>
+                          <div class="norm-row">
+                            norm <div class="norm-bar"><div class="norm-fill" style="width:78%;background:var(--purple)"></div></div>
+                            <span style="color:var(--purple)">+15.00</span>
+                          </div>
+                        </div>
+                        <div class="calc-item">
+                          <div class="calc-label">Theta Efficiency</div>
+                          <div class="calc-box"><span style="color:var(--red)">0-0.0010 / 382 = -0.0003</span></div>
+                          <div class="norm-row">
+                            norm <div class="norm-bar"><div class="norm-fill" style="width:35%;background:var(--red)"></div></div>
+                            <span style="color:var(--red)">+4.65</span>
+                          </div>
+                        </div>
+                        <div class="calc-total">
+                          <span class="calc-total-label">composite → 71.00</span>
+                          <span class="calc-total-value" style="color:var(--green)">71.00</span>
+                        </div>
+                      </div>
+
+                      <!-- Col 3: Strategy Fit -->
+                      <div>
+                        <div class="col-title">Strategy Fit</div>
+
+                        <div class="strategy-row">
+                          <span class="strategy-name">Steady Paycheck</span>
+                          <div class="strategy-score-bar"><div class="strategy-score-fill" style="width:76%;background:var(--green)"></div></div>
+                          <span class="strategy-score-num" style="color:var(--green)">76</span>
+                        </div>
+                        <div class="strategy-why">78 credit spreads in range. Best: Bear Call short 640.0 | exp 2026-04 | PoP 78% | R:R 0.30</div>
+
+                        <div class="strategy-row">
+                          <span class="strategy-name">Weekly Grind</span>
+                          <div class="strategy-score-bar"><div class="strategy-score-fill" style="width:72%;background:var(--green)"></div></div>
+                          <span class="strategy-score-num" style="color:var(--green)">72</span>
+                        </div>
+                        <div class="strategy-why">173 credit spreads in range. Best: Bear Call short 612.5 | exp 2026-03 | PoP 78% | R:R 0.28</div>
+
+                        <div class="strategy-row">
+                          <span class="strategy-name">Trend Rider</span>
+                          <div class="strategy-score-bar"><div class="strategy-score-fill" style="width:67%;background:var(--amber)"></div></div>
+                          <span class="strategy-score-num" style="color:var(--amber)">67</span>
+                        </div>
+                        <div class="strategy-why">85 call candidates found. Best: Call 585.0 @ exp 2026-04 | Δ 0.58 | Premium 2975</div>
+
+                        <div class="strategy-row active">
+                          <span class="strategy-name" style="font-weight:700;">Lottery Ticket</span>
+                          <div class="strategy-score-bar"><div class="strategy-score-fill" style="width:87%;background:var(--green)"></div></div>
+                          <span class="strategy-score-num" style="color:var(--green)">87</span>
+                        </div>
+                        <div class="strategy-why">91 call candidates found. Best: Call 625.0 @ exp 2026-03 | Δ 0.06 | Premium 48</div>
+
+                        <div style="margin-top:14px;">
+                          <button class="btn btn-teal">Re-evaluate →</button>
+                        </div>
+                      </div>
+
+                      <!-- Col 4: Strategy Details -->
+                      <div>
+                        <div class="col-title">Strategy Details</div>
+                        <div class="detail-strategy-name">Lottery Ticket</div>
+                        <div class="detail-subtitle">1-7 DTE deep OTM, asymmetric payout, catalyst required</div>
+
+                        <div class="param-grid">
+                          <div class="param-item">
+                            <div class="param-key">Max DTE</div>
+                            <div class="param-val param-pass">7days</div>
+                          </div>
+                          <div class="param-item">
+                            <div class="param-key">Max Delta</div>
+                            <div class="param-val param-pass">✓ 0.15Δ</div>
+                          </div>
+                        </div>
+
+                        <div class="signal-box">
+                          <div class="signal-title">Signal Checks</div>
+                          <div class="signal-item">
+                            <span class="signal-dot" style="background:var(--green)"></span>
+                            SMA: bullish — 8 > 21 > 50
+                          </div>
+                          <div class="signal-item">
+                            <span class="signal-dot" style="background:var(--green)"></span>
+                            Delta 0.074 (≤0.15 target)
+                          </div>
+                          <div class="signal-item">
+                            <span class="signal-dot" style="background:var(--green)"></span>
+                            Composite score 71 / 100
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Verdict Card -->
+                    <div class="verdict-card">
+                      <div class="verdict-card-header">
+                        <span class="verdict-badge verdict-execute">Execute</span>
+                        <span class="verdict-strategy-pill">Lottery Ticket</span>
+                        <span class="verdict-trade-ref">META · BEAR PUT · 590/580 · 04-17 · 3.82 debit</span>
+                        <span class="verdict-timestamp">03-24-2026 09:45</span>
+                      </div>
+                      <div class="verdict-body">
+                        <!-- Claude's Read -->
+                        <div>
+                          <div class="verdict-section-label">Claude's Read</div>
+                          <div class="claude-read-text">
+                            <p>META is currently trading above all key SMAs in a bullish alignment, making this bear put spread a contrarian volatility play against the prevailing trend — the edge here is IV at 34.98% providing decent premium expansion potential on a reversal. The required move is only 1.14% to reach breakeven at 586.17, giving this trade a realistic path to profit if momentum stalls.</p>
+                            <p>Watch closely if META holds above 591 (current SMA 8 support); a continued grind higher invalidates the thesis rapidly given the short 23-day window.</p>
+                          </div>
+                          <div class="claude-bullets">
+                            <div class="claude-bullet">Bullish SMA alignment directly opposes this bearish directional bet.</div>
+                            <div class="claude-bullet">Time decay works against buyer with only 23 days to expiration.</div>
+                            <div class="claude-bullet">Low net delta (-0.074) means slow initial P&L response to moves.</div>
+                          </div>
+                        </div>
+                        <!-- Exit Plan -->
+                        <div>
+                          <div class="verdict-section-label">Exit Plan</div>
+                          <div class="exit-row">
+                            <div>
+                              <div class="exit-label">Take Profit</div>
+                              <div class="exit-sublabel">underlying price — full profit exit</div>
+                            </div>
+                            <span class="exit-price" style="color:var(--green)">580.00</span>
+                          </div>
+                          <div class="exit-row">
+                            <div>
+                              <div class="exit-label">Warning Level</div>
+                              <div class="exit-sublabel">underlying price — early warning</div>
+                            </div>
+                            <span class="exit-price" style="color:var(--amber)">586.00</span>
+                          </div>
+                          <div class="exit-row">
+                            <div>
+                              <div class="exit-label">Hard Stop</div>
+                              <div class="exit-sublabel">underlying price — cut the loss</div>
+                            </div>
+                            <span class="exit-price" style="color:var(--red)">591.00</span>
+                          </div>
+                        </div>
+                        <!-- Pre-Screen Checks -->
+                        <div>
+                          <div class="verdict-section-label">Pre-Screen Checks</div>
+                          <div class="check-item">
+                            <span class="check-dot" style="background:var(--green)"></span> R:R 1.61
+                          </div>
+                          <div class="check-item">
+                            <span class="check-dot" style="background:var(--amber)"></span> PoP 45.70%
+                          </div>
+                          <div class="check-item">
+                            <span class="check-dot" style="background:var(--green)"></span> Score 71.00
+                          </div>
+                          <div class="check-item">
+                            <span class="check-dot" style="background:var(--green)"></span> DTE 23
+                          </div>
+                          <div class="risk-budget-box">
+                            <div class="risk-budget-title">Risk Budget</div>
+                            <div class="risk-budget-value">382 max loss</div>
+                            <div class="risk-budget-pct">3.8% of 10,000 acct</div>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="verdict-actions">
+                        <button class="btn btn-teal">Follow (Paper)</button>
+                        <button class="btn btn-green">Take Position (Live)</button>
+                        <input type="text" class="followup-input" placeholder="Ask a follow-up about this trade…">
+                        <button class="btn btn-neutral" style="margin-left:auto;">Discard ✕</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- ═══ ANALYSIS VERSION 1: ORIGINAL (collapsed) ═══ -->
+                <div class="analysis-version">
+                  <div class="analysis-header" onclick="this.nextElementSibling.classList.toggle('open'); this.querySelector('.analysis-chevron').classList.toggle('open');">
+                    <span class="analysis-chevron">▶</span>
+                    <span class="analysis-badge original">Original</span>
+                    <span class="analysis-date">03-20-2026 14:12</span>
+                    <div class="analysis-verdict">
+                      <span class="verdict-badge verdict-execute">Execute</span>
+                      <span class="analysis-score" style="color:var(--green);">73.00</span>
+                    </div>
+                  </div>
+                  <div class="analysis-body">
+                    <!-- Same 4-col structure would render here with the original analysis data -->
+                    <div style="padding:20px 16px; color:var(--muted); font-size:10px; font-style:italic; background:var(--bg2);">
+                      Original analysis from 03-20-2026 — same 4-column layout with entry-time data and Claude verdict.
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+
+              <!-- Position Actions -->
+              <div class="position-actions">
+                <button class="btn btn-teal">Refresh</button>
+                <button class="btn btn-neutral">Archive</button>
+              </div>
+            </div>
+          </td>
+        </tr>
+
+        <!-- ═══ META ROW 2 — COLLAPSED ═══ -->
+        <tr>
+          <td>▶</td>
+          <td>META</td>
+          <td><span class="pill pill-paper">Paper</span></td>
+          <td><span class="pill pill-strategy">Lottery Ticket</span></td>
+          <td>Vertical</td>
+          <td><span class="pill pill-type-bear">Bear Call</span></td>
+          <td>03-20-2026</td>
+          <td>625/630</td>
+          <td>2.55</td>
+          <td>2.10</td>
+          <td style="color:var(--green);">+45.00 <span style="font-size:9px;color:var(--muted);">(17.6%)</span></td>
+          <td>30</td>
+          <td><span class="perf-dot perf-green"></span></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- ═══ STRATEGY GROUP: STEADY PAYCHECK ═══ -->
+    <div class="group-header" style="margin-top:20px;">
+      <span class="group-name">Steady Paycheck</span>
+      <span class="group-count">3 active</span>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th></th>
+          <th>Symbol</th>
+          <th>Pos Type</th>
+          <th>Strategy</th>
+          <th>Structure</th>
+          <th>Type</th>
+          <th>Analyzed</th>
+          <th>Strike/Spread</th>
+          <th>Premium</th>
+          <th>Current</th>
+          <th>P&L</th>
+          <th>DTE</th>
+          <th>Perf</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>▶</td>
+          <td>F</td>
+          <td><span class="pill pill-paper">Paper</span></td>
+          <td><span class="pill pill-strategy">Steady Paycheck</span></td>
+          <td>Vertical</td>
+          <td><span class="pill pill-type-bull">Bull Put</span></td>
+          <td>03-18-2026</td>
+          <td>11/10</td>
+          <td>0.18</td>
+          <td>0.12</td>
+          <td style="color:var(--green);">+6.00 <span style="font-size:9px;color:var(--muted);">(33.3%)</span></td>
+          <td>30</td>
+          <td><span class="perf-dot perf-green"></span></td>
+        </tr>
+        <tr>
+          <td>▶</td>
+          <td>IBM</td>
+          <td><span class="pill pill-paper">Paper</span></td>
+          <td><span class="pill pill-strategy">Steady Paycheck</span></td>
+          <td>Vertical</td>
+          <td><span class="pill pill-type-bull">Bull Put</span></td>
+          <td>03-15-2026</td>
+          <td>245/240</td>
+          <td>2.35</td>
+          <td>1.90</td>
+          <td style="color:var(--green);">+45.00 <span style="font-size:9px;color:var(--muted);">(19.1%)</span></td>
+          <td>30</td>
+          <td><span class="perf-dot perf-green"></span></td>
+        </tr>
+        <tr>
+          <td>▶</td>
+          <td>GEV</td>
+          <td><span class="pill pill-live">Live</span></td>
+          <td><span class="pill pill-strategy">Steady Paycheck</span></td>
+          <td>Vertical</td>
+          <td><span class="pill pill-type-bull">Bull Put</span></td>
+          <td>03-12-2026</td>
+          <td>800/795</td>
+          <td>2.85</td>
+          <td>1.40</td>
+          <td style="color:var(--green);">+145.00 <span style="font-size:9px;color:var(--muted);">(50.9%)</span></td>
+          <td>23</td>
+          <td><span class="perf-dot perf-green"></span></td>
+        </tr>
+      </tbody>
+    </table>
+
+  </div><!-- /main-content -->
+</div><!-- /layout -->
+
+</body>
+</html>

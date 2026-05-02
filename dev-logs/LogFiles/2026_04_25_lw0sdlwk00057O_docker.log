@@ -1,0 +1,777 @@
+2026-04-25T01:42:00.7725427Z State: Starting, Action: EstablishingSiteNetworks, LastError: , LastErrorTimestamp: 01/01/0001 00:00:00, LastErrorDetails: , Details: , DetailsLevel: INFO
+2026-04-25T01:42:07.2857043Z State: Starting, Action: StartingSiteContainers, LastError: , LastErrorTimestamp: 01/01/0001 00:00:00, LastErrorDetails: , Details: , DetailsLevel: INFO
+2026-04-25T01:42:07.3223723Z Container start method called.
+2026-04-25T01:42:07.3592439Z State: Starting, Action: PullingImage, LastError: , LastErrorTimestamp: 01/01/0001 00:00:00, LastErrorDetails: , Details: Pulling image 10.1.0.6:13209/appsvc/python:3.13_20260203.2.tuxprod for options-analyzer-api-dev., DetailsLevel: INFO
+2026-04-25T01:42:07.3595410Z Establishing network.
+2026-04-25T01:42:07.3795073Z Pulling image: appsvc/python:3.13_20260203.2.tuxprod.
+2026-04-25T01:43:26.4248305Z Image appsvc/python:3.13_20260203.2.tuxprod is pulled from registry 10.1.0.6:13209
+2026-04-25T01:43:26.7459934Z Container is starting.
+2026-04-25T01:43:26.7627436Z State: Starting, Action: MountingVolumes, LastError: , LastErrorTimestamp: 01/01/0001 00:00:00, LastErrorDetails: , Details: Mounting volumes for options-analyzer-api-dev., DetailsLevel: INFO
+2026-04-25T01:43:26.7631320Z Establishing user namespace if not established already.
+2026-04-25T01:43:26.7632564Z Establishing network if not established already.
+2026-04-25T01:43:26.7633959Z Mounting volumes.
+2026-04-25T01:43:26.7758137Z Nested mountpoint 
+2026-04-25T01:43:26.8962378Z Nested mountpoint volatile/logs
+2026-04-25T01:43:26.9156956Z Nested mountpoint 
+2026-04-25T01:43:27.0735664Z Nested mountpoint 
+2026-04-25T01:43:27.0910414Z Nested mountpoint 
+2026-04-25T01:43:27.4056211Z State: Starting, Action: CreatingContainer, LastError: , LastErrorTimestamp: 01/01/0001 00:00:00, LastErrorDetails: , Details: Finished pulling container image and mounting volumes for options-analyzer-api-dev. Allocatinng the rest of the container resources to finish container creation., DetailsLevel: INFO
+2026-04-25T01:43:27.4063924Z Creating container.
+2026-04-25T01:43:27.4144997Z Creating pipes for streaming container io.
+2026-04-25T01:43:27.4161056Z Creating stdout named pipe at /podr/container/pipe/d19b60137f6e_options-analyzer-api-dev/stdout_2b375df0baa14663aa7fe3b3d16e94a8.
+2026-04-25T01:43:27.4241205Z Successfully created stdout named pipe at: /podr/container/pipe/d19b60137f6e_options-analyzer-api-dev/stdout_2b375df0baa14663aa7fe3b3d16e94a8.
+2026-04-25T01:43:27.4256329Z Opening named pipe /podr/container/pipe/d19b60137f6e_options-analyzer-api-dev/stdout_2b375df0baa14663aa7fe3b3d16e94a8 for reading in non-blocking mode.
+2026-04-25T01:43:27.4339228Z Successfully opened named pipe: /podr/container/pipe/d19b60137f6e_options-analyzer-api-dev/stdout_2b375df0baa14663aa7fe3b3d16e94a8.
+2026-04-25T01:43:27.4351114Z Successfully removed non-blocking flag from /podr/container/pipe/d19b60137f6e_options-analyzer-api-dev/stdout_2b375df0baa14663aa7fe3b3d16e94a8.
+2026-04-25T01:43:27.4435870Z Creating stderr named pipe at /podr/container/pipe/d19b60137f6e_options-analyzer-api-dev/stderr_69e4fe37433c42b69ca4287b6282364c.
+2026-04-25T01:43:27.4441079Z Successfully created stderr named pipe at: /podr/container/pipe/d19b60137f6e_options-analyzer-api-dev/stderr_69e4fe37433c42b69ca4287b6282364c.
+2026-04-25T01:43:27.4445892Z Opening named pipe /podr/container/pipe/d19b60137f6e_options-analyzer-api-dev/stderr_69e4fe37433c42b69ca4287b6282364c for reading in non-blocking mode.
+2026-04-25T01:43:27.4449086Z Successfully opened named pipe: /podr/container/pipe/d19b60137f6e_options-analyzer-api-dev/stderr_69e4fe37433c42b69ca4287b6282364c.
+2026-04-25T01:43:27.4457696Z Successfully removed non-blocking flag from /podr/container/pipe/d19b60137f6e_options-analyzer-api-dev/stderr_69e4fe37433c42b69ca4287b6282364c.
+2026-04-25T01:43:27.4646909Z Creating container with image: appsvc/python:3.13_20260203.2.tuxprod from registry: 10.1.0.6:13209 and fully qualified image name: 10.1.0.6:13209/appsvc/python:3.13_20260203.2.tuxprod
+2026-04-25T01:43:29.2123533Z Starting container: d19b60137f6e_options-analyzer-api-dev.
+2026-04-25T01:43:29.6475269Z Starting watchers and probes.
+2026-04-25T01:43:29.7847790Z Starting metrics collection.
+2026-04-25T01:43:29.8263734Z Container is running.
+2026-04-25T01:43:29.8265817Z State: Starting, Action: CreatingContainer, LastError: , LastErrorTimestamp: 01/01/0001 00:00:00, LastErrorDetails: , Details: Container options-analyzer-api-dev successfully created and is running., DetailsLevel: INFO
+2026-04-25T01:43:30.7433693Z Container start method finished after 83419 ms.
+2026-04-25T01:43:30.7810919Z State: Starting, Action: InitiatingSiteWarmUpProbe, LastError: , LastErrorTimestamp: 01/01/0001 00:00:00, LastErrorDetails: , Details: Container options-analyzer-api-dev successfully created and is running., DetailsLevel: INFO
+2026-04-25T01:43:30.8130054Z State: Starting, Action: WaitingForSiteWarmUpProbeSuccess, LastError: , LastErrorTimestamp: 01/01/0001 00:00:00, LastErrorDetails: , Details: Pinging warmup path to ensure container is ready to receive requests., DetailsLevel: INFO
+2026-04-25T01:44:00.9979005Z Container has finished running with exit code: 1.
+2026-04-25T01:44:01.0162546Z Container is terminating. Grace period: 5 seconds.
+2026-04-25T01:44:01.0462780Z Stop and delete container. Retry count = 0
+2026-04-25T01:44:01.0486217Z Stopping container: d19b60137f6e_options-analyzer-api-dev.
+2026-04-25T01:44:01.1485568Z Deleting container: d19b60137f6e_options-analyzer-api-dev. Retry count = 0
+2026-04-25T01:44:01.4705221Z Container spec TerminationMessagePolicy  path 
+2026-04-25T01:44:01.5078187Z Container is terminated. Total time elapsed: 488 ms.
+2026-04-25T01:44:01.5086648Z Site container: options-analyzer-api-dev terminated during site startup.
+2026-04-25T01:44:01.5184998Z State: Stopping, Action: CancellingStartup, LastError: , LastErrorTimestamp: 01/01/0001 00:00:00, LastErrorDetails: , Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T01:44:01.5875038Z Site startup probe failed after 30.6756181 seconds.
+2026-04-25T01:44:01.8638082Z State: Stopping, Action: CancellingStartup, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:44:01, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T01:44:01.9849539Z Failed to start site. Revert by stopping site.
+2026-04-25T01:44:02.1009680Z State: Stopping, Action: StoppingSite, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:44:01, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T01:44:02.1142367Z State: Stopping, Action: StoppingSiteContainers, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:44:01, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T01:44:02.1329126Z Site: options-analyzer-api-dev stopped.
+2026-04-25T01:44:30.5127661Z State: Starting, Action: EstablishingSiteNetworks, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:44:01, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site stopped at 04/25/2026 01:44:04 (UTC), DetailsLevel: ERR
+2026-04-25T01:44:31.9580773Z State: Starting, Action: StartingSiteContainers, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:44:01, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site stopped at 04/25/2026 01:44:04 (UTC), DetailsLevel: ERR
+2026-04-25T01:44:31.9582249Z Container start method called.
+2026-04-25T01:44:31.9582750Z State: Starting, Action: PullingImage, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:44:01, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Pulling image 10.1.0.6:13209/appsvc/python:3.13_20260203.2.tuxprod for options-analyzer-api-dev., DetailsLevel: INFO
+2026-04-25T01:44:31.9583471Z Establishing network.
+2026-04-25T01:44:31.9584258Z Pulling image: appsvc/python:3.13_20260203.2.tuxprod.
+2026-04-25T01:44:32.1683074Z Container is starting.
+2026-04-25T01:44:32.1684277Z State: Starting, Action: MountingVolumes, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:44:01, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Mounting volumes for options-analyzer-api-dev., DetailsLevel: INFO
+2026-04-25T01:44:32.1707242Z Establishing user namespace if not established already.
+2026-04-25T01:44:32.1795016Z Establishing network if not established already.
+2026-04-25T01:44:32.1803278Z Mounting volumes.
+2026-04-25T01:44:32.1899424Z Nested mountpoint 
+2026-04-25T01:44:32.1981261Z Nested mountpoint volatile/logs
+2026-04-25T01:44:32.2171729Z Nested mountpoint 
+2026-04-25T01:44:32.2178548Z Nested mountpoint 
+2026-04-25T01:44:32.2299007Z Nested mountpoint 
+2026-04-25T01:44:32.4280608Z State: Starting, Action: CreatingContainer, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:44:01, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Finished pulling container image and mounting volumes for options-analyzer-api-dev. Allocatinng the rest of the container resources to finish container creation., DetailsLevel: INFO
+2026-04-25T01:44:32.4286627Z Creating container.
+2026-04-25T01:44:32.4293287Z Creating pipes for streaming container io.
+2026-04-25T01:44:32.4299879Z Creating stdout named pipe at /podr/container/pipe/feff0d70ec6f_options-analyzer-api-dev/stdout_2e1d57973145463ca4371254910aa090.
+2026-04-25T01:44:32.4369668Z Successfully created stdout named pipe at: /podr/container/pipe/feff0d70ec6f_options-analyzer-api-dev/stdout_2e1d57973145463ca4371254910aa090.
+2026-04-25T01:44:32.4373578Z Opening named pipe /podr/container/pipe/feff0d70ec6f_options-analyzer-api-dev/stdout_2e1d57973145463ca4371254910aa090 for reading in non-blocking mode.
+2026-04-25T01:44:32.4376408Z Successfully opened named pipe: /podr/container/pipe/feff0d70ec6f_options-analyzer-api-dev/stdout_2e1d57973145463ca4371254910aa090.
+2026-04-25T01:44:32.4378024Z Successfully removed non-blocking flag from /podr/container/pipe/feff0d70ec6f_options-analyzer-api-dev/stdout_2e1d57973145463ca4371254910aa090.
+2026-04-25T01:44:32.4391832Z Creating stderr named pipe at /podr/container/pipe/feff0d70ec6f_options-analyzer-api-dev/stderr_97c0d60e78d64e7f8eb428fcb9882514.
+2026-04-25T01:44:32.4472536Z Successfully created stderr named pipe at: /podr/container/pipe/feff0d70ec6f_options-analyzer-api-dev/stderr_97c0d60e78d64e7f8eb428fcb9882514.
+2026-04-25T01:44:32.4478192Z Opening named pipe /podr/container/pipe/feff0d70ec6f_options-analyzer-api-dev/stderr_97c0d60e78d64e7f8eb428fcb9882514 for reading in non-blocking mode.
+2026-04-25T01:44:32.4481816Z Successfully opened named pipe: /podr/container/pipe/feff0d70ec6f_options-analyzer-api-dev/stderr_97c0d60e78d64e7f8eb428fcb9882514.
+2026-04-25T01:44:32.4486604Z Successfully removed non-blocking flag from /podr/container/pipe/feff0d70ec6f_options-analyzer-api-dev/stderr_97c0d60e78d64e7f8eb428fcb9882514.
+2026-04-25T01:44:32.4492293Z Creating container with image: appsvc/python:3.13_20260203.2.tuxprod from registry: 10.1.0.6:13209 and fully qualified image name: 10.1.0.6:13209/appsvc/python:3.13_20260203.2.tuxprod
+2026-04-25T01:44:33.0582471Z Starting container: feff0d70ec6f_options-analyzer-api-dev.
+2026-04-25T01:44:33.2779852Z Starting watchers and probes.
+2026-04-25T01:44:33.3078326Z Starting metrics collection.
+2026-04-25T01:44:33.3093411Z Container is running.
+2026-04-25T01:44:33.3095090Z State: Starting, Action: CreatingContainer, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:44:01, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Container options-analyzer-api-dev successfully created and is running., DetailsLevel: INFO
+2026-04-25T01:44:33.6795182Z Container start method finished after 1721 ms.
+2026-04-25T01:44:33.6797338Z State: Starting, Action: InitiatingSiteWarmUpProbe, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:44:01, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Container options-analyzer-api-dev successfully created and is running., DetailsLevel: INFO
+2026-04-25T01:44:33.6797656Z State: Starting, Action: WaitingForSiteWarmUpProbeSuccess, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:44:01, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Pinging warmup path to ensure container is ready to receive requests., DetailsLevel: INFO
+2026-04-25T01:44:58.6599949Z Container has finished running with exit code: 1.
+2026-04-25T01:44:58.6603009Z Container is terminating. Grace period: 5 seconds.
+2026-04-25T01:44:58.6973706Z Stop and delete container. Retry count = 0
+2026-04-25T01:44:58.7268719Z Stopping container: feff0d70ec6f_options-analyzer-api-dev.
+2026-04-25T01:44:58.9107874Z Deleting container: feff0d70ec6f_options-analyzer-api-dev. Retry count = 0
+2026-04-25T01:44:59.3454553Z Container spec TerminationMessagePolicy  path 
+2026-04-25T01:44:59.3544830Z Container is terminated. Total time elapsed: 685 ms.
+2026-04-25T01:44:59.3551718Z Site container: options-analyzer-api-dev terminated during site startup.
+2026-04-25T01:44:59.3563696Z State: Stopping, Action: CancellingStartup, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:44:01, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T01:44:59.3870716Z Site startup probe failed after 25.6304953 seconds.
+2026-04-25T01:44:59.6374157Z State: Stopping, Action: CancellingStartup, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:44:59, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T01:44:59.6388940Z Failed to start site. Revert by stopping site.
+2026-04-25T01:44:59.6535628Z State: Stopping, Action: StoppingSite, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:44:59, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T01:44:59.6542504Z State: Stopping, Action: StoppingSiteContainers, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:44:59, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T01:44:59.6542795Z Site: options-analyzer-api-dev stopped.
+2026-04-25T01:45:26.1359047Z State: Starting, Action: EstablishingSiteNetworks, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:44:59, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site stopped at 04/25/2026 01:45:00 (UTC), DetailsLevel: ERR
+2026-04-25T01:45:28.9564146Z State: Starting, Action: StartingMsiContainer, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:44:59, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site stopped at 04/25/2026 01:45:00 (UTC), DetailsLevel: ERR
+2026-04-25T01:45:42.0911878Z State: Starting, Action: StartingSiteContainers, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:44:59, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site stopped at 04/25/2026 01:45:00 (UTC), DetailsLevel: ERR
+2026-04-25T01:45:42.0918222Z Container start method called.
+2026-04-25T01:45:42.0986819Z State: Starting, Action: PullingImage, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:44:59, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Pulling image 10.1.0.6:13209/appsvc/python:3.13_20260203.2.tuxprod for options-analyzer-api-dev., DetailsLevel: INFO
+2026-04-25T01:45:42.1006987Z Establishing network.
+2026-04-25T01:45:42.1021282Z Pulling image: appsvc/python:3.13_20260203.2.tuxprod.
+2026-04-25T01:45:42.2664045Z Container is starting.
+2026-04-25T01:45:42.2728888Z State: Starting, Action: MountingVolumes, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:44:59, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Mounting volumes for options-analyzer-api-dev., DetailsLevel: INFO
+2026-04-25T01:45:42.2730906Z Establishing user namespace if not established already.
+2026-04-25T01:45:42.2736831Z Establishing network if not established already.
+2026-04-25T01:45:42.2739095Z Mounting volumes.
+2026-04-25T01:45:42.2742350Z Nested mountpoint 
+2026-04-25T01:45:42.3231348Z Nested mountpoint volatile/logs
+2026-04-25T01:45:42.3442841Z Nested mountpoint 
+2026-04-25T01:45:42.3576942Z Nested mountpoint 
+2026-04-25T01:45:42.3976617Z Nested mountpoint 
+2026-04-25T01:45:42.8384295Z State: Starting, Action: CreatingContainer, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:44:59, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Finished pulling container image and mounting volumes for options-analyzer-api-dev. Allocatinng the rest of the container resources to finish container creation., DetailsLevel: INFO
+2026-04-25T01:45:42.8386407Z Creating container.
+2026-04-25T01:45:42.8387494Z Creating pipes for streaming container io.
+2026-04-25T01:45:42.8388530Z Creating stdout named pipe at /podr/container/pipe/f8ef0fa36422_options-analyzer-api-dev/stdout_712dc04e2e314fc3b1a98adf301a3265.
+2026-04-25T01:45:42.8468945Z Successfully created stdout named pipe at: /podr/container/pipe/f8ef0fa36422_options-analyzer-api-dev/stdout_712dc04e2e314fc3b1a98adf301a3265.
+2026-04-25T01:45:42.8471221Z Opening named pipe /podr/container/pipe/f8ef0fa36422_options-analyzer-api-dev/stdout_712dc04e2e314fc3b1a98adf301a3265 for reading in non-blocking mode.
+2026-04-25T01:45:42.8476001Z Successfully opened named pipe: /podr/container/pipe/f8ef0fa36422_options-analyzer-api-dev/stdout_712dc04e2e314fc3b1a98adf301a3265.
+2026-04-25T01:45:42.8477387Z Successfully removed non-blocking flag from /podr/container/pipe/f8ef0fa36422_options-analyzer-api-dev/stdout_712dc04e2e314fc3b1a98adf301a3265.
+2026-04-25T01:45:42.8479416Z Creating stderr named pipe at /podr/container/pipe/f8ef0fa36422_options-analyzer-api-dev/stderr_54797c48e8e74333adf98dca4be58f0e.
+2026-04-25T01:45:42.8481061Z Successfully created stderr named pipe at: /podr/container/pipe/f8ef0fa36422_options-analyzer-api-dev/stderr_54797c48e8e74333adf98dca4be58f0e.
+2026-04-25T01:45:42.8481960Z Opening named pipe /podr/container/pipe/f8ef0fa36422_options-analyzer-api-dev/stderr_54797c48e8e74333adf98dca4be58f0e for reading in non-blocking mode.
+2026-04-25T01:45:42.8483058Z Successfully opened named pipe: /podr/container/pipe/f8ef0fa36422_options-analyzer-api-dev/stderr_54797c48e8e74333adf98dca4be58f0e.
+2026-04-25T01:45:42.8483915Z Successfully removed non-blocking flag from /podr/container/pipe/f8ef0fa36422_options-analyzer-api-dev/stderr_54797c48e8e74333adf98dca4be58f0e.
+2026-04-25T01:45:42.8503690Z Creating container with image: appsvc/python:3.13_20260203.2.tuxprod from registry: 10.1.0.6:13209 and fully qualified image name: 10.1.0.6:13209/appsvc/python:3.13_20260203.2.tuxprod
+2026-04-25T01:45:43.4813993Z Starting container: f8ef0fa36422_options-analyzer-api-dev.
+2026-04-25T01:45:43.6690316Z Starting watchers and probes.
+2026-04-25T01:45:43.7206913Z Starting metrics collection.
+2026-04-25T01:45:43.7223004Z Container is running.
+2026-04-25T01:45:43.7396664Z State: Starting, Action: CreatingContainer, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:44:59, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Container options-analyzer-api-dev successfully created and is running., DetailsLevel: INFO
+2026-04-25T01:45:44.0235292Z Container start method finished after 1931 ms.
+2026-04-25T01:45:44.0237445Z State: Starting, Action: InitiatingSiteWarmUpProbe, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:44:59, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Container options-analyzer-api-dev successfully created and is running., DetailsLevel: INFO
+2026-04-25T01:45:44.0237711Z State: Starting, Action: WaitingForSiteWarmUpProbeSuccess, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:44:59, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Pinging warmup path to ensure container is ready to receive requests., DetailsLevel: INFO
+2026-04-25T01:46:14.6152345Z Container has finished running with exit code: 1.
+2026-04-25T01:46:14.6157172Z Container is terminating. Grace period: 5 seconds.
+2026-04-25T01:46:14.6165625Z Stop and delete container. Retry count = 0
+2026-04-25T01:46:14.6176345Z Stopping container: f8ef0fa36422_options-analyzer-api-dev.
+2026-04-25T01:46:14.6881042Z Deleting container: f8ef0fa36422_options-analyzer-api-dev. Retry count = 0
+2026-04-25T01:46:14.9076727Z Container spec TerminationMessagePolicy  path 
+2026-04-25T01:46:14.9081068Z Container is terminated. Total time elapsed: 291 ms.
+2026-04-25T01:46:14.9098651Z Site container: options-analyzer-api-dev terminated during site startup.
+2026-04-25T01:46:14.9099896Z State: Stopping, Action: CancellingStartup, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:44:59, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T01:46:14.9464959Z Site startup probe failed after 30.8486515 seconds.
+2026-04-25T01:46:15.1858048Z State: Stopping, Action: CancellingStartup, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:46:15, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T01:46:15.1952328Z Failed to start site. Revert by stopping site.
+2026-04-25T01:46:15.1961319Z State: Stopping, Action: StoppingSite, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:46:15, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T01:46:15.1964253Z State: Stopping, Action: StoppingSiteContainers, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:46:15, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T01:46:15.6990465Z Site container: options-analyzer-api-dev_managedIdentity terminated during site startup.
+2026-04-25T01:46:15.7004466Z State: Stopping, Action: StoppingSiteContainers, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:46:15, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T01:46:15.7013584Z Site: options-analyzer-api-dev stopped.
+2026-04-25T01:46:42.1787557Z State: Starting, Action: EstablishingSiteNetworks, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:46:15, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site stopped at 04/25/2026 01:46:16 (UTC), DetailsLevel: ERR
+2026-04-25T01:46:45.0218797Z State: Starting, Action: StartingMsiContainer, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:46:15, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site stopped at 04/25/2026 01:46:16 (UTC), DetailsLevel: ERR
+2026-04-25T01:46:54.5312684Z State: Starting, Action: StartingSiteContainers, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:46:15, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site stopped at 04/25/2026 01:46:16 (UTC), DetailsLevel: ERR
+2026-04-25T01:46:54.5318094Z Container start method called.
+2026-04-25T01:46:54.5319189Z State: Starting, Action: PullingImage, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:46:15, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Pulling image 10.1.0.7:13209/appsvc/python:3.13_20260203.2.tuxprod for options-analyzer-api-dev., DetailsLevel: INFO
+2026-04-25T01:46:54.5320402Z Establishing network.
+2026-04-25T01:46:54.5321832Z Pulling image: appsvc/python:3.13_20260203.2.tuxprod.
+2026-04-25T01:46:55.1771624Z Image appsvc/python:3.13_20260203.2.tuxprod is pulled from registry 10.1.0.7:13209
+2026-04-25T01:46:55.1783245Z Container is starting.
+2026-04-25T01:46:55.1874859Z State: Starting, Action: MountingVolumes, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:46:15, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Mounting volumes for options-analyzer-api-dev., DetailsLevel: INFO
+2026-04-25T01:46:55.1877787Z Establishing user namespace if not established already.
+2026-04-25T01:46:55.1878994Z Establishing network if not established already.
+2026-04-25T01:46:55.1880195Z Mounting volumes.
+2026-04-25T01:46:55.1882114Z Nested mountpoint 
+2026-04-25T01:46:55.2653905Z Nested mountpoint volatile/logs
+2026-04-25T01:46:55.2794409Z Nested mountpoint 
+2026-04-25T01:46:55.3027403Z Nested mountpoint 
+2026-04-25T01:46:55.3221377Z Nested mountpoint 
+2026-04-25T01:46:55.9392665Z State: Starting, Action: CreatingContainer, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:46:15, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Finished pulling container image and mounting volumes for options-analyzer-api-dev. Allocatinng the rest of the container resources to finish container creation., DetailsLevel: INFO
+2026-04-25T01:46:55.9480398Z Creating container.
+2026-04-25T01:46:55.9541589Z Creating pipes for streaming container io.
+2026-04-25T01:46:55.9543725Z Creating stdout named pipe at /podr/container/pipe/a8b251cd0708_options-analyzer-api-dev/stdout_08f22d85bd8d45ac95bbaa73fc7a5d1f.
+2026-04-25T01:46:55.9545969Z Successfully created stdout named pipe at: /podr/container/pipe/a8b251cd0708_options-analyzer-api-dev/stdout_08f22d85bd8d45ac95bbaa73fc7a5d1f.
+2026-04-25T01:46:55.9547031Z Opening named pipe /podr/container/pipe/a8b251cd0708_options-analyzer-api-dev/stdout_08f22d85bd8d45ac95bbaa73fc7a5d1f for reading in non-blocking mode.
+2026-04-25T01:46:55.9548147Z Successfully opened named pipe: /podr/container/pipe/a8b251cd0708_options-analyzer-api-dev/stdout_08f22d85bd8d45ac95bbaa73fc7a5d1f.
+2026-04-25T01:46:55.9549150Z Successfully removed non-blocking flag from /podr/container/pipe/a8b251cd0708_options-analyzer-api-dev/stdout_08f22d85bd8d45ac95bbaa73fc7a5d1f.
+2026-04-25T01:46:55.9654745Z Creating stderr named pipe at /podr/container/pipe/a8b251cd0708_options-analyzer-api-dev/stderr_1d92bf4a02bf4d158b51b765e02306f3.
+2026-04-25T01:46:55.9663926Z Successfully created stderr named pipe at: /podr/container/pipe/a8b251cd0708_options-analyzer-api-dev/stderr_1d92bf4a02bf4d158b51b765e02306f3.
+2026-04-25T01:46:55.9723162Z Opening named pipe /podr/container/pipe/a8b251cd0708_options-analyzer-api-dev/stderr_1d92bf4a02bf4d158b51b765e02306f3 for reading in non-blocking mode.
+2026-04-25T01:46:55.9730657Z Successfully opened named pipe: /podr/container/pipe/a8b251cd0708_options-analyzer-api-dev/stderr_1d92bf4a02bf4d158b51b765e02306f3.
+2026-04-25T01:46:55.9734060Z Successfully removed non-blocking flag from /podr/container/pipe/a8b251cd0708_options-analyzer-api-dev/stderr_1d92bf4a02bf4d158b51b765e02306f3.
+2026-04-25T01:46:55.9806993Z Creating container with image: appsvc/python:3.13_20260203.2.tuxprod from registry: 10.1.0.7:13209 and fully qualified image name: 10.1.0.7:13209/appsvc/python:3.13_20260203.2.tuxprod
+2026-04-25T01:46:56.5113574Z Starting container: a8b251cd0708_options-analyzer-api-dev.
+2026-04-25T01:46:56.6494886Z Starting watchers and probes.
+2026-04-25T01:46:56.6587361Z Starting metrics collection.
+2026-04-25T01:46:56.6590625Z Container is running.
+2026-04-25T01:46:56.6658477Z State: Starting, Action: CreatingContainer, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:46:15, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Container options-analyzer-api-dev successfully created and is running., DetailsLevel: INFO
+2026-04-25T01:46:56.9131516Z Container start method finished after 2326 ms.
+2026-04-25T01:46:56.9215300Z State: Starting, Action: InitiatingSiteWarmUpProbe, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:46:15, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Container options-analyzer-api-dev successfully created and is running., DetailsLevel: INFO
+2026-04-25T01:46:56.9216151Z State: Starting, Action: WaitingForSiteWarmUpProbeSuccess, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:46:15, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Pinging warmup path to ensure container is ready to receive requests., DetailsLevel: INFO
+2026-04-25T01:47:40.1863521Z Container has finished running with exit code: 1.
+2026-04-25T01:47:40.1865653Z Container is terminating. Grace period: 5 seconds.
+2026-04-25T01:47:40.1869737Z Stop and delete container. Retry count = 0
+2026-04-25T01:47:40.1947858Z Stopping container: a8b251cd0708_options-analyzer-api-dev.
+2026-04-25T01:47:40.6147173Z Deleting container: a8b251cd0708_options-analyzer-api-dev. Retry count = 0
+2026-04-25T01:47:41.7779048Z Container spec TerminationMessagePolicy  path 
+2026-04-25T01:47:41.7781755Z Container is terminated. Total time elapsed: 1591 ms.
+2026-04-25T01:47:41.7783259Z Site container: options-analyzer-api-dev terminated during site startup.
+2026-04-25T01:47:41.7784640Z State: Stopping, Action: CancellingStartup, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:46:15, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T01:47:41.7793450Z Site startup probe failed after 44.8568947 seconds.
+2026-04-25T01:47:42.7314509Z State: Stopping, Action: CancellingStartup, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:47:42, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T01:47:42.7576221Z Failed to start site. Revert by stopping site.
+2026-04-25T01:47:42.7579545Z State: Stopping, Action: StoppingSite, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:47:42, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T01:47:42.7699331Z State: Stopping, Action: StoppingSiteContainers, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:47:42, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T01:47:43.8396181Z Site container: options-analyzer-api-dev_managedIdentity terminated during site startup.
+2026-04-25T01:47:43.8398334Z State: Stopping, Action: StoppingSiteContainers, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:47:42, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T01:47:43.8407425Z Site: options-analyzer-api-dev stopped.
+2026-04-25T01:47:43.8613554Z State: Stopping, Action: UnmountingVolumes, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:47:42, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T01:47:44.4122550Z State: Stopping, Action: StoppingSiteNetworks, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:47:42, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T01:47:45.3134861Z State: Stopped, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:47:42, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site stopped at 04/25/2026 01:47:45 (UTC), DetailsLevel: ERR
+2026-04-25T01:47:45.6159102Z State: Stopped, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:47:42, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site stopped at 04/25/2026 01:47:45 (UTC), DetailsLevel: ERR
+2026-04-25T01:47:50.7056503Z State: Starting, Action: EstablishingSiteNetworks, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:47:42, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site stopped at 04/25/2026 01:47:45 (UTC), DetailsLevel: ERR
+2026-04-25T01:47:53.6180749Z State: Starting, Action: StartingMsiContainer, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:47:42, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site stopped at 04/25/2026 01:47:45 (UTC), DetailsLevel: ERR
+2026-04-25T01:48:04.3032512Z State: Starting, Action: StartingSiteContainers, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:47:42, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site stopped at 04/25/2026 01:47:45 (UTC), DetailsLevel: ERR
+2026-04-25T01:48:04.3033680Z Container start method called.
+2026-04-25T01:48:04.3034220Z State: Starting, Action: PullingImage, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:47:42, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Pulling image 10.1.0.7:13209/appsvc/python:3.13_20260203.2.tuxprod for options-analyzer-api-dev., DetailsLevel: INFO
+2026-04-25T01:48:04.3035220Z Establishing network.
+2026-04-25T01:48:04.3036293Z Pulling image: appsvc/python:3.13_20260203.2.tuxprod.
+2026-04-25T01:48:04.5794508Z Container is starting.
+2026-04-25T01:48:04.5872839Z State: Starting, Action: MountingVolumes, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:47:42, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Mounting volumes for options-analyzer-api-dev., DetailsLevel: INFO
+2026-04-25T01:48:04.5877224Z Establishing user namespace if not established already.
+2026-04-25T01:48:04.5879732Z Establishing network if not established already.
+2026-04-25T01:48:04.5895101Z Mounting volumes.
+2026-04-25T01:48:04.5967680Z Nested mountpoint 
+2026-04-25T01:48:04.6179900Z Nested mountpoint volatile/logs
+2026-04-25T01:48:04.6684812Z Nested mountpoint 
+2026-04-25T01:48:04.6693738Z Nested mountpoint 
+2026-04-25T01:48:04.6977592Z Nested mountpoint 
+2026-04-25T01:48:05.8906094Z State: Starting, Action: CreatingContainer, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:47:42, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Finished pulling container image and mounting volumes for options-analyzer-api-dev. Allocatinng the rest of the container resources to finish container creation., DetailsLevel: INFO
+2026-04-25T01:48:05.9174870Z Creating container.
+2026-04-25T01:48:05.9177124Z Creating pipes for streaming container io.
+2026-04-25T01:48:05.9189198Z Creating stdout named pipe at /podr/container/pipe/0eff8eea4283_options-analyzer-api-dev/stdout_e26e205917dd43fc8125c9526c98e92b.
+2026-04-25T01:48:05.9193078Z Successfully created stdout named pipe at: /podr/container/pipe/0eff8eea4283_options-analyzer-api-dev/stdout_e26e205917dd43fc8125c9526c98e92b.
+2026-04-25T01:48:05.9194648Z Opening named pipe /podr/container/pipe/0eff8eea4283_options-analyzer-api-dev/stdout_e26e205917dd43fc8125c9526c98e92b for reading in non-blocking mode.
+2026-04-25T01:48:05.9199496Z Successfully opened named pipe: /podr/container/pipe/0eff8eea4283_options-analyzer-api-dev/stdout_e26e205917dd43fc8125c9526c98e92b.
+2026-04-25T01:48:05.9201130Z Successfully removed non-blocking flag from /podr/container/pipe/0eff8eea4283_options-analyzer-api-dev/stdout_e26e205917dd43fc8125c9526c98e92b.
+2026-04-25T01:48:05.9397739Z Creating stderr named pipe at /podr/container/pipe/0eff8eea4283_options-analyzer-api-dev/stderr_fae1c44089bc4beaafa368060d14095b.
+2026-04-25T01:48:05.9697404Z Successfully created stderr named pipe at: /podr/container/pipe/0eff8eea4283_options-analyzer-api-dev/stderr_fae1c44089bc4beaafa368060d14095b.
+2026-04-25T01:48:05.9702439Z Opening named pipe /podr/container/pipe/0eff8eea4283_options-analyzer-api-dev/stderr_fae1c44089bc4beaafa368060d14095b for reading in non-blocking mode.
+2026-04-25T01:48:05.9706000Z Successfully opened named pipe: /podr/container/pipe/0eff8eea4283_options-analyzer-api-dev/stderr_fae1c44089bc4beaafa368060d14095b.
+2026-04-25T01:48:05.9707835Z Successfully removed non-blocking flag from /podr/container/pipe/0eff8eea4283_options-analyzer-api-dev/stderr_fae1c44089bc4beaafa368060d14095b.
+2026-04-25T01:48:05.9979154Z Creating container with image: appsvc/python:3.13_20260203.2.tuxprod from registry: 10.1.0.7:13209 and fully qualified image name: 10.1.0.7:13209/appsvc/python:3.13_20260203.2.tuxprod
+2026-04-25T01:48:07.4398736Z Starting container: 0eff8eea4283_options-analyzer-api-dev.
+2026-04-25T01:48:07.6183516Z Starting watchers and probes.
+2026-04-25T01:48:07.6573473Z Starting metrics collection.
+2026-04-25T01:48:07.6577069Z Container is running.
+2026-04-25T01:48:07.6578041Z State: Starting, Action: CreatingContainer, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:47:42, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Container options-analyzer-api-dev successfully created and is running., DetailsLevel: INFO
+2026-04-25T01:48:08.3990764Z Container start method finished after 4087 ms.
+2026-04-25T01:48:08.4092664Z State: Starting, Action: InitiatingSiteWarmUpProbe, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:47:42, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Container options-analyzer-api-dev successfully created and is running., DetailsLevel: INFO
+2026-04-25T01:48:08.4093686Z State: Starting, Action: WaitingForSiteWarmUpProbeSuccess, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:47:42, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Pinging warmup path to ensure container is ready to receive requests., DetailsLevel: INFO
+2026-04-25T01:48:34.9154850Z Container has finished running with exit code: 1.
+2026-04-25T01:48:34.9613933Z Container is terminating. Grace period: 5 seconds.
+2026-04-25T01:48:34.9700256Z Stop and delete container. Retry count = 0
+2026-04-25T01:48:34.9702318Z Stopping container: 0eff8eea4283_options-analyzer-api-dev.
+2026-04-25T01:48:35.1973038Z Deleting container: 0eff8eea4283_options-analyzer-api-dev. Retry count = 0
+2026-04-25T01:48:35.8706351Z Container spec TerminationMessagePolicy  path 
+2026-04-25T01:48:35.8721143Z Container is terminated. Total time elapsed: 909 ms.
+2026-04-25T01:48:35.8724361Z Site container: options-analyzer-api-dev terminated during site startup.
+2026-04-25T01:48:35.8800274Z State: Stopping, Action: CancellingStartup, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:47:42, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T01:48:35.8821833Z Site startup probe failed after 27.4723818 seconds.
+2026-04-25T01:48:36.2242402Z State: Stopping, Action: CancellingStartup, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:48:36, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T01:48:36.2267664Z Failed to start site. Revert by stopping site.
+2026-04-25T01:48:36.2340827Z State: Stopping, Action: StoppingSite, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:48:36, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T01:48:36.2429283Z State: Stopping, Action: StoppingSiteContainers, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:48:36, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T01:48:36.8758542Z Site container: options-analyzer-api-dev_managedIdentity terminated during site startup.
+2026-04-25T01:48:36.8761981Z State: Stopping, Action: StoppingSiteContainers, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:48:36, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T01:48:36.8763789Z Site: options-analyzer-api-dev stopped.
+2026-04-25T01:48:36.8784166Z State: Stopping, Action: UnmountingVolumes, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:48:36, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T01:48:37.3599085Z State: Stopping, Action: StoppingSiteNetworks, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:48:36, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T01:48:37.8743021Z Site: options-analyzer-api-dev will be blocked for 1 minutes till 04/25/2026 01:49:37
+2026-04-25T01:48:37.9018863Z State: Blocked, Action: StoppingSiteNetworks, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:48:36, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site: options-analyzer-api-dev will be blocked for 1 minutes till 04/25/2026 01:49:37, DetailsLevel: WARN
+2026-04-25T01:48:37.9332364Z State: Stopped, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:48:36, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site stopped at 04/25/2026 01:48:37 (UTC), DetailsLevel: WARN
+2026-04-25T01:48:38.2321849Z State: Stopped, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:48:36, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site stopped at 04/25/2026 01:48:37 (UTC), DetailsLevel: WARN
+2026-04-25T01:48:43.4092270Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:48:36, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 01:49:37, DetailsLevel: WARN
+2026-04-25T01:48:43.4092685Z Start site prohibitted because the site is being blocked.
+2026-04-25T01:48:48.6473591Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:48:36, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 01:49:37, DetailsLevel: WARN
+2026-04-25T01:48:48.6485636Z Start site prohibitted because the site is being blocked.
+2026-04-25T01:48:53.9055574Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:48:36, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 01:49:37, DetailsLevel: WARN
+2026-04-25T01:48:53.9057147Z Start site prohibitted because the site is being blocked.
+2026-04-25T01:48:59.0489959Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:48:36, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 01:49:37, DetailsLevel: WARN
+2026-04-25T01:48:59.0490310Z Start site prohibitted because the site is being blocked.
+2026-04-25T01:49:04.2555495Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:48:36, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 01:49:37, DetailsLevel: WARN
+2026-04-25T01:49:04.2555861Z Start site prohibitted because the site is being blocked.
+2026-04-25T01:49:09.4799322Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:48:36, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 01:49:37, DetailsLevel: WARN
+2026-04-25T01:49:09.4800389Z Start site prohibitted because the site is being blocked.
+2026-04-25T01:49:14.7470189Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:48:36, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 01:49:37, DetailsLevel: WARN
+2026-04-25T01:49:14.7470940Z Start site prohibitted because the site is being blocked.
+2026-04-25T01:49:19.8807498Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:48:36, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 01:49:37, DetailsLevel: WARN
+2026-04-25T01:49:19.8807789Z Start site prohibitted because the site is being blocked.
+2026-04-25T01:49:25.1553678Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:48:36, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 01:49:37, DetailsLevel: WARN
+2026-04-25T01:49:25.1554554Z Start site prohibitted because the site is being blocked.
+2026-04-25T01:49:30.3305065Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:48:36, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 01:49:37, DetailsLevel: WARN
+2026-04-25T01:49:30.3305431Z Start site prohibitted because the site is being blocked.
+2026-04-25T01:49:35.4167392Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:48:36, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 01:49:37, DetailsLevel: WARN
+2026-04-25T01:49:35.4167675Z Start site prohibitted because the site is being blocked.
+2026-04-25T01:49:37.8773539Z Site: options-analyzer-api-dev is unblocked.
+2026-04-25T01:49:40.6305524Z State: Starting, Action: EstablishingSiteNetworks, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:48:36, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 01:49:37, DetailsLevel: WARN
+2026-04-25T01:49:43.0679374Z State: Starting, Action: StartingMsiContainer, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:48:36, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 01:49:37, DetailsLevel: WARN
+2026-04-25T01:49:53.4009780Z State: Starting, Action: StartingSiteContainers, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:48:36, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 01:49:37, DetailsLevel: WARN
+2026-04-25T01:49:53.4011219Z Container start method called.
+2026-04-25T01:49:53.4011756Z State: Starting, Action: PullingImage, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:48:36, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Pulling image 10.1.0.7:13209/appsvc/python:3.13_20260203.2.tuxprod for options-analyzer-api-dev., DetailsLevel: INFO
+2026-04-25T01:49:53.4012658Z Establishing network.
+2026-04-25T01:49:53.4013838Z Pulling image: appsvc/python:3.13_20260203.2.tuxprod.
+2026-04-25T01:49:53.6655867Z Container is starting.
+2026-04-25T01:49:53.6657601Z State: Starting, Action: MountingVolumes, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:48:36, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Mounting volumes for options-analyzer-api-dev., DetailsLevel: INFO
+2026-04-25T01:49:53.6659547Z Establishing user namespace if not established already.
+2026-04-25T01:49:53.6661322Z Establishing network if not established already.
+2026-04-25T01:49:53.6665716Z Mounting volumes.
+2026-04-25T01:49:53.6674228Z Nested mountpoint 
+2026-04-25T01:49:53.6959902Z Nested mountpoint volatile/logs
+2026-04-25T01:49:53.8070968Z Nested mountpoint 
+2026-04-25T01:49:53.8274821Z Nested mountpoint 
+2026-04-25T01:49:53.8478379Z Nested mountpoint 
+2026-04-25T01:49:54.3373099Z State: Starting, Action: CreatingContainer, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:48:36, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Finished pulling container image and mounting volumes for options-analyzer-api-dev. Allocatinng the rest of the container resources to finish container creation., DetailsLevel: INFO
+2026-04-25T01:49:54.3441139Z Creating container.
+2026-04-25T01:49:54.3444342Z Creating pipes for streaming container io.
+2026-04-25T01:49:54.3447909Z Creating stdout named pipe at /podr/container/pipe/16868abcd1ac_options-analyzer-api-dev/stdout_fa64e645280a457dacd3c2ac7b76c951.
+2026-04-25T01:49:54.3454416Z Successfully created stdout named pipe at: /podr/container/pipe/16868abcd1ac_options-analyzer-api-dev/stdout_fa64e645280a457dacd3c2ac7b76c951.
+2026-04-25T01:49:54.3462691Z Opening named pipe /podr/container/pipe/16868abcd1ac_options-analyzer-api-dev/stdout_fa64e645280a457dacd3c2ac7b76c951 for reading in non-blocking mode.
+2026-04-25T01:49:54.3466782Z Successfully opened named pipe: /podr/container/pipe/16868abcd1ac_options-analyzer-api-dev/stdout_fa64e645280a457dacd3c2ac7b76c951.
+2026-04-25T01:49:54.3468726Z Successfully removed non-blocking flag from /podr/container/pipe/16868abcd1ac_options-analyzer-api-dev/stdout_fa64e645280a457dacd3c2ac7b76c951.
+2026-04-25T01:49:54.3712375Z Creating stderr named pipe at /podr/container/pipe/16868abcd1ac_options-analyzer-api-dev/stderr_7ae4bef140f74ff1ac06b73e05ad8ced.
+2026-04-25T01:49:54.3793829Z Successfully created stderr named pipe at: /podr/container/pipe/16868abcd1ac_options-analyzer-api-dev/stderr_7ae4bef140f74ff1ac06b73e05ad8ced.
+2026-04-25T01:49:54.3795150Z Opening named pipe /podr/container/pipe/16868abcd1ac_options-analyzer-api-dev/stderr_7ae4bef140f74ff1ac06b73e05ad8ced for reading in non-blocking mode.
+2026-04-25T01:49:54.3796611Z Successfully opened named pipe: /podr/container/pipe/16868abcd1ac_options-analyzer-api-dev/stderr_7ae4bef140f74ff1ac06b73e05ad8ced.
+2026-04-25T01:49:54.3797579Z Successfully removed non-blocking flag from /podr/container/pipe/16868abcd1ac_options-analyzer-api-dev/stderr_7ae4bef140f74ff1ac06b73e05ad8ced.
+2026-04-25T01:49:54.3809192Z Creating container with image: appsvc/python:3.13_20260203.2.tuxprod from registry: 10.1.0.7:13209 and fully qualified image name: 10.1.0.7:13209/appsvc/python:3.13_20260203.2.tuxprod
+2026-04-25T01:49:55.2273132Z Starting container: 16868abcd1ac_options-analyzer-api-dev.
+2026-04-25T01:49:55.3783171Z Starting watchers and probes.
+2026-04-25T01:49:55.3787481Z Starting metrics collection.
+2026-04-25T01:49:55.3794338Z Container is running.
+2026-04-25T01:49:55.3806876Z State: Starting, Action: CreatingContainer, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:48:36, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Container options-analyzer-api-dev successfully created and is running., DetailsLevel: INFO
+2026-04-25T01:49:55.7491699Z Container start method finished after 2347 ms.
+2026-04-25T01:49:55.7692246Z State: Starting, Action: InitiatingSiteWarmUpProbe, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:48:36, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Container options-analyzer-api-dev successfully created and is running., DetailsLevel: INFO
+2026-04-25T01:49:55.7692667Z State: Starting, Action: WaitingForSiteWarmUpProbeSuccess, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:48:36, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Pinging warmup path to ensure container is ready to receive requests., DetailsLevel: INFO
+2026-04-25T01:50:26.4458231Z Container has finished running with exit code: 1.
+2026-04-25T01:50:26.4459532Z Container is terminating. Grace period: 5 seconds.
+2026-04-25T01:50:26.4471900Z Stop and delete container. Retry count = 0
+2026-04-25T01:50:26.4472987Z Stopping container: 16868abcd1ac_options-analyzer-api-dev.
+2026-04-25T01:50:26.8124725Z Deleting container: 16868abcd1ac_options-analyzer-api-dev. Retry count = 0
+2026-04-25T01:50:27.5178238Z Container spec TerminationMessagePolicy  path 
+2026-04-25T01:50:27.5357252Z Container is terminated. Total time elapsed: 1071 ms.
+2026-04-25T01:50:27.5360548Z Site container: options-analyzer-api-dev terminated during site startup.
+2026-04-25T01:50:27.5745287Z State: Stopping, Action: CancellingStartup, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:48:36, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T01:50:27.5943193Z Site startup probe failed after 31.8149648 seconds.
+2026-04-25T01:50:27.9564173Z State: Stopping, Action: CancellingStartup, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:50:27, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T01:50:27.9583859Z Failed to start site. Revert by stopping site.
+2026-04-25T01:50:27.9586649Z State: Stopping, Action: StoppingSite, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:50:27, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T01:50:27.9673555Z State: Stopping, Action: StoppingSiteContainers, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:50:27, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T01:50:28.6510036Z Site container: options-analyzer-api-dev_managedIdentity terminated during site startup.
+2026-04-25T01:50:28.6515715Z State: Stopping, Action: StoppingSiteContainers, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:50:27, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T01:50:28.6522542Z Site: options-analyzer-api-dev stopped.
+2026-04-25T01:50:28.6671784Z State: Stopping, Action: UnmountingVolumes, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:50:27, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T01:50:29.0282110Z State: Stopping, Action: StoppingSiteNetworks, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:50:27, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T01:50:29.5325804Z Site: options-analyzer-api-dev will be blocked for 1 minutes till 04/25/2026 01:51:29
+2026-04-25T01:50:29.5328792Z State: Blocked, Action: StoppingSiteNetworks, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:50:27, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site: options-analyzer-api-dev will be blocked for 1 minutes till 04/25/2026 01:51:29, DetailsLevel: WARN
+2026-04-25T01:50:29.5424712Z State: Stopped, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:50:27, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site stopped at 04/25/2026 01:50:29 (UTC), DetailsLevel: WARN
+2026-04-25T01:50:29.9334734Z State: Stopped, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:50:27, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site stopped at 04/25/2026 01:50:29 (UTC), DetailsLevel: WARN
+2026-04-25T01:50:34.8676033Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:50:27, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 01:51:29, DetailsLevel: WARN
+2026-04-25T01:50:34.8680207Z Start site prohibitted because the site is being blocked.
+2026-04-25T01:50:40.3462910Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:50:27, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 01:51:29, DetailsLevel: WARN
+2026-04-25T01:50:40.3463349Z Start site prohibitted because the site is being blocked.
+2026-04-25T01:50:45.5353235Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:50:27, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 01:51:29, DetailsLevel: WARN
+2026-04-25T01:50:45.5354068Z Start site prohibitted because the site is being blocked.
+2026-04-25T01:50:50.8638562Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:50:27, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 01:51:29, DetailsLevel: WARN
+2026-04-25T01:50:50.8638908Z Start site prohibitted because the site is being blocked.
+2026-04-25T01:50:56.2225942Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:50:27, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 01:51:29, DetailsLevel: WARN
+2026-04-25T01:50:56.2226219Z Start site prohibitted because the site is being blocked.
+2026-04-25T01:51:01.5960450Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:50:27, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 01:51:29, DetailsLevel: WARN
+2026-04-25T01:51:01.5967577Z Start site prohibitted because the site is being blocked.
+2026-04-25T01:51:06.7729932Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:50:27, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 01:51:29, DetailsLevel: WARN
+2026-04-25T01:51:06.7730243Z Start site prohibitted because the site is being blocked.
+2026-04-25T01:51:11.9615457Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:50:27, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 01:51:29, DetailsLevel: WARN
+2026-04-25T01:51:11.9616875Z Start site prohibitted because the site is being blocked.
+2026-04-25T01:51:17.1023649Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:50:27, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 01:51:29, DetailsLevel: WARN
+2026-04-25T01:51:17.1023972Z Start site prohibitted because the site is being blocked.
+2026-04-25T01:51:22.3607668Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:50:27, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 01:51:29, DetailsLevel: WARN
+2026-04-25T01:51:22.3608407Z Start site prohibitted because the site is being blocked.
+2026-04-25T01:51:27.4405516Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:50:27, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 01:51:29, DetailsLevel: WARN
+2026-04-25T01:51:27.4492416Z Start site prohibitted because the site is being blocked.
+2026-04-25T01:51:29.5342548Z Site: options-analyzer-api-dev is unblocked.
+2026-04-25T01:51:32.6486719Z State: Starting, Action: EstablishingSiteNetworks, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:50:27, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 01:51:29, DetailsLevel: WARN
+2026-04-25T01:51:35.2868882Z State: Starting, Action: StartingMsiContainer, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:50:27, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 01:51:29, DetailsLevel: WARN
+2026-04-25T01:51:45.9019885Z State: Starting, Action: StartingSiteContainers, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:50:27, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 01:51:29, DetailsLevel: WARN
+2026-04-25T01:51:45.9022433Z Container start method called.
+2026-04-25T01:51:45.9023232Z State: Starting, Action: PullingImage, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:50:27, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Pulling image 10.1.0.7:13209/appsvc/python:3.13_20260203.2.tuxprod for options-analyzer-api-dev., DetailsLevel: INFO
+2026-04-25T01:51:45.9024266Z Establishing network.
+2026-04-25T01:51:45.9025478Z Pulling image: appsvc/python:3.13_20260203.2.tuxprod.
+2026-04-25T01:51:46.0949074Z Container is starting.
+2026-04-25T01:51:46.0949931Z State: Starting, Action: MountingVolumes, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:50:27, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Mounting volumes for options-analyzer-api-dev., DetailsLevel: INFO
+2026-04-25T01:51:46.0951050Z Establishing user namespace if not established already.
+2026-04-25T01:51:46.0952042Z Establishing network if not established already.
+2026-04-25T01:51:46.0953152Z Mounting volumes.
+2026-04-25T01:51:46.0954754Z Nested mountpoint 
+2026-04-25T01:51:46.1148397Z Nested mountpoint volatile/logs
+2026-04-25T01:51:46.2053411Z Nested mountpoint 
+2026-04-25T01:51:46.2063094Z Nested mountpoint 
+2026-04-25T01:51:46.3066458Z Nested mountpoint 
+2026-04-25T01:51:46.6158394Z State: Starting, Action: CreatingContainer, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:50:27, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Finished pulling container image and mounting volumes for options-analyzer-api-dev. Allocatinng the rest of the container resources to finish container creation., DetailsLevel: INFO
+2026-04-25T01:51:46.6324067Z Creating container.
+2026-04-25T01:51:46.6331773Z Creating pipes for streaming container io.
+2026-04-25T01:51:46.6333359Z Creating stdout named pipe at /podr/container/pipe/006a6e6762e6_options-analyzer-api-dev/stdout_1fb6321705be4a41a95b44d3968385f2.
+2026-04-25T01:51:46.6335627Z Successfully created stdout named pipe at: /podr/container/pipe/006a6e6762e6_options-analyzer-api-dev/stdout_1fb6321705be4a41a95b44d3968385f2.
+2026-04-25T01:51:46.6336532Z Opening named pipe /podr/container/pipe/006a6e6762e6_options-analyzer-api-dev/stdout_1fb6321705be4a41a95b44d3968385f2 for reading in non-blocking mode.
+2026-04-25T01:51:46.6337688Z Successfully opened named pipe: /podr/container/pipe/006a6e6762e6_options-analyzer-api-dev/stdout_1fb6321705be4a41a95b44d3968385f2.
+2026-04-25T01:51:46.6338600Z Successfully removed non-blocking flag from /podr/container/pipe/006a6e6762e6_options-analyzer-api-dev/stdout_1fb6321705be4a41a95b44d3968385f2.
+2026-04-25T01:51:46.6515948Z Creating stderr named pipe at /podr/container/pipe/006a6e6762e6_options-analyzer-api-dev/stderr_0f64ea944171436db3ba8598ef65e769.
+2026-04-25T01:51:46.6521422Z Successfully created stderr named pipe at: /podr/container/pipe/006a6e6762e6_options-analyzer-api-dev/stderr_0f64ea944171436db3ba8598ef65e769.
+2026-04-25T01:51:46.6536456Z Opening named pipe /podr/container/pipe/006a6e6762e6_options-analyzer-api-dev/stderr_0f64ea944171436db3ba8598ef65e769 for reading in non-blocking mode.
+2026-04-25T01:51:46.6538578Z Successfully opened named pipe: /podr/container/pipe/006a6e6762e6_options-analyzer-api-dev/stderr_0f64ea944171436db3ba8598ef65e769.
+2026-04-25T01:51:46.6546900Z Successfully removed non-blocking flag from /podr/container/pipe/006a6e6762e6_options-analyzer-api-dev/stderr_0f64ea944171436db3ba8598ef65e769.
+2026-04-25T01:51:46.6711380Z Creating container with image: appsvc/python:3.13_20260203.2.tuxprod from registry: 10.1.0.7:13209 and fully qualified image name: 10.1.0.7:13209/appsvc/python:3.13_20260203.2.tuxprod
+2026-04-25T01:51:47.5226702Z Starting container: 006a6e6762e6_options-analyzer-api-dev.
+2026-04-25T01:51:47.6505180Z Starting watchers and probes.
+2026-04-25T01:51:47.6518913Z Starting metrics collection.
+2026-04-25T01:51:47.6523343Z Container is running.
+2026-04-25T01:51:47.6801556Z State: Starting, Action: CreatingContainer, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:50:27, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Container options-analyzer-api-dev successfully created and is running., DetailsLevel: INFO
+2026-04-25T01:51:47.9417092Z Container start method finished after 2039 ms.
+2026-04-25T01:51:47.9419160Z State: Starting, Action: InitiatingSiteWarmUpProbe, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:50:27, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Container options-analyzer-api-dev successfully created and is running., DetailsLevel: INFO
+2026-04-25T01:51:47.9419428Z State: Starting, Action: WaitingForSiteWarmUpProbeSuccess, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:50:27, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Pinging warmup path to ensure container is ready to receive requests., DetailsLevel: INFO
+2026-04-25T01:52:24.0640318Z Container has finished running with exit code: 1.
+2026-04-25T01:52:24.0909331Z Container is terminating. Grace period: 5 seconds.
+2026-04-25T01:52:24.0923555Z Stop and delete container. Retry count = 0
+2026-04-25T01:52:24.1008083Z Stopping container: 006a6e6762e6_options-analyzer-api-dev.
+2026-04-25T01:52:24.2513718Z Deleting container: 006a6e6762e6_options-analyzer-api-dev. Retry count = 0
+2026-04-25T01:52:24.6602414Z Container spec TerminationMessagePolicy  path 
+2026-04-25T01:52:24.6609618Z Container is terminated. Total time elapsed: 569 ms.
+2026-04-25T01:52:24.6686403Z Site container: options-analyzer-api-dev terminated during site startup.
+2026-04-25T01:52:24.6690733Z State: Stopping, Action: CancellingStartup, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:50:27, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T01:52:24.6707000Z Site startup probe failed after 36.7283491 seconds.
+2026-04-25T01:52:24.9507879Z State: Stopping, Action: CancellingStartup, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:52:24, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T01:52:25.0500486Z Failed to start site. Revert by stopping site.
+2026-04-25T01:52:25.0519130Z State: Stopping, Action: StoppingSite, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:52:24, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T01:52:25.0819745Z State: Stopping, Action: StoppingSiteContainers, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:52:24, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T01:52:25.8568051Z Site container: options-analyzer-api-dev_managedIdentity terminated during site startup.
+2026-04-25T01:52:25.8569672Z State: Stopping, Action: StoppingSiteContainers, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:52:24, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T01:52:25.8571325Z Site: options-analyzer-api-dev stopped.
+2026-04-25T01:52:25.8654374Z State: Stopping, Action: UnmountingVolumes, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:52:24, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T01:52:26.4839973Z State: Stopping, Action: StoppingSiteNetworks, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:52:24, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T01:52:27.4369155Z Site: options-analyzer-api-dev will be blocked for 2 minutes till 04/25/2026 01:54:27
+2026-04-25T01:52:27.4446742Z State: Blocked, Action: StoppingSiteNetworks, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:52:24, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site: options-analyzer-api-dev will be blocked for 2 minutes till 04/25/2026 01:54:27, DetailsLevel: WARN
+2026-04-25T01:52:27.4452639Z State: Stopped, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:52:24, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site stopped at 04/25/2026 01:52:27 (UTC), DetailsLevel: WARN
+2026-04-25T01:52:27.9933103Z State: Stopped, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:52:24, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site stopped at 04/25/2026 01:52:27 (UTC), DetailsLevel: WARN
+2026-04-25T01:54:27.4396454Z Site: options-analyzer-api-dev is unblocked.
+2026-04-25T02:01:41.7534555Z State: Starting, Action: EstablishingSiteNetworks, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:52:24, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site stopped at 04/25/2026 01:52:27 (UTC), DetailsLevel: WARN
+2026-04-25T02:01:44.8194913Z State: Starting, Action: StartingMsiContainer, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:52:24, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site stopped at 04/25/2026 01:52:27 (UTC), DetailsLevel: WARN
+2026-04-25T02:01:55.0550295Z State: Starting, Action: StartingSiteContainers, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:52:24, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site stopped at 04/25/2026 01:52:27 (UTC), DetailsLevel: WARN
+2026-04-25T02:01:55.0730779Z Container start method called.
+2026-04-25T02:01:55.0736486Z State: Starting, Action: PullingImage, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:52:24, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Pulling image 10.1.0.7:13209/appsvc/python:3.13_20260203.2.tuxprod for options-analyzer-api-dev., DetailsLevel: INFO
+2026-04-25T02:01:55.0742356Z Establishing network.
+2026-04-25T02:01:55.0744406Z Pulling image: appsvc/python:3.13_20260203.2.tuxprod.
+2026-04-25T02:01:55.2816006Z Container is starting.
+2026-04-25T02:01:55.2820567Z State: Starting, Action: MountingVolumes, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:52:24, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Mounting volumes for options-analyzer-api-dev., DetailsLevel: INFO
+2026-04-25T02:01:55.2826484Z Establishing user namespace if not established already.
+2026-04-25T02:01:55.2895284Z Establishing network if not established already.
+2026-04-25T02:01:55.2900092Z Mounting volumes.
+2026-04-25T02:01:55.2904915Z Nested mountpoint 
+2026-04-25T02:01:55.3269684Z Nested mountpoint volatile/logs
+2026-04-25T02:01:55.3584886Z Nested mountpoint 
+2026-04-25T02:01:55.3763192Z Nested mountpoint 
+2026-04-25T02:01:55.3773506Z Nested mountpoint 
+2026-04-25T02:01:55.9023881Z State: Starting, Action: CreatingContainer, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:52:24, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Finished pulling container image and mounting volumes for options-analyzer-api-dev. Allocatinng the rest of the container resources to finish container creation., DetailsLevel: INFO
+2026-04-25T02:01:55.9025152Z Creating container.
+2026-04-25T02:01:55.9026188Z Creating pipes for streaming container io.
+2026-04-25T02:01:55.9027213Z Creating stdout named pipe at /podr/container/pipe/4d8fc74c6e7b_options-analyzer-api-dev/stdout_a2dbf7a89df447928ce66e105787fb58.
+2026-04-25T02:01:55.9029376Z Successfully created stdout named pipe at: /podr/container/pipe/4d8fc74c6e7b_options-analyzer-api-dev/stdout_a2dbf7a89df447928ce66e105787fb58.
+2026-04-25T02:01:55.9030273Z Opening named pipe /podr/container/pipe/4d8fc74c6e7b_options-analyzer-api-dev/stdout_a2dbf7a89df447928ce66e105787fb58 for reading in non-blocking mode.
+2026-04-25T02:01:55.9031351Z Successfully opened named pipe: /podr/container/pipe/4d8fc74c6e7b_options-analyzer-api-dev/stdout_a2dbf7a89df447928ce66e105787fb58.
+2026-04-25T02:01:55.9316214Z Successfully removed non-blocking flag from /podr/container/pipe/4d8fc74c6e7b_options-analyzer-api-dev/stdout_a2dbf7a89df447928ce66e105787fb58.
+2026-04-25T02:01:55.9320822Z Creating stderr named pipe at /podr/container/pipe/4d8fc74c6e7b_options-analyzer-api-dev/stderr_a21693fc0d2f4ebab5fcc22b3850262e.
+2026-04-25T02:01:55.9323047Z Successfully created stderr named pipe at: /podr/container/pipe/4d8fc74c6e7b_options-analyzer-api-dev/stderr_a21693fc0d2f4ebab5fcc22b3850262e.
+2026-04-25T02:01:55.9323995Z Opening named pipe /podr/container/pipe/4d8fc74c6e7b_options-analyzer-api-dev/stderr_a21693fc0d2f4ebab5fcc22b3850262e for reading in non-blocking mode.
+2026-04-25T02:01:55.9411350Z Successfully opened named pipe: /podr/container/pipe/4d8fc74c6e7b_options-analyzer-api-dev/stderr_a21693fc0d2f4ebab5fcc22b3850262e.
+2026-04-25T02:01:55.9414124Z Successfully removed non-blocking flag from /podr/container/pipe/4d8fc74c6e7b_options-analyzer-api-dev/stderr_a21693fc0d2f4ebab5fcc22b3850262e.
+2026-04-25T02:01:55.9416077Z Creating container with image: appsvc/python:3.13_20260203.2.tuxprod from registry: 10.1.0.7:13209 and fully qualified image name: 10.1.0.7:13209/appsvc/python:3.13_20260203.2.tuxprod
+2026-04-25T02:01:56.6194921Z Starting container: 4d8fc74c6e7b_options-analyzer-api-dev.
+2026-04-25T02:01:56.7696303Z Starting watchers and probes.
+2026-04-25T02:01:56.7699796Z Starting metrics collection.
+2026-04-25T02:01:56.7701453Z Container is running.
+2026-04-25T02:01:56.7702366Z State: Starting, Action: CreatingContainer, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:52:24, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Container options-analyzer-api-dev successfully created and is running., DetailsLevel: INFO
+2026-04-25T02:01:57.1518373Z Container start method finished after 2078 ms.
+2026-04-25T02:01:57.1536446Z State: Starting, Action: InitiatingSiteWarmUpProbe, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:52:24, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Container options-analyzer-api-dev successfully created and is running., DetailsLevel: INFO
+2026-04-25T02:01:57.1537303Z State: Starting, Action: WaitingForSiteWarmUpProbeSuccess, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:52:24, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Pinging warmup path to ensure container is ready to receive requests., DetailsLevel: INFO
+2026-04-25T02:02:42.9491066Z Container has finished running with exit code: 1.
+2026-04-25T02:02:42.9494603Z Container is terminating. Grace period: 5 seconds.
+2026-04-25T02:02:42.9498577Z Stop and delete container. Retry count = 0
+2026-04-25T02:02:42.9499515Z Stopping container: 4d8fc74c6e7b_options-analyzer-api-dev.
+2026-04-25T02:02:43.0901628Z Deleting container: 4d8fc74c6e7b_options-analyzer-api-dev. Retry count = 0
+2026-04-25T02:02:43.6457796Z Container spec TerminationMessagePolicy  path 
+2026-04-25T02:02:43.6528423Z Container is terminated. Total time elapsed: 696 ms.
+2026-04-25T02:02:43.6536327Z Site container: options-analyzer-api-dev terminated during site startup.
+2026-04-25T02:02:43.6547202Z State: Stopping, Action: CancellingStartup, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 01:52:24, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T02:02:43.6748464Z Site startup probe failed after 46.464241 seconds.
+2026-04-25T02:02:43.9354829Z State: Stopping, Action: CancellingStartup, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T02:02:43.9731874Z Failed to start site. Revert by stopping site.
+2026-04-25T02:02:43.9740079Z State: Stopping, Action: StoppingSite, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T02:02:43.9859553Z State: Stopping, Action: StoppingSiteContainers, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T02:02:44.7601302Z Site container: options-analyzer-api-dev_managedIdentity terminated during site startup.
+2026-04-25T02:02:44.7603007Z State: Stopping, Action: StoppingSiteContainers, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T02:02:44.7605598Z Site: options-analyzer-api-dev stopped.
+2026-04-25T02:02:44.7696102Z State: Stopping, Action: UnmountingVolumes, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T02:02:45.3444226Z State: Stopping, Action: StoppingSiteNetworks, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T02:02:46.0561202Z Site: options-analyzer-api-dev will be blocked for 2 minutes till 04/25/2026 02:04:46
+2026-04-25T02:02:46.0564480Z State: Blocked, Action: StoppingSiteNetworks, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site: options-analyzer-api-dev will be blocked for 2 minutes till 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:02:46.0659142Z State: Stopped, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site stopped at 04/25/2026 02:02:46 (UTC), DetailsLevel: WARN
+2026-04-25T02:02:46.4776946Z State: Stopped, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site stopped at 04/25/2026 02:02:46 (UTC), DetailsLevel: WARN
+2026-04-25T02:02:56.7452244Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:02:56.7452957Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:02:57.0264933Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:02:57.0265685Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:02:57.3513748Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:02:57.3516859Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:02:58.4541886Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:02:58.4542772Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:02:58.9357133Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:02:58.9358183Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:02:59.3804085Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:02:59.3806485Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:02:59.6589670Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:02:59.6589971Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:02:59.8091816Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:02:59.8092126Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:03:00.6368535Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:03:00.6369267Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:03:02.6465559Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:03:02.6466328Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:03:04.6633927Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:03:04.6634664Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:03:05.6446821Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:03:05.6607638Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:03:05.8664360Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:03:05.8666448Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:03:06.1251851Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:03:06.1255494Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:03:06.3698054Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:03:06.3700065Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:03:06.6429439Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:03:06.6434054Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:03:06.8961789Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:03:06.8962827Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:03:07.9342484Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:03:07.9342842Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:03:09.9470510Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:03:09.9472245Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:03:10.2664057Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:03:10.2666415Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:03:11.2784421Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:03:11.2784727Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:03:12.3125918Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:03:12.3126365Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:03:14.2653088Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:03:14.2653406Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:03:15.2739119Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:03:15.2739489Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:03:16.2607111Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:03:16.2607904Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:03:17.2787218Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:03:17.2787529Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:03:18.2901617Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:03:18.2902531Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:03:19.3018851Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:03:19.3020926Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:03:20.2811385Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:03:20.2812144Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:03:21.2774768Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:03:21.2775113Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:03:22.2758865Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:03:22.2760895Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:03:23.2805526Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:03:23.2807710Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:03:24.3053614Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:03:24.3054421Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:03:25.2676974Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:03:25.2677315Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:03:26.2706060Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:03:26.2706361Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:03:27.3170050Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:03:27.3170822Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:03:28.2646192Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:03:28.2648219Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:03:29.3795689Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:03:29.3796472Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:04:13.0759237Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:04:13.0906115Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:04:22.9455142Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:04:22.9456583Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:04:23.3712225Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:04:23.3712544Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:04:42.7540392Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:04:42.7595009Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:04:43.0482835Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:04:43.0486690Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:04:46.0586814Z Site: options-analyzer-api-dev is unblocked.
+2026-04-25T02:04:59.5302013Z State: Starting, Action: EstablishingSiteNetworks, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:05:03.3749492Z State: Starting, Action: StartingMsiContainer, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:05:18.5220098Z State: Starting, Action: StartingSiteContainers, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:04:46, DetailsLevel: WARN
+2026-04-25T02:05:18.5398525Z Container start method called.
+2026-04-25T02:05:18.5400448Z State: Starting, Action: PullingImage, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Pulling image 10.1.0.7:13209/appsvc/python:3.13_20260203.2.tuxprod for options-analyzer-api-dev., DetailsLevel: INFO
+2026-04-25T02:05:18.5410524Z Establishing network.
+2026-04-25T02:05:18.5412675Z Pulling image: appsvc/python:3.13_20260203.2.tuxprod.
+2026-04-25T02:05:18.7908914Z Container is starting.
+2026-04-25T02:05:18.7909826Z State: Starting, Action: MountingVolumes, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Mounting volumes for options-analyzer-api-dev., DetailsLevel: INFO
+2026-04-25T02:05:18.7910751Z Establishing user namespace if not established already.
+2026-04-25T02:05:18.7911720Z Establishing network if not established already.
+2026-04-25T02:05:18.7912844Z Mounting volumes.
+2026-04-25T02:05:18.7914276Z Nested mountpoint 
+2026-04-25T02:05:18.8291914Z Nested mountpoint volatile/logs
+2026-04-25T02:05:18.8520765Z Nested mountpoint 
+2026-04-25T02:05:18.9197646Z Nested mountpoint 
+2026-04-25T02:05:18.9755128Z Nested mountpoint 
+2026-04-25T02:05:19.4880448Z State: Starting, Action: CreatingContainer, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Finished pulling container image and mounting volumes for options-analyzer-api-dev. Allocatinng the rest of the container resources to finish container creation., DetailsLevel: INFO
+2026-04-25T02:05:19.4884053Z Creating container.
+2026-04-25T02:05:19.4891391Z Creating pipes for streaming container io.
+2026-04-25T02:05:19.4898382Z Creating stdout named pipe at /podr/container/pipe/e9aafc9babb4_options-analyzer-api-dev/stdout_2cf4817eafdc4eabbb3fb4fb15ac77dd.
+2026-04-25T02:05:19.4900920Z Successfully created stdout named pipe at: /podr/container/pipe/e9aafc9babb4_options-analyzer-api-dev/stdout_2cf4817eafdc4eabbb3fb4fb15ac77dd.
+2026-04-25T02:05:19.4901838Z Opening named pipe /podr/container/pipe/e9aafc9babb4_options-analyzer-api-dev/stdout_2cf4817eafdc4eabbb3fb4fb15ac77dd for reading in non-blocking mode.
+2026-04-25T02:05:19.4902997Z Successfully opened named pipe: /podr/container/pipe/e9aafc9babb4_options-analyzer-api-dev/stdout_2cf4817eafdc4eabbb3fb4fb15ac77dd.
+2026-04-25T02:05:19.4903998Z Successfully removed non-blocking flag from /podr/container/pipe/e9aafc9babb4_options-analyzer-api-dev/stdout_2cf4817eafdc4eabbb3fb4fb15ac77dd.
+2026-04-25T02:05:19.5074240Z Creating stderr named pipe at /podr/container/pipe/e9aafc9babb4_options-analyzer-api-dev/stderr_e1aef789385c4695a6d01e3ec04b5ca7.
+2026-04-25T02:05:19.5093321Z Successfully created stderr named pipe at: /podr/container/pipe/e9aafc9babb4_options-analyzer-api-dev/stderr_e1aef789385c4695a6d01e3ec04b5ca7.
+2026-04-25T02:05:19.5096131Z Opening named pipe /podr/container/pipe/e9aafc9babb4_options-analyzer-api-dev/stderr_e1aef789385c4695a6d01e3ec04b5ca7 for reading in non-blocking mode.
+2026-04-25T02:05:19.5167863Z Successfully opened named pipe: /podr/container/pipe/e9aafc9babb4_options-analyzer-api-dev/stderr_e1aef789385c4695a6d01e3ec04b5ca7.
+2026-04-25T02:05:19.5169437Z Successfully removed non-blocking flag from /podr/container/pipe/e9aafc9babb4_options-analyzer-api-dev/stderr_e1aef789385c4695a6d01e3ec04b5ca7.
+2026-04-25T02:05:19.5171191Z Creating container with image: appsvc/python:3.13_20260203.2.tuxprod from registry: 10.1.0.7:13209 and fully qualified image name: 10.1.0.7:13209/appsvc/python:3.13_20260203.2.tuxprod
+2026-04-25T02:05:21.3512027Z Starting container: e9aafc9babb4_options-analyzer-api-dev.
+2026-04-25T02:05:22.1880955Z Starting watchers and probes.
+2026-04-25T02:05:22.3071727Z Starting metrics collection.
+2026-04-25T02:05:22.7309521Z Container is running.
+2026-04-25T02:05:22.7313834Z State: Starting, Action: CreatingContainer, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Container options-analyzer-api-dev successfully created and is running., DetailsLevel: INFO
+2026-04-25T02:05:23.0976681Z Container start method finished after 4557 ms.
+2026-04-25T02:05:23.0978847Z State: Starting, Action: InitiatingSiteWarmUpProbe, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Container options-analyzer-api-dev successfully created and is running., DetailsLevel: INFO
+2026-04-25T02:05:23.0979147Z State: Starting, Action: WaitingForSiteWarmUpProbeSuccess, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Pinging warmup path to ensure container is ready to receive requests., DetailsLevel: INFO
+2026-04-25T02:05:58.8858792Z Container has finished running with exit code: 1.
+2026-04-25T02:05:58.8860931Z Container is terminating. Grace period: 5 seconds.
+2026-04-25T02:05:58.8867214Z Stop and delete container. Retry count = 0
+2026-04-25T02:05:58.8883979Z Stopping container: e9aafc9babb4_options-analyzer-api-dev.
+2026-04-25T02:05:58.9733991Z Deleting container: e9aafc9babb4_options-analyzer-api-dev. Retry count = 0
+2026-04-25T02:05:59.3075607Z Container spec TerminationMessagePolicy  path 
+2026-04-25T02:05:59.3176224Z Container is terminated. Total time elapsed: 421 ms.
+2026-04-25T02:05:59.3253914Z Site container: options-analyzer-api-dev terminated during site startup.
+2026-04-25T02:05:59.3258560Z State: Stopping, Action: CancellingStartup, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:02:43, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T02:05:59.3456487Z Site startup probe failed after 36.2469477 seconds.
+2026-04-25T02:05:59.5664037Z State: Stopping, Action: CancellingStartup, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:05:59, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T02:05:59.5690443Z Failed to start site. Revert by stopping site.
+2026-04-25T02:05:59.5762278Z State: Stopping, Action: StoppingSite, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:05:59, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T02:05:59.5773248Z State: Stopping, Action: StoppingSiteContainers, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:05:59, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T02:06:00.0471229Z Site container: options-analyzer-api-dev_managedIdentity terminated during site startup.
+2026-04-25T02:06:00.0475855Z State: Stopping, Action: StoppingSiteContainers, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:05:59, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T02:06:00.0574530Z Site: options-analyzer-api-dev stopped.
+2026-04-25T02:06:00.0785587Z State: Stopping, Action: UnmountingVolumes, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:05:59, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T02:06:00.6778743Z State: Stopping, Action: StoppingSiteNetworks, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:05:59, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T02:06:01.0776627Z Site: options-analyzer-api-dev will be blocked for 2 minutes till 04/25/2026 02:08:01
+2026-04-25T02:06:01.0778164Z State: Blocked, Action: StoppingSiteNetworks, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:05:59, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site: options-analyzer-api-dev will be blocked for 2 minutes till 04/25/2026 02:08:01, DetailsLevel: WARN
+2026-04-25T02:06:01.0781121Z State: Stopped, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:05:59, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site stopped at 04/25/2026 02:06:01 (UTC), DetailsLevel: WARN
+2026-04-25T02:06:01.5648899Z State: Stopped, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:05:59, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site stopped at 04/25/2026 02:06:01 (UTC), DetailsLevel: WARN
+2026-04-25T02:06:01.9291392Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:05:59, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:08:01, DetailsLevel: WARN
+2026-04-25T02:06:01.9291699Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:06:43.5613560Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:05:59, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:08:01, DetailsLevel: WARN
+2026-04-25T02:06:43.5614653Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:08:01.0782423Z Site: options-analyzer-api-dev is unblocked.
+2026-04-25T02:33:06.6035756Z State: Starting, Action: EstablishingSiteNetworks, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:05:59, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:08:01, DetailsLevel: WARN
+2026-04-25T02:33:09.7524850Z State: Starting, Action: StartingMsiContainer, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:05:59, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:08:01, DetailsLevel: WARN
+2026-04-25T02:33:21.6854077Z State: Starting, Action: StartingSiteContainers, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:05:59, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:08:01, DetailsLevel: WARN
+2026-04-25T02:33:21.6857893Z Container start method called.
+2026-04-25T02:33:21.6860661Z State: Starting, Action: PullingImage, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:05:59, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Pulling image 10.1.0.7:13209/appsvc/python:3.13_20260203.2.tuxprod for options-analyzer-api-dev., DetailsLevel: INFO
+2026-04-25T02:33:21.6865740Z Establishing network.
+2026-04-25T02:33:21.6877260Z Pulling image: appsvc/python:3.13_20260203.2.tuxprod.
+2026-04-25T02:33:21.8290703Z Container is starting.
+2026-04-25T02:33:21.8293382Z State: Starting, Action: MountingVolumes, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:05:59, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Mounting volumes for options-analyzer-api-dev., DetailsLevel: INFO
+2026-04-25T02:33:21.8294864Z Establishing user namespace if not established already.
+2026-04-25T02:33:21.8299390Z Establishing network if not established already.
+2026-04-25T02:33:21.8304539Z Mounting volumes.
+2026-04-25T02:33:21.8307676Z Nested mountpoint 
+2026-04-25T02:33:21.8610043Z Nested mountpoint volatile/logs
+2026-04-25T02:33:21.9291675Z Nested mountpoint 
+2026-04-25T02:33:21.9721199Z Nested mountpoint 
+2026-04-25T02:33:22.0494054Z Nested mountpoint 
+2026-04-25T02:33:22.6424252Z State: Starting, Action: CreatingContainer, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:05:59, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Finished pulling container image and mounting volumes for options-analyzer-api-dev. Allocatinng the rest of the container resources to finish container creation., DetailsLevel: INFO
+2026-04-25T02:33:22.6428609Z Creating container.
+2026-04-25T02:33:22.6430378Z Creating pipes for streaming container io.
+2026-04-25T02:33:22.6431532Z Creating stdout named pipe at /podr/container/pipe/a59ea308f7d8_options-analyzer-api-dev/stdout_e7a04959dc4f4365820bf1bf5ff94005.
+2026-04-25T02:33:22.6433769Z Successfully created stdout named pipe at: /podr/container/pipe/a59ea308f7d8_options-analyzer-api-dev/stdout_e7a04959dc4f4365820bf1bf5ff94005.
+2026-04-25T02:33:22.6438239Z Opening named pipe /podr/container/pipe/a59ea308f7d8_options-analyzer-api-dev/stdout_e7a04959dc4f4365820bf1bf5ff94005 for reading in non-blocking mode.
+2026-04-25T02:33:22.6439660Z Successfully opened named pipe: /podr/container/pipe/a59ea308f7d8_options-analyzer-api-dev/stdout_e7a04959dc4f4365820bf1bf5ff94005.
+2026-04-25T02:33:22.6624284Z Successfully removed non-blocking flag from /podr/container/pipe/a59ea308f7d8_options-analyzer-api-dev/stdout_e7a04959dc4f4365820bf1bf5ff94005.
+2026-04-25T02:33:22.6632082Z Creating stderr named pipe at /podr/container/pipe/a59ea308f7d8_options-analyzer-api-dev/stderr_6457a888eef34ea5ac6c891f4e44e2f3.
+2026-04-25T02:33:22.6636103Z Successfully created stderr named pipe at: /podr/container/pipe/a59ea308f7d8_options-analyzer-api-dev/stderr_6457a888eef34ea5ac6c891f4e44e2f3.
+2026-04-25T02:33:22.6715366Z Opening named pipe /podr/container/pipe/a59ea308f7d8_options-analyzer-api-dev/stderr_6457a888eef34ea5ac6c891f4e44e2f3 for reading in non-blocking mode.
+2026-04-25T02:33:22.6717934Z Successfully opened named pipe: /podr/container/pipe/a59ea308f7d8_options-analyzer-api-dev/stderr_6457a888eef34ea5ac6c891f4e44e2f3.
+2026-04-25T02:33:22.6728469Z Successfully removed non-blocking flag from /podr/container/pipe/a59ea308f7d8_options-analyzer-api-dev/stderr_6457a888eef34ea5ac6c891f4e44e2f3.
+2026-04-25T02:33:22.6734881Z Creating container with image: appsvc/python:3.13_20260203.2.tuxprod from registry: 10.1.0.7:13209 and fully qualified image name: 10.1.0.7:13209/appsvc/python:3.13_20260203.2.tuxprod
+2026-04-25T02:33:23.3798124Z Starting container: a59ea308f7d8_options-analyzer-api-dev.
+2026-04-25T02:33:23.4560120Z Starting watchers and probes.
+2026-04-25T02:33:23.4684185Z Starting metrics collection.
+2026-04-25T02:33:23.5088122Z Container is running.
+2026-04-25T02:33:23.5090139Z State: Starting, Action: CreatingContainer, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:05:59, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Container options-analyzer-api-dev successfully created and is running., DetailsLevel: INFO
+2026-04-25T02:33:23.6389242Z Container start method finished after 1952 ms.
+2026-04-25T02:33:23.6391255Z State: Starting, Action: InitiatingSiteWarmUpProbe, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:05:59, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Container options-analyzer-api-dev successfully created and is running., DetailsLevel: INFO
+2026-04-25T02:33:23.6391766Z State: Starting, Action: WaitingForSiteWarmUpProbeSuccess, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:05:59, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Pinging warmup path to ensure container is ready to receive requests., DetailsLevel: INFO
+2026-04-25T02:34:51.5794507Z Container has finished running with exit code: 3.
+2026-04-25T02:34:51.5811980Z Container is terminating. Grace period: 5 seconds.
+2026-04-25T02:34:51.6135172Z Stop and delete container. Retry count = 0
+2026-04-25T02:34:51.6143269Z Stopping container: a59ea308f7d8_options-analyzer-api-dev.
+2026-04-25T02:34:51.6952299Z Deleting container: a59ea308f7d8_options-analyzer-api-dev. Retry count = 0
+2026-04-25T02:34:53.6191197Z Container spec TerminationMessagePolicy  path 
+2026-04-25T02:34:53.6288275Z Container is terminated. Total time elapsed: 2045 ms.
+2026-04-25T02:34:53.6298884Z Site container: options-analyzer-api-dev terminated during site startup.
+2026-04-25T02:34:53.6414695Z State: Stopping, Action: CancellingStartup, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:05:59, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T02:34:53.7280755Z Site startup probe failed after 89.9117518 seconds.
+2026-04-25T02:34:54.0087789Z State: Stopping, Action: CancellingStartup, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:34:54, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T02:34:54.0422678Z Failed to start site. Revert by stopping site.
+2026-04-25T02:34:54.0519549Z State: Stopping, Action: StoppingSite, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:34:54, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T02:34:54.0612006Z State: Stopping, Action: StoppingSiteContainers, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:34:54, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T02:34:54.5710304Z Site container: options-analyzer-api-dev_managedIdentity terminated during site startup.
+2026-04-25T02:34:54.5718729Z State: Stopping, Action: StoppingSiteContainers, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:34:54, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T02:34:54.5729342Z Site: options-analyzer-api-dev stopped.
+2026-04-25T02:34:54.5840047Z State: Stopping, Action: UnmountingVolumes, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:34:54, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T02:34:55.0568363Z State: Stopping, Action: StoppingSiteNetworks, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:34:54, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site container: options-analyzer-api-dev terminated during site startup. Cancelling site startup., DetailsLevel: ERR
+2026-04-25T02:34:55.4013341Z Site: options-analyzer-api-dev will be blocked for 2 minutes till 04/25/2026 02:36:55
+2026-04-25T02:34:55.4481315Z State: Blocked, Action: StoppingSiteNetworks, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:34:54, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site: options-analyzer-api-dev will be blocked for 2 minutes till 04/25/2026 02:36:55, DetailsLevel: WARN
+2026-04-25T02:34:55.5306835Z State: Stopped, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:34:54, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site stopped at 04/25/2026 02:34:55 (UTC), DetailsLevel: WARN
+2026-04-25T02:34:55.9819353Z State: Stopped, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:34:54, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site stopped at 04/25/2026 02:34:55 (UTC), DetailsLevel: WARN
+2026-04-25T02:36:26.7697361Z State: Blocked, Action: None, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:34:54, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:36:55, DetailsLevel: WARN
+2026-04-25T02:36:26.7697738Z Start site prohibitted because the site is being blocked.
+2026-04-25T02:36:55.4106004Z Site: options-analyzer-api-dev is unblocked.
+2026-04-25T02:41:09.1456428Z State: Starting, Action: EstablishingSiteNetworks, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:34:54, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:36:55, DetailsLevel: WARN
+2026-04-25T02:41:13.0456048Z State: Starting, Action: StartingMsiContainer, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:34:54, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:36:55, DetailsLevel: WARN
+2026-04-25T02:41:25.7279584Z State: Starting, Action: StartingSiteContainers, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:34:54, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Site is blocked due to multiple, consecutive cold start failures. Site scheduled to be unblocked at 04/25/2026 02:36:55, DetailsLevel: WARN
+2026-04-25T02:41:25.7293218Z Container start method called.
+2026-04-25T02:41:25.7303702Z State: Starting, Action: PullingImage, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:34:54, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Pulling image 10.1.0.7:13209/appsvc/python:3.13_20260203.2.tuxprod for options-analyzer-api-dev., DetailsLevel: INFO
+2026-04-25T02:41:25.7313961Z Establishing network.
+2026-04-25T02:41:25.7343917Z Pulling image: appsvc/python:3.13_20260203.2.tuxprod.
+2026-04-25T02:41:25.8863412Z Container is starting.
+2026-04-25T02:41:25.8868612Z State: Starting, Action: MountingVolumes, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:34:54, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Mounting volumes for options-analyzer-api-dev., DetailsLevel: INFO
+2026-04-25T02:41:25.8870696Z Establishing user namespace if not established already.
+2026-04-25T02:41:25.8872406Z Establishing network if not established already.
+2026-04-25T02:41:25.8874058Z Mounting volumes.
+2026-04-25T02:41:25.8880933Z Nested mountpoint 
+2026-04-25T02:41:25.9569640Z Nested mountpoint volatile/logs
+2026-04-25T02:41:26.0491730Z Nested mountpoint 
+2026-04-25T02:41:26.0676849Z Nested mountpoint 
+2026-04-25T02:41:26.0772995Z Nested mountpoint 
+2026-04-25T02:41:26.5966568Z State: Starting, Action: CreatingContainer, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:34:54, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Finished pulling container image and mounting volumes for options-analyzer-api-dev. Allocatinng the rest of the container resources to finish container creation., DetailsLevel: INFO
+2026-04-25T02:41:26.5975458Z Creating container.
+2026-04-25T02:41:26.5984166Z Creating pipes for streaming container io.
+2026-04-25T02:41:26.5990501Z Creating stdout named pipe at /podr/container/pipe/73386bb212d7_options-analyzer-api-dev/stdout_a4d0a77aaa0f482384d5e1a43cf264e3.
+2026-04-25T02:41:26.6061821Z Successfully created stdout named pipe at: /podr/container/pipe/73386bb212d7_options-analyzer-api-dev/stdout_a4d0a77aaa0f482384d5e1a43cf264e3.
+2026-04-25T02:41:26.6066904Z Opening named pipe /podr/container/pipe/73386bb212d7_options-analyzer-api-dev/stdout_a4d0a77aaa0f482384d5e1a43cf264e3 for reading in non-blocking mode.
+2026-04-25T02:41:26.6072909Z Successfully opened named pipe: /podr/container/pipe/73386bb212d7_options-analyzer-api-dev/stdout_a4d0a77aaa0f482384d5e1a43cf264e3.
+2026-04-25T02:41:26.6081701Z Successfully removed non-blocking flag from /podr/container/pipe/73386bb212d7_options-analyzer-api-dev/stdout_a4d0a77aaa0f482384d5e1a43cf264e3.
+2026-04-25T02:41:26.6156067Z Creating stderr named pipe at /podr/container/pipe/73386bb212d7_options-analyzer-api-dev/stderr_7951bfd0034e4d1ab0abaf5c469fa982.
+2026-04-25T02:41:26.6158140Z Successfully created stderr named pipe at: /podr/container/pipe/73386bb212d7_options-analyzer-api-dev/stderr_7951bfd0034e4d1ab0abaf5c469fa982.
+2026-04-25T02:41:26.6159073Z Opening named pipe /podr/container/pipe/73386bb212d7_options-analyzer-api-dev/stderr_7951bfd0034e4d1ab0abaf5c469fa982 for reading in non-blocking mode.
+2026-04-25T02:41:26.6166876Z Successfully opened named pipe: /podr/container/pipe/73386bb212d7_options-analyzer-api-dev/stderr_7951bfd0034e4d1ab0abaf5c469fa982.
+2026-04-25T02:41:26.6168234Z Successfully removed non-blocking flag from /podr/container/pipe/73386bb212d7_options-analyzer-api-dev/stderr_7951bfd0034e4d1ab0abaf5c469fa982.
+2026-04-25T02:41:26.6169742Z Creating container with image: appsvc/python:3.13_20260203.2.tuxprod from registry: 10.1.0.7:13209 and fully qualified image name: 10.1.0.7:13209/appsvc/python:3.13_20260203.2.tuxprod
+2026-04-25T02:41:27.7124309Z Starting container: 73386bb212d7_options-analyzer-api-dev.
+2026-04-25T02:41:27.8303722Z Starting watchers and probes.
+2026-04-25T02:41:27.8386416Z Starting metrics collection.
+2026-04-25T02:41:27.8389563Z Container is running.
+2026-04-25T02:41:27.8398257Z State: Starting, Action: CreatingContainer, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:34:54, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Container options-analyzer-api-dev successfully created and is running., DetailsLevel: INFO
+2026-04-25T02:41:28.1537510Z Container start method finished after 2424 ms.
+2026-04-25T02:41:28.1539592Z State: Starting, Action: InitiatingSiteWarmUpProbe, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:34:54, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Container options-analyzer-api-dev successfully created and is running., DetailsLevel: INFO
+2026-04-25T02:41:28.1540026Z State: Starting, Action: WaitingForSiteWarmUpProbeSuccess, LastError: ContainerTimeout, LastErrorTimestamp: 04/25/2026 02:34:54, LastErrorDetails: Container did not start within expected time limit of 230s. Please inspect your container logs for more details., Details: Pinging warmup path to ensure container is ready to receive requests., DetailsLevel: INFO

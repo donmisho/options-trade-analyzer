@@ -1,0 +1,26 @@
+﻿name                                                                                                                             type_desc                                                    authentication_type_desc
+-------------------------------------------------------------------------------------------------------------------------------- ------------------------------------------------------------ ------------------------------------------------------------
+options-analyzer-api                                                                                                             EXTERNAL_USER                                                EXTERNAL
+options-analyzer-api-dev                                                                                                         EXTERNAL_USER                                                EXTERNAL
+
+(2 rows affected)
+
+role_name                                                                                                                        member_name
+-------------------------------------------------------------------------------------------------------------------------------- --------------------------------------------------------------------------------------------------------------------------------
+db_ddladmin                                                                                                                      options-analyzer-api
+db_datareader                                                                                                                    options-analyzer-api
+db_datawriter                                                                                                                    options-analyzer-api
+db_ddladmin                                                                                                                      options-analyzer-api-dev
+db_datareader                                                                                                                    options-analyzer-api-dev
+db_datawriter                                                                                                                    options-analyzer-api-dev
+
+(6 rows affected)
+
+table_count procedure_count view_count
+----------- --------------- -----------
+27          7               1
+
+(1 row affected)
+
+
+Completion time: 2026-04-28T14:41:09.5635107-05:00
