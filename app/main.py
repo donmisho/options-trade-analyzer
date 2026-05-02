@@ -19,6 +19,9 @@ Python API that will serve a web app, Excel Python, and MCP.
 import asyncio
 import logging
 import os
+import shutil
+import subprocess
+import sys
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -82,6 +85,71 @@ def _log_startup_timing(step: str, start_time: float) -> None:
     logger.info(f"STARTUP_TIMING | step={step} | elapsed_ms={elapsed_ms} | timestamp={timestamp}")
 
 
+def _install_odbc_if_needed():
+    """
+    Install ODBC Driver 18 for SQL Server on Azure App Service Linux containers.
+
+    App Service Python images don't pre-install ODBC Driver 18. Rather than
+    using a bash startup script (which loses the Python venv PATH), we install
+    it here — after Python is already running — via subprocess. This runs
+    synchronously at startup before any DB connections are attempted.
+
+    No-op on Windows or systems without apt-get (local dev).
+    """
+    if sys.platform != "linux" or not shutil.which("apt-get"):
+        return
+
+    odbc_lib_dir = "/opt/microsoft/msodbcsql18/lib64"
+    try:
+        if os.path.isdir(odbc_lib_dir) and any(
+            f.startswith("libmsodbcsql-18") for f in os.listdir(odbc_lib_dir)
+        ):
+            logger.info("ODBC Driver 18: already installed")
+            return
+    except OSError:
+        pass
+
+    logger.info("ODBC Driver 18: not found — installing (this takes ~60s)...")
+
+    r = subprocess.run(
+        ["curl", "-fsSL", "https://packages.microsoft.com/keys/microsoft.asc",
+         "-o", "/etc/apt/trusted.gpg.d/microsoft.asc"],
+        capture_output=True, text=True,
+    )
+    if r.returncode != 0:
+        logger.error(f"ODBC install: MS signing key download failed: {r.stderr.strip()}")
+        return
+
+    if os.path.exists("/etc/debian_version"):
+        with open("/etc/debian_version") as f:
+            deb_ver = f.read().strip().split(".")[0]
+        repo_url = f"https://packages.microsoft.com/config/debian/{deb_ver}/prod.list"
+    else:
+        r2 = subprocess.run(["lsb_release", "-rs"], capture_output=True, text=True)
+        ubuntu_ver = r2.stdout.strip() if r2.returncode == 0 else "22.04"
+        repo_url = f"https://packages.microsoft.com/config/ubuntu/{ubuntu_ver}/prod.list"
+
+    r = subprocess.run(
+        ["curl", "-fsSL", repo_url, "-o", "/etc/apt/sources.list.d/mssql-release.list"],
+        capture_output=True, text=True,
+    )
+    if r.returncode != 0:
+        logger.error(f"ODBC install: MS apt repo setup failed: {r.stderr.strip()}")
+        return
+
+    subprocess.run(["apt-get", "update", "-qq"], capture_output=True, text=True)
+
+    env = {**os.environ, "ACCEPT_EULA": "Y"}
+    r = subprocess.run(
+        ["apt-get", "install", "-y", "-qq", "msodbcsql18"],
+        env=env, capture_output=True, text=True,
+    )
+    if r.returncode != 0:
+        logger.error(f"ODBC install: apt-get install failed: {r.stderr.strip()}")
+    else:
+        logger.info("ODBC Driver 18: installed successfully")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -99,8 +167,8 @@ async def lifespan(app: FastAPI):
     _log_startup_timing("app_start", _app_startup_start)
     _log_startup_timing("routers_registered", _app_startup_start)
 
-    # ODBC driver install moved to repo-root startup.sh (OTA-545).
-    # App Service Configuration > General Settings > Startup Command must reference startup.sh.
+    # 0. Install ODBC Driver 18 if on Azure App Service Linux (needed for Azure SQL)
+    _install_odbc_if_needed()
 
     # 1. Initialize database tables
     await init_db()

@@ -743,16 +743,6 @@ The staging and prod slots share the same Azure SQL database. This is what enfor
 
 The frontend deploys separately to Azure Static Web Apps via `azure-static-web-apps-purple-ground-0d4efed10.yml`. SWA has its own build-on-push pipeline. The two deployment pipelines (App Service backend, SWA frontend) run independently. There is no coordinated atomic deploy of both — a frontend change deploys to SWA on push; a backend change requires the manual gate. This is acceptable because the API contract between the two is versioned and breaking changes go through the same gate.
 
-### App Service Startup Command
-
-The App Service is configured with `Startup Command: bash startup.sh` (Configuration > General Settings).
-
-`startup.sh` (repo root) performs OS-level setup — Microsoft ODBC Driver 18 install via `apt-get` — before invoking `exec python -m uvicorn app.main:app --host 0.0.0.0 --port 8000`. Keeping OS install out of `app/main.py` lifespan eliminates cold-start coupling between app code and platform package management.
-
-The `build-on-push.yml` workflow bundles `startup.sh` into the deployment zip alongside `app/`, `requirements.txt`, and `static/`.
-
-**Long-term direction:** A custom container image with ODBC pre-installed eliminates `startup.sh` entirely. Tracked as a follow-up in OTA-547 (Polish & Future-Proofing) backlog if `startup.sh` proves fragile.
-
 ## Azure Resources Summary
 
 | Resource | Name | Location | Tier | Tags |
