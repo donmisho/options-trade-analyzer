@@ -1,6 +1,6 @@
 # architecture-plan.md
 
-**Last Updated:** 2026-04-30 23:30 UTC
+**Last Updated:** 2026-05-01 21:30 UTC
 **Instigating Ticket:** OTA-535 (Architecture Optimization Framework v1 Epic; absorbs cancelled OTA-244, OTA-246, OTA-247, OTA-474, OTA-475, OTA-521; merges and supersedes project-hierarchy.md; incorporates findings from the 2026-04-30 GPT-5.4 and Opus-4.7 architectural reviews; adds OTAR roadmap reference per OTA-495; links to OTAR-24 and OTAR-27)
 
 ---
@@ -193,7 +193,7 @@ The invariant is enforced by:
 
 ## Schema Migration Strategy
 
-The system uses **Alembic** for schema migrations, integrated with the SQLAlchemy async engine. This is the locked-in decision (per OTA-522, which remains open as the implementation work).
+The system uses **Alembic** for schema migrations, integrated with the SQLAlchemy async engine. Alembic is wired and operational as of OTA-540 (shipped 2026-05-01). OTA-522 is superseded by OTA-540.
 
 The chosen migration discipline is **expand/contract**:
 
@@ -205,7 +205,18 @@ This discipline is required because the staging and production slots in the App 
 
 Deferred contract migrations are tracked perpetually under OTA-523 (Database Contract Actions). When a contract migration ships, its row in OTA-523's tracking table updates to `dropped` and is preserved for audit.
 
-The current `app/models/session.py` `init_db()` call uses `metadata.create_all()` — this works for fresh dev databases but is not safe for production schema evolution. The migration to Alembic-driven schema management is part of OTA-522 and is the gating dependency for any production schema change.
+**OTA-540 (shipped):** Alembic is now wired and operational. The baseline migration (`f9e59a180957`) represents the full production schema as of 2026-05-01.
+
+`app/models/session.py` `init_db()` now runs `alembic upgrade head` at startup **in dev/staging only**. In production, `init_db()` is a no-op — migrations are applied manually as part of the deploy procedure:
+
+1. Build artifact ships via `build-on-push.yml` → deploy to staging slot via `deploy-to-prod.yml`
+2. Developer runs `alembic upgrade head` from a workstation with prod Entra credentials, pointed at the production Azure SQL database
+3. Verify `alembic current` shows the expected revision
+4. Promote staging to prod via `swap-staging-to-prod.yml`
+
+The one-time production stamping procedure (for existing databases transitioning from `create_all()` to Alembic) is documented in `docs/runbooks/alembic-stamp-prod.md`.
+
+The legacy `app/models/migrations.py` hand-written migration runner is superseded by Alembic for all new schema changes. It remains in place only for reference; it no longer runs at startup.
 
 ---
 
@@ -846,6 +857,7 @@ The Architecture Optimization Epic (OTA-535) tracks the active drift items ident
 
 | Date | Ticket | Change |
 |---|---|---|
+| 2026-05-01 21:30 UTC | OTA-540 | Schema Migration Strategy section updated: Alembic is now operational (baseline `f9e59a180957` ships with OTA-540). `init_db()` now runs `alembic upgrade head` in dev/staging; production migrations are manual (stamping procedure in `docs/runbooks/alembic-stamp-prod.md`). Updated § 2 to remove the "OTA-522 remains open" note and document the prod migration deploy procedure. |
 | 2026-04-30 23:30 UTC | OTA-535 | Updated placeholder references to real ticket numbers throughout the document. Architecture Optimization Epic is OTA-535. New TMTC Application Framework OTAR Category is OTAR-27. The 12 cluster Stories (OTA-536 through OTA-547) and four reparented predecessor Stories (OTA-513, OTA-514, OTA-522, OTA-525) are now siblings under OTA-535. |
 | 2026-04-30 22:50 UTC | OTA-495 | Added Roadmap Reference section after Source of Truth Documents, mapping each architectural pattern and engine to its umbrella OTAR Category. Establishes the OTA → OTAR Polaris-link relationship as the canonical strategic-prioritization linkage. Replaces the implicit "phase number" prioritization scheme that previously created cross-talk. |
 | 2026-04-30 22:30 UTC | Architecture Optimization Epic (OTA-535) | Complete rewrite. Reorganized into seven categories: Background and Patterns, Data, API and Integration, AI Model Interaction, Application Patterns and Engines, Observability and Operations, Software Development and Deployment. Absorbed `project-hierarchy.md` content (directory tree → System Structure; API endpoints → Key API Endpoints; Azure resources → Azure Resources Summary; phase tracker → Phase History); `project-hierarchy.md` is now scheduled for deletion. Rewrote Pattern 7 from "one App Service serves API + SPA" to "Two Deployables, One Logical App, One Origin" reflecting Path B decision (SWA frontend, App Service backend, SWA-proxied unified origin). Added new sections: Provider Lifecycle State Machine (formalizes OTA-525 with state table, transition rules, and current state of each provider); AI Adapter Contract (single `AIAdapter` ABC target with documented `chat()` shape); Schema Migration Strategy (commits to Alembic per OTA-522 with expand/contract discipline); Resource Shutdown Discipline (explicit list of resources requiring lifespan close); Data Isolation Invariant (every CRUD endpoint filters by user_id); Cross-App Reuse Plane (OTA + manufacturing app sharing strategy with `framework-portable` tag, per-app storage accounts, SKILL.md domain split); Cleanup Roadmap appendix with 30+ items organized must-fix / should-fix / nice-to-improve, citing the 2026-04-30 GPT-5.4 and Opus-4.7 reviews. Removed business-rule content (scoring formulas, gate thresholds, health grade math, position lifecycle state rules) and replaced with pointers to `business-rules.md`. Updated Source of Truth Documents inventory to mirror CLAUDE.md. Updated to reflect cancelled stories OTA-244, OTA-246, OTA-247, OTA-474, OTA-475, OTA-521. |

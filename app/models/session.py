@@ -116,21 +116,81 @@ async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit
 
 async def init_db():
     """
-    Create all tables then run additive migrations. Called once at app startup.
+    Run Alembic migrations at startup.
 
-    WHY run_sync: SQLAlchemy's metadata.create_all is synchronous,
-    so we need to wrap it in run_sync to call it from async context.
+    Dev / staging: runs `alembic upgrade head` to apply any pending migrations.
+    A fresh empty database gets the full baseline schema from the baseline migration.
+    An already-stamped database is a no-op (already at head).
+
+    Production: skipped entirely. Migrations in production are run manually as part
+    of the deploy procedure — see docs/runbooks/alembic-stamp-prod.md and
+    architecture-plan.md § 7. This prevents accidental schema changes during a
+    rolling deploy or slot-swap window.
+
+    Unmanaged legacy state: if the database has application tables but no
+    alembic_version table (pre-Alembic state), startup fails with a clear
+    instruction to run `alembic stamp f9e59a180957` before restarting.
     """
-    from app.models.migrations import run_migrations
+    from app.core.config import settings
+
+    if settings.app_env == "production":
+        logger.info(
+            "Production: skipping automatic migration. "
+            "Run `alembic upgrade head` manually after deploy — "
+            "see docs/runbooks/alembic-stamp-prod.md"
+        )
+        return
+
     try:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        logger.info("Database tables initialized successfully")
-        await run_migrations(engine)
-        logger.info("Database migrations applied")
-    except Exception as e:
-        logger.error(f"Failed to initialize database: {e}")
+        # Detect unmanaged legacy state: application tables exist but alembic_version
+        # does not.  Running upgrade head against this state would attempt to re-create
+        # all tables and fail with "table already exists".  Fail fast with clear guidance.
+        async with engine.connect() as conn:
+            has_version_table = await conn.run_sync(_alembic_version_table_exists)
+            has_app_tables = await conn.run_sync(_any_app_table_exists)
+
+        if has_app_tables and not has_version_table:
+            raise RuntimeError(
+                "Database has application tables but no alembic_version table. "
+                "This is a pre-Alembic (unmanaged) database. "
+                "Run `alembic stamp f9e59a180957` from the project root to register "
+                "the current schema as the baseline, then restart the app."
+            )
+
+        # Run migrations — no-op if already at head, creates all tables if empty.
+        from pathlib import Path
+        from alembic.config import Config
+        from alembic import command as alembic_command
+
+        alembic_ini = Path(__file__).resolve().parent.parent.parent / "alembic.ini"
+        alembic_cfg = Config(str(alembic_ini))
+        alembic_command.upgrade(alembic_cfg, "head")
+        logger.info("Database migrations applied (alembic upgrade head)")
+
+    except RuntimeError:
         raise
+    except Exception as e:
+        logger.error(f"Failed to run database migrations: {e}")
+        raise
+
+
+def _alembic_version_table_exists(conn) -> bool:
+    """Synchronous helper — detect whether alembic_version table exists."""
+    from sqlalchemy import text, inspect
+    try:
+        return inspect(conn).has_table("alembic_version")
+    except Exception:
+        return False
+
+
+def _any_app_table_exists(conn) -> bool:
+    """Synchronous helper — detect whether any OTA application table exists."""
+    from sqlalchemy import inspect
+    try:
+        existing = set(inspect(conn).get_table_names())
+        return bool(existing - {"alembic_version"})
+    except Exception:
+        return False
 
 
 async def get_db() -> AsyncSession:

@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-**Last Updated:** 2026-04-30 23:55 UTC
+**Last Updated:** 2026-05-01 21:45 UTC
 **Instigating Ticket:** OTA-535 (Prompt Writing Convention added — addresses the gap that committed `claude_context/` SoT docs are NOT auto-loaded by Claude Code at session start)
 
 ---
@@ -426,6 +426,40 @@ pytest --cov=app                # With coverage
 
 Test infrastructure today is minimal — most validation happens via Swagger UI at `/docs`. Auth, provider, and route coverage is a known gap tracked under the Architecture Optimization epic.
 
+### Alembic Migrations
+
+All schema changes MUST follow expand/contract discipline (architecture-plan.md § 2).
+
+```bash
+# Generate a migration after editing app/models/database.py
+alembic revision --autogenerate -m "description"
+
+# Apply pending migrations to the dev database
+alembic upgrade head
+
+# Inspect current revision
+alembic current
+
+# Show migration history
+alembic history --verbose
+
+# Roll back one revision
+alembic downgrade -1
+
+# Stamp a database at a specific revision WITHOUT running the migration DDL
+# DESTRUCTIVE — only use for onboarding existing databases or resetting version tracking
+alembic stamp <revision-id>
+
+# Remove the stamp entirely (drops alembic_version row; does not touch app tables)
+alembic stamp --purge
+```
+
+**CI gate:** `build-on-push.yml` fails if `app/models/database.py` is modified without a corresponding new file in `alembic/versions/`. Always generate a migration when editing `database.py`.
+
+**Production migrations are manual** — `init_db()` is a no-op in production. After deploying a build that contains a new migration, run `alembic upgrade head` from a workstation with prod Entra credentials before the slot swap. See `docs/runbooks/alembic-stamp-prod.md` for the one-time stamping procedure for the initial Alembic onboarding.
+
+**Deferred contract migrations** — when deferring a column/table drop, log a row in OTA-523 (Database Contract Actions). Do not track deferrals anywhere else.
+
 ### Zombie Process Warning (Windows)
 
 Before restarting the backend, always kill existing Python and uvicorn processes first:
@@ -621,6 +655,7 @@ When working on anything that touches these areas, check the Architecture Optimi
 
 | Date | Ticket | Change |
 |---|---|---|
+| 2026-05-01 21:45 UTC | OTA-540 | Added **Alembic Migrations** subsection to Development Environment. Covers the full command reference (revision, upgrade, downgrade, current, history, stamp, stamp --purge), the CI gate behaviour, the prod manual-migration rule, and the OTA-523 deferred-contract tracking rule. |
 | 2026-04-30 23:55 UTC | OTA-535 | Added **Prompt Writing Convention** section to address Claude Code's session-start file-loading limitation. The repo's root `CLAUDE.md` (which Claude Code auto-loads) is intentionally not committed to git; the canonical source-of-truth docs live in `claude_context/` and are not auto-loaded. The new convention requires every Claude Code prompt that Claude Web writes to include both (A) explicit `cat` instructions for the SoT files relevant to the Story domain, and (B) an embedded "Relevant Context — Do Not Deviate" block that copy-pastes the specific decisions/rules governing the Story, each citing source doc + section. Updated Source of Truth Documents table to use full `claude_context/` paths and to note the auto-load limitation explicitly. Restructured Session Start Protocol to defer SoT-doc reading to per-prompt instruction rather than session-start cat lists, since Claude Code cannot reliably know which SoT docs to read without prompt-level direction. Per-domain required-reading combinations table added. Prompt file template documented. |
 | 2026-04-30 23:30 UTC | OTA-535 | Updated placeholder references to real ticket numbers: Architecture Optimization Epic is OTA-535; new TMTC Application Framework OTAR Category is OTAR-27. Active Cleanup Items section now lists the 12 cluster Stories (OTA-536 through OTA-547) and four reparented predecessor Stories (OTA-513, OTA-514, OTA-522, OTA-525). |
 | 2026-04-30 22:50 UTC | OTA-495 | Added Product Roadmap (OTAR) section after Source of Truth Documents. Captures the OTA ↔ OTAR relationship (OTAR is a separate Jira Product Discovery project holding strategic Categories; each OTA Epic links to one OTAR Category via Polaris work item links). Lists all 12 active OTAR Categories (OTAR-7 through OTAR-24) with one-line scope summaries. Documents the procedure for linking new Epics to their umbrella Category. This context was missing from the prior CLAUDE.md and only existed in past chat history; surfacing it here makes it permanent session context for Claude Code. |
