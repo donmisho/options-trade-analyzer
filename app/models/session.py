@@ -11,7 +11,6 @@ AZURE SQL vs SQLITE:
 - The connection string format determines which driver is used
 """
 
-import asyncio
 import struct
 import urllib.parse
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
@@ -173,13 +172,21 @@ async def init_db():
 
         alembic_ini = Path(__file__).resolve().parent.parent.parent / "alembic.ini"
         alembic_cfg = Config(str(alembic_ini))
-        # WHY asyncio.to_thread: alembic_command.upgrade() is synchronous and
-        # calls asyncio.run() internally (via env.py run_migrations_online).
-        # Calling asyncio.run() from within a running event loop raises
-        # "RuntimeError: This event loop is already running."
-        # Running in a thread-pool worker gives alembic a clean thread with no
-        # active event loop, so asyncio.run() can create its own.
-        await asyncio.to_thread(alembic_command.upgrade, alembic_cfg, "head")
+
+        # Pass a synchronous connection to alembic via config attributes.
+        # WHY: alembic's env.py normally calls asyncio.run() to create a new
+        # event loop for the async engine.  But we're already inside uvicorn's
+        # event loop (lifespan), and aioodbc connections are event-loop-bound —
+        # reusing the engine from a second event loop causes connections to hang
+        # and eventually time out (exit code 3 on App Service).
+        # By obtaining the connection here (in the main event loop) and passing
+        # it through config.attributes["connection"], env.py skips asyncio.run()
+        # entirely and runs migrations on the existing connection.
+        async with engine.connect() as connection:
+            await connection.run_sync(
+                _run_alembic_upgrade, alembic_cfg
+            )
+            await connection.commit()
         logger.info("Database migrations applied (alembic upgrade head)")
 
     except RuntimeError:
@@ -206,6 +213,17 @@ def _any_app_table_exists(conn) -> bool:
         return bool(existing - {"alembic_version"})
     except Exception:
         return False
+
+
+def _run_alembic_upgrade(conn, alembic_cfg) -> None:
+    """Synchronous helper — run alembic upgrade head using an existing connection.
+
+    Passes the connection through alembic's config.attributes so that env.py
+    can use it directly instead of creating a new event loop via asyncio.run().
+    """
+    from alembic import command as alembic_command
+    alembic_cfg.attributes["connection"] = conn
+    alembic_command.upgrade(alembic_cfg, "head")
 
 
 async def get_db() -> AsyncSession:

@@ -74,8 +74,21 @@ async def run_async_migrations() -> None:
 
 
 def run_migrations_online() -> None:
-    """Run migrations in 'online' mode."""
-    asyncio.run(run_async_migrations())
+    """Run migrations in 'online' mode.
+
+    Two paths:
+    1. Called from init_db() at app startup — a pre-existing synchronous
+       connection is passed via config.attributes["connection"].  Using this
+       connection avoids creating a second event loop (which conflicts with
+       aioodbc's event-loop-bound connections).
+    2. Called from the CLI (`alembic upgrade head`) — no pre-existing
+       connection, so we create one via asyncio.run().
+    """
+    connectable = config.attributes.get("connection", None)
+    if connectable is not None:
+        do_run_migrations(connectable)
+    else:
+        asyncio.run(run_async_migrations())
 
 
 if context.is_offline_mode():
