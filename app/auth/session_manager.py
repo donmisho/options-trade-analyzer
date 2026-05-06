@@ -164,13 +164,17 @@ class SessionManager:
         (shared lock) and releases its connection before the UPDATE fires.
         """
         now = datetime.now(timezone.utc)
+        # Azure SQL DateTime columns return naive datetimes (no tzinfo).
+        # Use a naive UTC timestamp for Python-side comparisons to avoid
+        # "can't subtract offset-aware and offset-naive datetimes" TypeError.
+        now_naive = now.replace(tzinfo=None)
 
         # --- SELECT: read-only, shared lock, connection released immediately ---
         async with make_session() as db:
             result = await db.execute(
                 select(UserSession)
                 .where(UserSession.session_id == session_id)
-                .where(UserSession.expires_at > now)
+                .where(UserSession.expires_at > now_naive)
             )
             session = result.scalar_one_or_none()
 
@@ -179,7 +183,7 @@ class SessionManager:
 
             needs_refresh = (
                 session.token_expires_at is not None
-                and (session.token_expires_at - now) < timedelta(minutes=5)
+                and (session.token_expires_at - now_naive) < timedelta(minutes=5)
             )
             session_data = {
                 "user_id": session.user_id,
@@ -192,7 +196,7 @@ class SessionManager:
 
         # --- Fire-and-forget: atomic conditional UPDATE ---
         # Connection from the SELECT is already returned to the pool before this fires.
-        asyncio.create_task(self._touch_last_active(session_id, now))
+        asyncio.create_task(self._touch_last_active(session_id, now_naive))
 
         if needs_refresh:
             asyncio.create_task(self.refresh_tokens(session_id))
