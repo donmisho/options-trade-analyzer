@@ -82,10 +82,11 @@ export default function QuoteBar({ symbol: symbolProp, quote: quoteProp, smaSign
 
   const rawEarnings = fundamentals?.earningsDate || quote?.next_earnings_date;
   const rawDividend = fundamentals?.dividendDate  || quote?.next_dividend_date;
+  const earningsTimeOfDay = quote?.earnings_time_of_day;
   const earningsDays = daysUntil(rawEarnings);
   const dividendDays = daysUntil(rawDividend);
-  const showEarnings = earningsDays !== null && earningsDays >= 0 && earningsDays <= 60;
-  const showDividend = dividendDays !== null && dividendDays >= 0 && dividendDays <= 60;
+  const showEarnings = earningsDays !== null && earningsDays >= 0;
+  const showDividend = dividendDays !== null && dividendDays >= 0;
 
   const lastAnalyzedStr = fmtLastAnalyzed(lastAnalyzed);
 
@@ -152,14 +153,18 @@ export default function QuoteBar({ symbol: symbolProp, quote: quoteProp, smaSign
             </div>
           )}
           {showEarnings && (
-            earningsDays <= 14 ? (
-              <span className="qb-earn-urgent">Earnings {fmtDateShort(rawEarnings)} ({earningsDays}d)</span>
-            ) : (
-              <span className="qb-earn">Earnings {fmtDateShort(rawEarnings)} ({earningsDays}d)</span>
-            )
+            <div className="qb-field">
+              <span className="qb-label">Earnings</span>
+              <span className="qb-value" style={earningsDays <= 14 ? { color: '#f59e0b' } : undefined}>
+                {fmtDateShort(rawEarnings)} ({earningsDays}){earningsTimeOfDay ? ` ${earningsTimeOfDay}` : ''}
+              </span>
+            </div>
           )}
           {showDividend && (
-            <span className="qb-earn">Div {fmtDateShort(rawDividend)} ({dividendDays}d)</span>
+            <div className="qb-field">
+              <span className="qb-label">Dividend</span>
+              <span className="qb-value">{fmtDateShort(rawDividend)} ({dividendDays})</span>
+            </div>
           )}
         </>
       )}

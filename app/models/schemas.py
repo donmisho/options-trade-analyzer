@@ -128,6 +128,7 @@ class Quote(BaseModel):
     volume_ratio: Optional[float] = None
     next_earnings_date: Optional[str] = None
     next_dividend_date: Optional[str] = None
+    earnings_time_of_day: Optional[str] = None  # "bmo" | "amc" | "dmh" | None
 
 
 class OptionContract(BaseModel):

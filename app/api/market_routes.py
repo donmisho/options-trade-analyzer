@@ -72,6 +72,19 @@ async def get_quote(
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Provider error: {str(e)}")
 
+    # Enrich with Finnhub earnings if Schwab didn't provide an earnings date
+    if not data.get("next_earnings_date"):
+        try:
+            from app.agents.context_store import ContextStore
+            from app.providers.finnhub_earnings import FinnhubEarningsSource
+            store = ContextStore(db)
+            signal = await store.refresh_if_stale(sym, FinnhubEarningsSource())
+            if signal and signal.get("next_earnings_date"):
+                data["next_earnings_date"] = signal["next_earnings_date"]
+                data["earnings_time_of_day"] = signal.get("time_of_day")
+        except Exception as e:
+            log.debug(f"Finnhub earnings enrichment skipped for {sym}: {e}")
+
     # Persist quote snapshot (fire-and-forget — never fail the request over this)
     try:
         db.add(SymbolQuote(

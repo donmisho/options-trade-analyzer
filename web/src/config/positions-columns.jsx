@@ -96,7 +96,7 @@ export const positionsColumns = [
     align: 'center',
     sortable: false,
     render: (pos) => {
-      if (pos.short_strike && pos.long_strike) return `${pos.short_strike}/${pos.long_strike}`;
+      if (pos.long_strike && pos.short_strike) return `${pos.long_strike}/${pos.short_strike}`;
       if (pos.strike) return String(pos.strike);
       return pos.strike_spread ?? '—';
     },

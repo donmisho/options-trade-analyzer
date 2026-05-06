@@ -16,14 +16,14 @@ export function formatDate(dateInput, includeTime = false) {
   const date = new Date(dateInput);
   if (isNaN(date.getTime())) return '';
 
-  const mm  = String(date.getMonth() + 1).padStart(2, '0');
-  const dd  = String(date.getDate()).padStart(2, '0');
-  const yyyy = date.getFullYear();
+  const mm  = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const dd  = String(date.getUTCDate()).padStart(2, '0');
+  const yyyy = date.getUTCFullYear();
 
   if (!includeTime) return `${mm}-${dd}-${yyyy}`;
 
-  const hh  = String(date.getHours()).padStart(2, '0');
-  const min = String(date.getMinutes()).padStart(2, '0');
+  const hh  = String(date.getUTCHours()).padStart(2, '0');
+  const min = String(date.getUTCMinutes()).padStart(2, '0');
   return `${mm}-${dd}-${yyyy} ${hh}:${min}`;
 }
 

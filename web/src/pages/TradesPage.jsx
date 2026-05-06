@@ -841,8 +841,8 @@ export default function TradesPage() {
         spread_types: ['bull_call', 'bear_put', 'bull_put', 'bear_call'],
         // TODO(OTA-512): remove min_dte override once per-strategy DTE windows are
         // honored by the backend per-strategy user_config routing.
-        // Interim override: backend default min_dte=14 excludes WG's 5-13 DTE window.
-        min_dte: 3,
+        // Floor at 10 DTE — evaluator hard-rejects ≤7 DTE, so scanning below 10 is waste.
+        min_dte: 10,
         max_results: 20,
         ...config,
       });

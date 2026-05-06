@@ -307,8 +307,6 @@ export default function Layout() {
   }, [retryCount]);
 
   const handleSchwabClick = async () => {
-    if (schwabConnected) return;
-
     // Fix 5: Focus existing popup if still open
     if (schwabPopupRef.current && !schwabPopupRef.current.closed) {
       schwabPopupRef.current.focus();
@@ -507,13 +505,13 @@ export default function Layout() {
             onClick={handleSchwabClick}
             title={
               schwabConnected === null ? 'Checking Schwab connection…' :
-              schwabConnected            ? 'Connected to Schwab — live market data active' :
+              schwabConnected            ? 'Schwab connected — click to reconnect' :
               'Click to connect to Schwab'
             }
             style={{
               display: 'flex', alignItems: 'center', gap: 8,
               padding: '10px 16px',
-              cursor: schwabConnected ? 'default' : 'pointer',
+              cursor: 'pointer',
             }}
           >
             <div style={{

@@ -561,7 +561,16 @@ export default function PositionsPage() {
         const expired = normalized.filter(
           p => p.expiration && new Date(p.expiration) < now && !_inactive(p.status)
         );
+        const noExpiration = normalized.filter(
+          p => !p.expiration && !_inactive(p.status)
+        );
+        if (noExpiration.length > 0) {
+          console.warn(`[PositionsPage] ${noExpiration.length} active position(s) have no expiration in trade_structure:`,
+            noExpiration.map(p => ({ id: p.id, symbol: p.symbol, strategy: p.strategy_key })));
+        }
         if (expired.length > 0) {
+          console.info(`[PositionsPage] Auto-archiving ${expired.length} expired position(s):`,
+            expired.map(p => ({ id: p.id, symbol: p.symbol, expiration: p.expiration })));
           _archiveExpiredBatch(expired);
         }
       } catch (err) {
@@ -606,8 +615,8 @@ export default function PositionsPage() {
         await archivePosition(pos.id);
         setPositions(prev => prev.map(p => p.id === pos.id ? { ...p, status: 'ARCHIVED' } : p));
         count++;
-      } catch {
-        // non-fatal
+      } catch (err) {
+        console.warn(`[PositionsPage] Auto-archive failed for ${pos.symbol} (${pos.id}):`, err.message);
       }
     }
     if (count > 0) {
