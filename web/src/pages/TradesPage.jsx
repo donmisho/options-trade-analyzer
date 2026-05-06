@@ -789,6 +789,18 @@ export default function TradesPage() {
     };
   }, [candles, smaPeriods]);
 
+  // ── DTE filter state (URL-persisted) ────────────────────────────────────
+  const DTE_MIN_DEFAULT = 10;   // matches fetchVerticals min_dte
+  const DTE_MAX_DEFAULT = 365;
+  const dteMinParam = parseInt(searchParams.get('dte_min'), 10);
+  const dteMaxParam = parseInt(searchParams.get('dte_max'), 10);
+  const [dteMin, setDteMin] = useState(
+    Number.isFinite(dteMinParam) ? Math.max(1, Math.min(365, dteMinParam)) : DTE_MIN_DEFAULT
+  );
+  const [dteMax, setDteMax] = useState(
+    Number.isFinite(dteMaxParam) ? Math.max(1, Math.min(365, dteMaxParam)) : DTE_MAX_DEFAULT
+  );
+
   // ── Vertical spreads state ───────────────────────────────────────────────
   // Default: expanded unless a long_option strategy is specified
   const [vertExpanded, setVertExpanded]     = useState(!_isLongOptStrat);
@@ -939,6 +951,47 @@ export default function TradesPage() {
       fetchCalls(symbol);
     }
   }
+
+  // ── DTE filter helpers ──────────────────────────────────────────────────
+  function computeDte(expiration) {
+    if (!expiration) return null;
+    return Math.max(0, Math.round((new Date(expiration) - new Date()) / 86400000));
+  }
+
+  const filteredVertSpreads = useMemo(() => {
+    if (!vertSpreads.length) return vertSpreads;
+    return vertSpreads.filter(s => {
+      const dte = computeDte(s.expiration);
+      if (dte == null) return true;
+      return dte >= dteMin && dte <= dteMax;
+    });
+  }, [vertSpreads, dteMin, dteMax]);
+
+  function updateDteFilter(newMin, newMax) {
+    const min = Math.max(1, Math.min(365, newMin));
+    const max = Math.max(1, Math.min(365, newMax));
+    const safeMin = Math.min(min, max);
+    const safeMax = Math.max(min, max);
+    setDteMin(safeMin);
+    setDteMax(safeMax);
+    setExpandedRowId(null);
+    const next = new URLSearchParams(searchParams);
+    if (safeMin === DTE_MIN_DEFAULT) next.delete('dte_min'); else next.set('dte_min', String(safeMin));
+    if (safeMax === DTE_MAX_DEFAULT) next.delete('dte_max'); else next.set('dte_max', String(safeMax));
+    setSearchParams(next, { replace: true });
+  }
+
+  function resetDteFilter() {
+    setDteMin(DTE_MIN_DEFAULT);
+    setDteMax(DTE_MAX_DEFAULT);
+    setExpandedRowId(null);
+    const next = new URLSearchParams(searchParams);
+    next.delete('dte_min');
+    next.delete('dte_max');
+    setSearchParams(next, { replace: true });
+  }
+
+  const dteFilterActive = dteMin !== DTE_MIN_DEFAULT || dteMax !== DTE_MAX_DEFAULT;
 
   // ── Row expansion handlers ───────────────────────────────────────────────
   function handleRowClick(id) {
@@ -1110,6 +1163,16 @@ export default function TradesPage() {
     return symbol ? '· no results' : '· enter a symbol above';
   }
 
+  function vertCountText() {
+    if (vertLoading) return '· loading…';
+    if (vertError)   return '· error';
+    if (!vertSpreads.length) return symbol ? '· no results' : '· enter a symbol above';
+    if (dteFilterActive && filteredVertSpreads.length !== vertSpreads.length) {
+      return `· ${filteredVertSpreads.length} of ${vertSpreads.length} results`;
+    }
+    return `· ${vertSpreads.length} results`;
+  }
+
   return (
     <>
       <div style={{ padding: '16px 20px', fontFamily: 'monospace' }}>
@@ -1158,7 +1221,7 @@ export default function TradesPage() {
           {/* Vertical spreads */}
           <SectionHeader
             title="Vertical spreads"
-            count={countText(vertLoading, vertError, vertSpreads)}
+            count={vertCountText()}
             expanded={vertExpanded}
             onToggle={handleVertToggle}
             showConfig
@@ -1166,15 +1229,75 @@ export default function TradesPage() {
           />
           {vertExpanded && (
             <div style={{ paddingTop: 4 }}>
+              {/* DTE filter bar */}
+              {!vertLoading && !vertError && vertSpreads.length > 0 && (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '6px 10px', marginBottom: 6,
+                  background: 'var(--bg2)', borderRadius: 4,
+                  border: `1px solid ${BORDER}`,
+                  fontSize: 10, fontFamily: 'monospace', color: MUTED,
+                }}>
+                  <span style={{ whiteSpace: 'nowrap' }}>DTE:</span>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    Min
+                    <input
+                      type="number"
+                      min={1} max={365} step={1}
+                      value={dteMin}
+                      onChange={e => {
+                        const v = parseInt(e.target.value, 10);
+                        if (Number.isFinite(v)) updateDteFilter(v, dteMax);
+                      }}
+                      style={{
+                        width: 52, padding: '3px 6px',
+                        background: 'var(--bg)', border: `1px solid ${BORDER}`,
+                        borderRadius: 3, color: TEXT, fontSize: 10,
+                        fontFamily: 'monospace', textAlign: 'right',
+                      }}
+                    />
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    Max
+                    <input
+                      type="number"
+                      min={1} max={365} step={1}
+                      value={dteMax}
+                      onChange={e => {
+                        const v = parseInt(e.target.value, 10);
+                        if (Number.isFinite(v)) updateDteFilter(dteMin, v);
+                      }}
+                      style={{
+                        width: 52, padding: '3px 6px',
+                        background: 'var(--bg)', border: `1px solid ${BORDER}`,
+                        borderRadius: 3, color: TEXT, fontSize: 10,
+                        fontFamily: 'monospace', textAlign: 'right',
+                      }}
+                    />
+                  </label>
+                  {dteFilterActive && (
+                    <button
+                      onClick={resetDteFilter}
+                      style={{
+                        background: 'transparent', border: `1px solid ${BORDER}`,
+                        color: MUTED, padding: '3px 8px', borderRadius: 3,
+                        fontSize: 10, fontFamily: 'monospace', cursor: 'pointer',
+                      }}
+                    >
+                      Reset
+                    </button>
+                  )}
+                </div>
+              )}
               {vertLoading && (
                 <div style={{ padding: '12px 0', color: MUTED, fontSize: 11 }}>Loading vertical spreads…</div>
               )}
               {vertError && (
                 <div style={{ padding: '12px 0', color: 'var(--red)', fontSize: 11 }}>{vertError}</div>
               )}
-              {!vertLoading && !vertError && vertSpreads.length > 0 && (
+              {!vertLoading && !vertError && vertSpreads.length > 0 && filteredVertSpreads.length > 0 && (
                 <ResultsTable
-                  results={vertSpreads}
+                  results={filteredVertSpreads}
                   columns={verticalsColumns}
                   context={vertContext}
                   expandedRowId={expandedRowId}
@@ -1184,6 +1307,17 @@ export default function TradesPage() {
                   defaultSortKey="composite_score"
                   defaultSortDir="desc"
                 />
+              )}
+              {!vertLoading && !vertError && vertSpreads.length > 0 && filteredVertSpreads.length === 0 && (
+                <div style={{ padding: '12px 0', color: MUTED, fontSize: 11 }}>
+                  No vertical spreads match DTE range {dteMin}–{dteMax}.{' '}
+                  <span
+                    onClick={resetDteFilter}
+                    style={{ color: 'var(--teal)', cursor: 'pointer', textDecoration: 'underline' }}
+                  >
+                    Reset filter
+                  </span>
+                </div>
               )}
               {!vertLoading && !vertError && vertSpreads.length === 0 && symbol && (
                 <div style={{ padding: '12px 0', color: MUTED, fontSize: 11 }}>No vertical spreads found.</div>
