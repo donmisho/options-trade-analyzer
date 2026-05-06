@@ -472,13 +472,11 @@ async def score_all_strategies(
     CRITICAL: exactly one provider.get_chain() call regardless of strategy count.
     This is enforced by design — chain is fetched here and passed down.
 
-    user_config keys (all optional):
-        dte_min, dte_max, delta_min, delta_max — override strategy defaults
-        sma_alignment_score — float 0-1, for trend-rider (from frontend SMA data)
-        iv_rank_proxy — float 0-100, explicit IV rank if available
+    user_config: per-strategy nested dict, e.g.:
+        {"weekly-grind": {"dte_min": 10, "dte_max": 14}, "trend-rider": {}}
+        Each strategy's slice supports: dte_min, dte_max, delta_min, delta_max,
+        sma_alignment_score (float 0-1), max_cost_per_contract, etc.
     """
-    cfg = user_config or {}
-
     # Single chain fetch — wide range to cover all strategies (lottery 1d to trend-rider 65d)
     try:
         chain_data = await provider.get_chain(
@@ -520,19 +518,25 @@ async def score_all_strategies(
     # ATM IV estimate from chain — used as iv_rank proxy for credit strategies
     atm_iv = _get_atm_iv(contracts, underlying_price)
 
+    # Slice user_config per strategy — frontend sends nested dict keyed by strategy_key
+    def _cfg_for(key: str) -> dict:
+        if not user_config:
+            return {}
+        return user_config.get(key, {})
+
     # Run all four scorers against the same contracts list
     scores = [
         _score_credit_spread_strategy(
-            "steady-paycheck", contracts, underlying_price, cfg, atm_iv
+            "steady-paycheck", contracts, underlying_price, _cfg_for("steady-paycheck"), atm_iv
         ),
         _score_credit_spread_strategy(
-            "weekly-grind", contracts, underlying_price, cfg, atm_iv
+            "weekly-grind", contracts, underlying_price, _cfg_for("weekly-grind"), atm_iv
         ),
         _score_long_option_strategy(
-            "trend-rider", contracts, underlying_price, cfg, atm_iv
+            "trend-rider", contracts, underlying_price, _cfg_for("trend-rider"), atm_iv
         ),
         _score_long_option_strategy(
-            "lottery-ticket", contracts, underlying_price, cfg, atm_iv
+            "lottery-ticket", contracts, underlying_price, _cfg_for("lottery-ticket"), atm_iv
         ),
     ]
 
