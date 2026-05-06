@@ -1,6 +1,6 @@
 # architecture-plan.md
 
-**Last Updated:** 2026-05-06 03:00 UTC
+**Last Updated:** 2026-05-06 UTC
 **Instigating Ticket:** OTA-535 (Architecture Optimization Framework v1 Epic; absorbs cancelled OTA-244, OTA-246, OTA-247, OTA-474, OTA-475, OTA-521; merges and supersedes project-hierarchy.md; incorporates findings from the 2026-04-30 GPT-5.4 and Opus-4.7 architectural reviews; adds OTAR roadmap reference per OTA-495; links to OTAR-24 and OTAR-27)
 
 ---
@@ -779,6 +779,16 @@ curl -s https://oa-dev.tmtctech.ai/api/v1/auth/me
 
 If any of these return HTML instead of JSON/redirect/401, the App Service is not running correctly — check Kudu logs.
 
+### Cold-start and runtime OS dependencies
+
+The ODBC Driver 18 install runs inside `app/main.py` lifespan startup. This is the intentional pattern, not a workaround. It costs roughly 90 seconds on cold start. Always On is enabled on the App Service plan, so cold start happens only on app restart — not on idle wake — bounding the user-perceived latency penalty to deploys and rare unplanned restarts.
+
+The alternative (a custom container image with ODBC pre-installed, deployed via Azure Container Registry) is documented as Option A in OTA-553. It is not pursued today because the recurring cost (~$5/mo registry, plus a Docker build step in CI) is not justified by the ~90s cold-start savings at current scale. Revisit when a broader containerization effort is undertaken or when cold-start becomes user-visible (e.g., autoscale-out scenarios where new instances spin up frequently).
+
+A user-supplied `startup.sh` approach was attempted under OTA-545 Phase 2 and reverted on 2026-05-02. The App Service Linux Python (Oryx) runtime makes that pattern brittle. **Do not retry that specific approach.** The general goal of moving ODBC out of `main.py` is still achievable via Option A if/when justified.
+
+References: OTA-553 (decision), OTA-545 (Phase 2 revert), OTA-601 (this update).
+
 ## Azure Resources Summary
 
 | Resource | Name | Location | Tier | Tags |
@@ -883,6 +893,7 @@ The Architecture Optimization Epic (OTA-535) tracks the active drift items ident
 
 | Date | Ticket | Change |
 |---|---|---|
+| 2026-05-06 UTC | OTA-601 | Added § Deployment Architecture subsection "Cold-start and runtime OS dependencies" recording the OTA-553 Option B decision: ODBC Driver 18 install in `app/main.py` lifespan is the intentional pattern. Documents the ~90s cold-start cost mitigated by Always On, the deferred Option A alternative (custom container image), and the explicit prohibition against retrying the user-supplied `startup.sh` approach (OTA-545 Phase 2, reverted 2026-05-02). |
 | 2026-05-06 03:00 UTC | OTA-554 | Corrected Pattern 7 and Deployment Architecture to reflect actual request routing: Cloudflare proxies custom domains (`oa-dev.tmtctech.ai`, `oa.tmtctech.ai`) directly to the App Service — the SWA is not in the request path. Added "Request Routing — Cloudflare to App Service Direct" subsection with verification commands and health endpoint inventory. Fixed SWA SKU (was "Standard", actually "Free") and URL in Azure Resources Summary. Marked SWA as orphan candidate for cleanup. Removed incorrect claims that the `static/` directory is absent from the deployment artifact and that the SPA fallback in `main.py` is dead code — the build workflow bundles the SPA into `static/` and the App Service actively serves it. |
 | 2026-05-01 21:30 UTC | OTA-540 | Schema Migration Strategy section updated: Alembic is now operational (baseline `f9e59a180957` ships with OTA-540). `init_db()` now runs `alembic upgrade head` in dev/staging; production migrations are manual (stamping procedure in `docs/runbooks/alembic-stamp-prod.md`). Updated § 2 to remove the "OTA-522 remains open" note and document the prod migration deploy procedure. |
 | 2026-04-30 23:30 UTC | OTA-535 | Updated placeholder references to real ticket numbers throughout the document. Architecture Optimization Epic is OTA-535. New TMTC Application Framework OTAR Category is OTAR-27. The 12 cluster Stories (OTA-536 through OTA-547) and four reparented predecessor Stories (OTA-513, OTA-514, OTA-522, OTA-525) are now siblings under OTA-535. |
