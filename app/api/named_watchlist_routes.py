@@ -1,3 +1,7 @@
+# All endpoints in this file must filter by user_id.
+# See architecture-plan.md § 2 (Data Isolation Invariant).
+# Cross-user attempts return 404 (not 403) to avoid leaking existence.
+
 """
 Named Watchlists API — OTA-444, OTA-445
 

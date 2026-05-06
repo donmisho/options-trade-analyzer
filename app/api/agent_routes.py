@@ -1,3 +1,7 @@
+# All endpoints in this file must filter by user_id.
+# See architecture-plan.md § 2 (Data Isolation Invariant).
+# Cross-user attempts return 404 (not 403) to avoid leaking existence.
+
 """
 Claude Trade Agent endpoints — Phase 2.6
 
@@ -715,8 +719,14 @@ async def delete_recommendation(
     db: AsyncSession = Depends(get_db),
 ):
     """Clear a saved recommendation (user wants a fresh evaluation)."""
+    row = await _fetch_rec(db, trade_key, user_id=user.get("sub"))
+    if not row:
+        raise HTTPException(status_code=404, detail=f"No recommendation for {trade_key}")
     await db.execute(
-        delete(TradeRecommendation).where(TradeRecommendation.trade_key == trade_key)
+        delete(TradeRecommendation).where(
+            TradeRecommendation.trade_key == trade_key,
+            TradeRecommendation.user_id == user.get("sub"),
+        )
     )
     await db.commit()
 

@@ -1,3 +1,8 @@
+# All endpoints in this file must filter by user_id.
+# See architecture-plan.md § 2 (Data Isolation Invariant).
+# Cross-user attempts return 404 (not 403) to avoid leaking existence.
+# NOTE: Insight model currently has no user_id column — see OTA-542 audit.
+
 """
 Insight Engine API endpoints — Phase 3.6 Stream A3 / C3.
 
