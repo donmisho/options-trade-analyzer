@@ -1,6 +1,6 @@
 # architecture-plan.md
 
-**Last Updated:** 2026-05-01 21:30 UTC
+**Last Updated:** 2026-05-06 03:00 UTC
 **Instigating Ticket:** OTA-535 (Architecture Optimization Framework v1 Epic; absorbs cancelled OTA-244, OTA-246, OTA-247, OTA-474, OTA-475, OTA-521; merges and supersedes project-hierarchy.md; incorporates findings from the 2026-04-30 GPT-5.4 and Opus-4.7 architectural reviews; adds OTAR roadmap reference per OTA-495; links to OTAR-24 and OTAR-27)
 
 ---
@@ -82,11 +82,16 @@ The Insight Engine is a domain-agnostic detect → score → communicate pattern
 
 FastAPI is the OIDC confidential client. The browser never holds an identity token. Auth state lives in an HttpOnly session cookie backed by a server-side session row encrypted with Fernet. PKCE protects the auth code exchange; signed state tokens prevent replay; CSRF middleware protects state-mutating endpoints. Per-IdP configuration is encapsulated in a provider registry so additional identity providers can be added without changing routes. The deep-dive lives in `auth-process.md`.
 
-### Pattern 7 — Two Deployables, One Logical App, One Origin
+### Pattern 7 — Single Origin via Cloudflare → App Service
 
-The frontend is hosted on Azure Static Web Apps for CDN, edge routing, and global asset delivery. The backend is hosted on Azure App Service for the FastAPI runtime. SWA proxies `/api/*` to the App Service backend so the browser sees one origin per environment (`oa.tmtctech.ai` in prod, `oa-dev.tmtctech.ai` in dev). The auth domain is unified.
+Each environment uses Cloudflare to proxy its custom domain directly to the App Service, which serves both the API and the SPA from a single origin:
 
-This is a deliberate two-deployable architecture, not a violation of an aspiration toward a single deployable. The split exists because SWA gives the SPA free CDN and App Service can't match that economically; conversely, App Service is the right host for a long-running Python process with WebSocket needs and ODBC dependencies. The FastAPI app's `StaticFiles` SPA fallback in `main.py` is dead code on Azure (the App Service deployment artifact does not include a `static/` directory) and is scheduled for removal under the Architecture Optimization Epic.
+- `oa-dev.tmtctech.ai` → Cloudflare → `options-analyzer-api-dev` (App Service, custom domain bound)
+- `oa.tmtctech.ai` → Cloudflare → `options-analyzer-api` (App Service, custom domain bound)
+
+The `build-on-push.yml` workflow builds the React SPA (`npm run build` in `web/`), copies the output to a `static/` directory, and bundles it alongside `app/` in the deployment artifact. At runtime, FastAPI serves the API at `/api/v1/*`, `/health`, and `/docs`, then falls back to the SPA via a `/{path:path}` catch-all route in `main.py` that serves `static/index.html` for any unmatched path. Same-origin is trivial — the API and SPA share the same App Service origin, so BFF session cookies (`HttpOnly`, `SameSite=Lax`) are sent on every request without proxy workarounds.
+
+A Static Web App resource (`options-analyzer-web`, Free SKU) exists in the resource group and has its own deploy-on-push pipeline (`azure-static-web-apps-purple-ground-0d4efed10.yml`), but it is **not in the request path**. Cloudflare routes both custom domains to the App Service directly. The SWA is an orphan from an earlier architecture iteration and is a candidate for cleanup (see Cleanup Roadmap).
 
 ---
 
@@ -741,7 +746,38 @@ Dev deploys use `deploy-to-dev.yml` with `confirm_deploy=DEPLOY-DEV` and no slot
 
 The staging and prod slots share the same Azure SQL database. This is what enforces the expand/contract migration discipline (see §2 Schema Migration Strategy).
 
-The frontend deploys separately to Azure Static Web Apps via `azure-static-web-apps-purple-ground-0d4efed10.yml`. SWA has its own build-on-push pipeline. The two deployment pipelines (App Service backend, SWA frontend) run independently. There is no coordinated atomic deploy of both — a frontend change deploys to SWA on push; a backend change requires the manual gate. This is acceptable because the API contract between the two is versioned and breaking changes go through the same gate.
+A separate SWA deploy pipeline (`azure-static-web-apps-purple-ground-0d4efed10.yml`) also runs on push, deploying the SPA to the `options-analyzer-web` Static Web App. However, as documented in Pattern 7, the SWA is not in the request path — Cloudflare routes both custom domains directly to the App Service. The SWA pipeline is effectively a no-op from the user's perspective and is a candidate for removal alongside the orphan SWA resource.
+
+### Request Routing — Cloudflare to App Service Direct
+
+Both environments use the same routing pattern. Cloudflare proxies the custom domain to the App Service, which serves both API and SPA:
+
+```
+Browser → Cloudflare (oa-dev.tmtctech.ai) → options-analyzer-api-dev (App Service)
+Browser → Cloudflare (oa.tmtctech.ai)     → options-analyzer-api     (App Service)
+```
+
+The custom domain is bound directly on the App Service (visible via `az webapp show --name <app> --query hostNames`). No SWA linked backend, no Cloudflare `/api/*` rewrite rule — the App Service handles all paths.
+
+**Health endpoints:**
+- `/health` → 200 JSON (root-level, no `/api/v1` prefix)
+- `/api/v1/health/detailed` → 200 JSON (component-level: database, Schwab)
+- `/api/v1/health` does **not** exist — this is a common mistake; the path falls through to the SPA catch-all and returns HTML
+
+**Verifying the routing:**
+```bash
+# Should return JSON (not HTML)
+curl -s https://oa-dev.tmtctech.ai/health
+curl -s https://oa-dev.tmtctech.ai/api/v1/health/detailed
+
+# Should return 307 redirect to Entra (BFF login initiation)
+curl -s -o /dev/null -w "%{http_code}" https://oa-dev.tmtctech.ai/api/v1/auth/login
+
+# Should return 401 JSON (auth middleware fires, no session cookie)
+curl -s https://oa-dev.tmtctech.ai/api/v1/auth/me
+```
+
+If any of these return HTML instead of JSON/redirect/401, the App Service is not running correctly — check Kudu logs.
 
 ## Azure Resources Summary
 
@@ -752,7 +788,7 @@ The frontend deploys separately to Azure Static Web Apps via `azure-static-web-a
 | App Service Plan (dev) | (per current naming convention) | West US 2 | B1 | `environment=dev`, `component=api` |
 | App Service (prod) | `options-analyzer-api` (with `staging` slot) | West US 2 | n/a | `environment=prod`, `component=api` |
 | App Service (dev) | `options-analyzer-api-dev` | West US 2 | n/a | `environment=dev`, `component=api` |
-| Static Web App | `options-analyzer-web` (URL: `purple-ground-0d4efed10.azurestaticapps.net`) | n/a (global) | Standard | `environment=prod`, `component=web` |
+| Static Web App | `options-analyzer-web` (URL: `purple-ground-0d4efed10.4.azurestaticapps.net`) | Central US | Free | `environment=prod`, `component=web` — **orphan; not in request path (see Pattern 7)** |
 | Azure SQL Server | `options-analyzer-sql` | West US 2 | n/a | `environment=prod`, `component=database` |
 | Azure SQL Database | `options-analyzer-db` | West US 2 | n/a | `environment=prod`, `component=database` |
 | Key Vault | `options-analyzer` | West US 2 | Standard | `component=secrets` |
@@ -847,6 +883,7 @@ The Architecture Optimization Epic (OTA-535) tracks the active drift items ident
 
 | Date | Ticket | Change |
 |---|---|---|
+| 2026-05-06 03:00 UTC | OTA-554 | Corrected Pattern 7 and Deployment Architecture to reflect actual request routing: Cloudflare proxies custom domains (`oa-dev.tmtctech.ai`, `oa.tmtctech.ai`) directly to the App Service — the SWA is not in the request path. Added "Request Routing — Cloudflare to App Service Direct" subsection with verification commands and health endpoint inventory. Fixed SWA SKU (was "Standard", actually "Free") and URL in Azure Resources Summary. Marked SWA as orphan candidate for cleanup. Removed incorrect claims that the `static/` directory is absent from the deployment artifact and that the SPA fallback in `main.py` is dead code — the build workflow bundles the SPA into `static/` and the App Service actively serves it. |
 | 2026-05-01 21:30 UTC | OTA-540 | Schema Migration Strategy section updated: Alembic is now operational (baseline `f9e59a180957` ships with OTA-540). `init_db()` now runs `alembic upgrade head` in dev/staging; production migrations are manual (stamping procedure in `docs/runbooks/alembic-stamp-prod.md`). Updated § 2 to remove the "OTA-522 remains open" note and document the prod migration deploy procedure. |
 | 2026-04-30 23:30 UTC | OTA-535 | Updated placeholder references to real ticket numbers throughout the document. Architecture Optimization Epic is OTA-535. New TMTC Application Framework OTAR Category is OTAR-27. The 12 cluster Stories (OTA-536 through OTA-547) and four reparented predecessor Stories (OTA-513, OTA-514, OTA-522, OTA-525) are now siblings under OTA-535. |
 | 2026-04-30 22:50 UTC | OTA-495 | Added Roadmap Reference section after Source of Truth Documents, mapping each architectural pattern and engine to its umbrella OTAR Category. Establishes the OTA → OTAR Polaris-link relationship as the canonical strategic-prioritization linkage. Replaces the implicit "phase number" prioritization scheme that previously created cross-talk. |

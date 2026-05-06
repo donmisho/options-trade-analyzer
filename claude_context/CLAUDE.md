@@ -1,7 +1,7 @@
 # CLAUDE.md
 
-**Last Updated:** 2026-05-01 21:45 UTC
-**Instigating Ticket:** OTA-535 (Prompt Writing Convention added — addresses the gap that committed `claude_context/` SoT docs are NOT auto-loaded by Claude Code at session start)
+**Last Updated:** 2026-05-05 [time] UTC
+**Instigating Change:** Adoption of profile-level universal `jira-structure.md` standard — see Change Log entry below for details
 
 ---
 
@@ -219,7 +219,7 @@ The OTA project uses a 6-stage workflow plus one terminal cancellation state. Th
 | 3 | Write Prompt | 10003 | In Progress | Claude Web | Story complete; writing the Claude Code execution prompt |
 | 4 | Code & Test Complete | 10004 | In Progress | Claude Code | Code committed and built; artifact ready to deploy. **Not yet in production.** |
 | 5 | Production Deployed | 10157 | Done | Automation / manual override | Live in prod after manual deploy + smoke test + slot swap |
-| C | Cancelled | 10158 | Done | Product Owner / Claude Web | Work absorbed elsewhere, superseded, or no longer needed. **Not deployed; intentionally not done.** |
+| C | Cancelled | 10158 | Done | Don / Automation | Work absorbed elsewhere, superseded, or no longer needed. **Not deployed; intentionally not done.** Tickets in Idea, Schedule, Write Story, or Write Prompt may be cancelled. Code & Test Complete tickets are not cancelled — they are deployed or rolled back via a follow-up Story. |
 
 **Transition ID reference (for REST API and MCP calls):**
 
@@ -233,39 +233,59 @@ The OTA project uses a 6-stage workflow plus one terminal cancellation state. Th
 | Claude Code Build | Write Prompt | Code & Test Complete | 6 |
 | Override | Code & Test Complete | Production Deployed | 9 |
 | Cancel (from Idea) | Idea | Cancelled | 12 |
-| cancel (from Write Prompt or Write Story) | Write Prompt / Write Story | Cancelled | 14 |
+| Cancel (from Schedule) | Schedule | Cancelled | TBD — confirm in workflow editor; add if missing |
+| Cancel (from Write Prompt or Write Story) | Write Prompt / Write Story | Cancelled | 14 |
 
-The Override transition exists for cases where a ticket was deployed but the auto-transition didn't fire. Cancellation requires the source-status-specific transition (12 from Idea, 14 from Write Prompt or Write Story). If a Cancel transition is missing from a status, it is added in the workflow editor — do not work around with reverse-then-cancel.
+The Override transition exists for cases where a ticket was deployed but the auto-transition didn't fire. Cancellation requires a source-status-specific transition. If a Cancel transition is missing from any of Idea, Schedule, Write Story, or Write Prompt, it is added in the workflow editor — do not work around with reverse-then-cancel.
 
 ---
 
-## Jira Issue Hierarchy — Strict
+## Jira Issue Hierarchy — OTA Project Specifics
 
-The OTA project uses a strict 3-level hierarchy. Every API-created ticket must respect this structure or it will not appear correctly on the board.
+The OTA project follows the universal **Epic → Feature → Story → Subtask** hierarchy with **Bug** as an issue type that may sit at either Story level (parented to a Feature) or Subtask level (parented to a Story).
 
-- Stories and Subtasks are the only levels that represent actionable build work.
-- Subtasks must always be parented to a Story or Feature — never directly to an Epic.
-- Stories and Features must always be parented to an Epic.
-- Never create a Feature as a child of another Feature.
-- Issue type IDs: Epic = 10001, Feature = 10003, Story = 10214, Subtask = 10002.
+### Issue type IDs
 
-**Before creating any ticket via API:**
+| Type | ID |
+|---|---|
+| Epic | 10001 |
+| Feature | 10003 |
+| Story | 10214 |
+| Subtask | 10002 |
+| Bug | TBD — confirm via Atlassian MCP `getJiraProjectIssueTypesMetadata` |
 
-1. Identify the correct Epic.
-2. Identify or create the correct Feature parent under that Epic (or use a Story under the Epic if no Feature is appropriate).
-3. Create the implementation ticket as a Subtask under that Feature/Story (or as a Story directly under the Epic for Feature-sized work).
+### Parenting rules
 
-**Common Epic parents for reference:**
+- Features parent to an Epic
+- Stories parent to a Feature (never directly to an Epic)
+- Story-level Bugs parent to a Feature (sibling of Story)
+- Subtasks parent to a Story (or to a Story-level Bug)
+- Subtask-level Bugs parent to a Story
+- Subtasks have no children — they are leaf nodes
+
+### Issue numbering
+
+Never invent or pre-assign OTA numbers. Jira assigns the key (e.g., `OTA-548`) when the issue is created; use the Jira-returned key in all references, commit messages, branch names, prompt files, and change-log entries. If a ticket reference is needed before creation, create the ticket first and then use the assigned key. `OTA-XXX` placeholders are permitted only in template documents that demonstrate format.
+
+### Before creating any ticket via API
+
+1. Identify the correct Epic
+2. Identify or create the correct Feature under that Epic
+3. Create the Story (or Story-level Bug) under that Feature
+4. Create any Subtasks under the Story when work spans multiple commits or sessions
+
+### Common Epic parents
 
 - OTA-4 — Phase 2.0.x
 - OTA-8 — Dashboard work
-- OTA-14 — Ongoing: Strategy Validation Reviews
-- OTA-19 — DEV Housekeeping (bugs, hotfixes, dev process)
+- OTA-14 — Ongoing: Strategy Validation Reviews (default Epic for bugs; bugs use the `bug` label, parented through a Feature → Story chain under OTA-14, never directly to the Epic)
+- OTA-19 — DEV Housekeeping
 - OTA-236 — Development Workflow — Planning & Toolchain
 - OTA-393 — Phase 2.11
 - OTA-477 — Architecture Documentation Refresh
 - OTA-507 — Ongoing: Trade Evaluation Anomaly Resolution
 - OTA-511 — Deploy & Environment Operations
+- OTA-535 — Architecture Optimization (Framework v1)
 
 When in doubt about the correct Epic or Feature parent, ask Don before creating tickets.
 
@@ -426,40 +446,6 @@ pytest --cov=app                # With coverage
 
 Test infrastructure today is minimal — most validation happens via Swagger UI at `/docs`. Auth, provider, and route coverage is a known gap tracked under the Architecture Optimization epic.
 
-### Alembic Migrations
-
-All schema changes MUST follow expand/contract discipline (architecture-plan.md § 2).
-
-```bash
-# Generate a migration after editing app/models/database.py
-alembic revision --autogenerate -m "description"
-
-# Apply pending migrations to the dev database
-alembic upgrade head
-
-# Inspect current revision
-alembic current
-
-# Show migration history
-alembic history --verbose
-
-# Roll back one revision
-alembic downgrade -1
-
-# Stamp a database at a specific revision WITHOUT running the migration DDL
-# DESTRUCTIVE — only use for onboarding existing databases or resetting version tracking
-alembic stamp <revision-id>
-
-# Remove the stamp entirely (drops alembic_version row; does not touch app tables)
-alembic stamp --purge
-```
-
-**CI gate:** `build-on-push.yml` fails if `app/models/database.py` is modified without a corresponding new file in `alembic/versions/`. Always generate a migration when editing `database.py`.
-
-**Production migrations are manual** — `init_db()` is a no-op in production. After deploying a build that contains a new migration, run `alembic upgrade head` from a workstation with prod Entra credentials before the slot swap. See `docs/runbooks/alembic-stamp-prod.md` for the one-time stamping procedure for the initial Alembic onboarding.
-
-**Deferred contract migrations** — when deferring a column/table drop, log a row in OTA-523 (Database Contract Actions). Do not track deferrals anywhere else.
-
 ### Zombie Process Warning (Windows)
 
 Before restarting the backend, always kill existing Python and uvicorn processes first:
@@ -478,10 +464,10 @@ Windows does not always release port 8000 cleanly. A zombie uvicorn process will
 | Environment | Frontend Origin | Backend Origin | App Service | DB | Notes |
 |---|---|---|---|---|---|
 | Local dev | `https://localhost:5173` (Vite) | `https://127.0.0.1:8000` (FastAPI) | n/a | Shared Azure SQL via Key Vault | Self-signed certs, full HTTPS |
-| Dev | `oa-dev.tmtctech.ai` | Same origin via SWA → App Service proxy | `options-analyzer-api-dev` (B1) | Shared Azure SQL | MSI + Key Vault, mirrors prod topology |
-| Prod | `oa.tmtctech.ai` | Same origin via SWA → App Service proxy | `options-analyzer-api` (B1) with `staging` slot | Production Azure SQL | MSI + Key Vault, slot-swap deploy gate |
+| Dev | `oa-dev.tmtctech.ai` | Same origin (Cloudflare → App Service direct) | `options-analyzer-api-dev` (B1) | Shared Azure SQL | MSI + Key Vault, mirrors prod topology |
+| Prod | `oa.tmtctech.ai` | Same origin (Cloudflare → App Service direct) | `options-analyzer-api` (B1) with `staging` slot | Production Azure SQL | MSI + Key Vault, slot-swap deploy gate |
 
-The frontend is hosted on Azure Static Web Apps for CDN and edge routing. The backend is a separate Azure App Service. SWA proxies `/api/*` to the App Service backend so the browser sees one origin per environment. This is the deliberate architecture; see `architecture-plan.md` Pattern 7 for the rationale.
+Cloudflare proxies each custom domain directly to the App Service, which serves both the API (`/api/v1/*`, `/health`, `/docs`) and the SPA (bundled in `static/` at build time, served via catch-all `/{path:path}` in `main.py`). Same-origin is trivial — BFF session cookies work without proxy workarounds. See `architecture-plan.md` Pattern 7 for details.
 
 ---
 
@@ -587,7 +573,7 @@ Full details in `architecture-plan.md`. Seven foundational patterns:
 4. **Unified Position Model** — paper and live positions share one schema. Distinguishing fields are `source` (PAPER | LIVE) and `status` (FOLLOWING | LIVE | CLOSED). All monitoring, scoring, and analytics work identically for both.
 5. **Generic Insight Engine** — domain-agnostic detect → score → communicate pattern. Domain-specific behavior lives in per-domain `SKILL.md` files. Designed for OTA + future TMTC apps (manufacturing, customer health) without forking.
 6. **Backend-for-Frontend Identity** — FastAPI is the OIDC confidential client. Browser holds an HttpOnly session cookie, never an identity token. PKCE + signed state + Fernet-encrypted server-side session storage + CSRF middleware.
-7. **Two Deployables, One Logical App, One Origin** — frontend on Azure Static Web Apps for CDN/routing, backend on Azure App Service for FastAPI. SWA proxies `/api/*` to App Service so the browser sees one origin per environment. Auth domain is unified.
+7. **Single Origin via Cloudflare → App Service** — Cloudflare proxies each custom domain (`oa.tmtctech.ai`, `oa-dev.tmtctech.ai`) directly to the App Service, which serves both the API and the SPA (bundled in `static/` at build time). Same-origin trivially — BFF cookies work without proxy workarounds. The SWA resource exists but is not in the request path (orphan).
 
 **Provider routing rule:** Never hardcode a provider name in API routes. Always use `_get_provider()` or `settings.default_market_data_provider`.
 
@@ -655,7 +641,8 @@ When working on anything that touches these areas, check the Architecture Optimi
 
 | Date | Ticket | Change |
 |---|---|---|
-| 2026-05-01 21:45 UTC | OTA-540 | Added **Alembic Migrations** subsection to Development Environment. Covers the full command reference (revision, upgrade, downgrade, current, history, stamp, stamp --purge), the CI gate behaviour, the prod manual-migration rule, and the OTA-523 deferred-contract tracking rule. |
+| 2026-05-06 03:00 UTC | OTA-554 | Corrected Architecture Summary Pattern 7 and Environments table: replaced "SWA proxies `/api/*` to App Service" with actual routing (Cloudflare → App Service direct). The SWA is not in the request path; it is an orphan resource. Updated Environments table "Backend Origin" column to reflect Cloudflare → App Service direct pattern. |
+| 2026-05-05 [time] UTC | (Profile-level Jira structure adoption — no OTA ticket; create one and reference here if desired) | Aligned CLAUDE.md to the new universal profile-level `jira-structure.md`. (1) Hierarchy: changed from 3-level (Epic → Feature → Subtask) to 4-level (Epic → Feature → Story → Subtask), with Bug as an issue type that sits at Story or Subtask level. Stories now parent to Features, never directly to Epics. Subtasks parent to Stories (or Story-level Bugs), never directly to Features or Epics. (2) Issue numbering rule added: never invent or pre-assign OTA numbers; use the Jira-returned key. `OTA-XXX` is permitted only as a placeholder in template documents. (3) Workflow Phases table: Cancelled "Who Acts" updated from "Product Owner / Claude Web" to "Don / Automation"; description expanded to clarify which statuses can be cancelled (Idea, Schedule, Write Story, Write Prompt). (4) Transition table: added Cancel-from-Schedule row (transition ID TBD; confirm in workflow editor and add if missing). (5) OTA-14 reference updated to note that bugs route through a Feature → Story chain under OTA-14, not directly under the Epic. (6) Bug issue type ID listed as TBD pending confirmation via Atlassian MCP. |
 | 2026-04-30 23:55 UTC | OTA-535 | Added **Prompt Writing Convention** section to address Claude Code's session-start file-loading limitation. The repo's root `CLAUDE.md` (which Claude Code auto-loads) is intentionally not committed to git; the canonical source-of-truth docs live in `claude_context/` and are not auto-loaded. The new convention requires every Claude Code prompt that Claude Web writes to include both (A) explicit `cat` instructions for the SoT files relevant to the Story domain, and (B) an embedded "Relevant Context — Do Not Deviate" block that copy-pastes the specific decisions/rules governing the Story, each citing source doc + section. Updated Source of Truth Documents table to use full `claude_context/` paths and to note the auto-load limitation explicitly. Restructured Session Start Protocol to defer SoT-doc reading to per-prompt instruction rather than session-start cat lists, since Claude Code cannot reliably know which SoT docs to read without prompt-level direction. Per-domain required-reading combinations table added. Prompt file template documented. |
 | 2026-04-30 23:30 UTC | OTA-535 | Updated placeholder references to real ticket numbers: Architecture Optimization Epic is OTA-535; new TMTC Application Framework OTAR Category is OTAR-27. Active Cleanup Items section now lists the 12 cluster Stories (OTA-536 through OTA-547) and four reparented predecessor Stories (OTA-513, OTA-514, OTA-522, OTA-525). |
 | 2026-04-30 22:50 UTC | OTA-495 | Added Product Roadmap (OTAR) section after Source of Truth Documents. Captures the OTA ↔ OTAR relationship (OTAR is a separate Jira Product Discovery project holding strategic Categories; each OTA Epic links to one OTAR Category via Polaris work item links). Lists all 12 active OTAR Categories (OTAR-7 through OTAR-24) with one-line scope summaries. Documents the procedure for linking new Epics to their umbrella Category. This context was missing from the prior CLAUDE.md and only existed in past chat history; surfacing it here makes it permanent session context for Claude Code. |
