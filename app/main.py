@@ -59,6 +59,7 @@ from app.api.dashboard_routes import router as dashboard_router
 from app.api.health_routes import router as health_router, init_health_routes
 from app.api.service_routes import router as service_router, init_service_routes
 from app.providers.ai import AnthropicAdapter, FoundryAdapter
+from app.api.changelog_routes import router as changelog_router, init_changelog_routes
 from app.middleware.csrf import CSRFMiddleware
 
 # Dev-only test routes — imported and registered only outside production
@@ -177,6 +178,9 @@ async def lifespan(app: FastAPI):
 
     # 2. Initialize secrets manager (Key Vault or .env fallback)
     secrets_manager = SecretsManager(vault_url=settings.azure_keyvault_url)
+
+    # 2b. Initialize changelog routes (deploy recording token from Key Vault)
+    init_changelog_routes(secrets_manager)
 
     # 3. Initialize auth system with secrets
     init_auth(secrets_manager)
@@ -414,6 +418,7 @@ app.include_router(validation_router, prefix="/api/v1")
 app.include_router(dashboard_router, prefix="/api/v1")
 app.include_router(service_router, prefix="/api/v1")
 app.include_router(health_router, prefix="/api/v1")
+app.include_router(changelog_router, prefix="/api/v1")
 if settings.app_env != "production":
     app.include_router(test_router, prefix="/api/v1/test")
 

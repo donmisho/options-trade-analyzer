@@ -21,6 +21,7 @@ import PositionsPage from './pages/PositionsPage';
 import DashboardPage from './pages/DashboardPage';
 import SecurityStrategiesPage from './pages/SecurityStrategiesPage';
 import BrokerConnectPage from './pages/BrokerConnectPage';
+import ChangeLogPage from './pages/ChangeLogPage';
 
 export default function App() {
   return (
@@ -64,6 +65,7 @@ export default function App() {
             <Route path="/directional" element={<Navigate to="/dashboard" replace />} />
             <Route path="/positions"   element={<PositionsPage />} />
             <Route path="/favorites"   element={<Navigate to="/positions" replace />} />
+            <Route path="/changelog"   element={<ChangeLogPage />} />
 
             {/* Default route → Dashboard */}
             <Route path="*" element={<Navigate to="/dashboard" replace />} />

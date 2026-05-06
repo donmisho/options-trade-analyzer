@@ -925,3 +925,35 @@ class UserSession(Base):
     __table_args__ = (
         Index("ix_user_sessions_expires_at", "expires_at"),
     )
+
+
+# ─── Deploy Log (OTA-602) ───────────────────────────────────────────────────
+
+
+class DeployLog(Base):
+    """
+    Record of every successful deployment to a non-local environment.
+
+    Observability data — NOT user-scoped. No user_id column.
+    This is an intentional exception to the Data Isolation Invariant
+    (see architecture-plan.md). Both the POST (deploy-token-authed,
+    system-write) and the GET (BFF-session-authed, read-only) operate
+    on the table as a whole.
+
+    Written by GitHub Actions workflow steps after a successful deploy.
+    Read by the /changelog frontend page.
+    """
+    __tablename__ = "deploy_log"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    build_id = Column(String(64), nullable=False)
+    environment = Column(String(16), nullable=False)       # "dev" or "prod"
+    deployed_at = Column(DateTime, nullable=False)
+    commit_sha = Column(String(40), nullable=False)
+    ticket_keys = Column(String(500), nullable=False)      # comma-separated, e.g. "OTA-561,OTA-562"
+    notes = Column(String(500), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        Index("ix_deploy_log_deployed_at", "deployed_at"),
+    )

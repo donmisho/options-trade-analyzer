@@ -547,6 +547,26 @@ export default function Layout() {
             <span>Settings</span>
           </button>
 
+          {/* Change Log */}
+          <button
+            onClick={() => navigate('/changelog')}
+            title="Change Log"
+            aria-label="Change Log"
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              padding: '8px 16px', background: 'none', border: 'none',
+              width: '100%', cursor: 'pointer', fontSize: 11,
+              color: location.pathname === '/changelog' ? TEAL : MUTED,
+              fontFamily: 'monospace', textAlign: 'left',
+              transition: 'color 150ms ease',
+            }}
+            onMouseEnter={onHoverIn}
+            onMouseLeave={onHoverOut}
+          >
+            <span style={{ fontSize: 14 }}>&#9776;</span>
+            <span>Change Log</span>
+          </button>
+
           {/* Sign out */}
           <button
             onClick={logout}

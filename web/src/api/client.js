@@ -865,3 +865,21 @@ export async function saveDashboardLayout(payload) {
 export async function getDashboardMedia(widgetId) {
   return apiFetch(`/dashboard/media/${encodeURIComponent(widgetId)}`);
 }
+
+
+// ═══════════════════════════════════════════════════════════════════
+// CHANGELOG (OTA-602)
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * Fetch deploy history in reverse-chronological order.
+ * @param {Object} opts — { limit?: number, environment?: 'dev'|'prod' }
+ * @returns DeployLogEntry[]
+ */
+export async function getChangeLog({ limit = 50, environment } = {}) {
+  const params = new URLSearchParams();
+  if (limit) params.set('limit', limit);
+  if (environment) params.set('environment', environment);
+  const qs = params.toString();
+  return apiFetch(`/changelog${qs ? `?${qs}` : ''}`);
+}
