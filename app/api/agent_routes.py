@@ -44,7 +44,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import require_read
 from app.models.session import get_db
 from app.models.database import AgentRunLog, TradeRecommendation
-from app.providers.ai.base import AIProvider
+from app.ai.base import AIAdapter
 from app.skills.skill_loader import get_skill
 from app.agents.telemetry import invoke_with_tracing
 
@@ -52,16 +52,16 @@ router = APIRouter(prefix="/agent", tags=["Claude Trade Agent"])
 log = logging.getLogger(__name__)
 
 # Injected from main.py at startup — same provider used by /evaluate routes
-_ai_provider: Optional[AIProvider] = None
+_ai_provider: Optional[AIAdapter] = None
 
 
-def init_agent_routes(ai_provider: AIProvider):
+def init_agent_routes(ai_provider: AIAdapter):
     """Called from main.py to inject the AI provider."""
     global _ai_provider
     _ai_provider = ai_provider
 
 
-def _get_ai() -> AIProvider:
+def _get_ai() -> AIAdapter:
     if _ai_provider is None:
         raise HTTPException(
             status_code=503,

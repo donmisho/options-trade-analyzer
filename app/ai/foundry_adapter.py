@@ -31,6 +31,7 @@ from typing import Optional
 
 import httpx
 
+from app.ai.base import AIAdapter, ChatResult
 from app.ai.schemas import TradeVerdict, FollowUpResponse
 from app.ai.prompts import TRADE_EVALUATION_SYSTEM_PROMPT, FOLLOW_UP_SYSTEM_PROMPT
 
@@ -80,7 +81,7 @@ def _extract_json(text: str) -> str:
     return text
 
 
-class FoundryEvalAdapter:
+class FoundryEvalAdapter(AIAdapter):
     """
     Calls Claude via Azure AI Foundry's Anthropic-compatible endpoint.
 
@@ -199,7 +200,7 @@ FOLLOW-UP QUESTION:
         user_message: str,
         max_tokens: int = 1500,
         extra_messages: Optional[list] = None,
-    ) -> dict:
+    ) -> ChatResult:
         """
         Call the model with fully custom system + user prompts.
 

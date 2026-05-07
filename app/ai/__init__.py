@@ -1,21 +1,25 @@
 """
-app/ai — Structured output evaluation module.
+app/ai — Unified AI adapter package.
 
-This package provides the httpx-based Foundry adapter that uses
-Anthropic's structured output feature for typed trade evaluations.
+All AI invocations go through adapters in this package:
+  - FoundryEvalAdapter: httpx-based, calls Azure AI Foundry endpoint
+  - AnthropicAdapter: SDK-based, calls Anthropic API directly (fallback)
 
-Separate from app/providers/ai (which uses the Anthropic SDK for
-agent routes). This adapter calls the Foundry endpoint directly
-via httpx, which is required to use the output_format parameter.
+Both implement the AIAdapter ABC with a single chat() entry point.
 """
 
+from .base import AIAdapter, ChatResult
 from .schemas import TradeVerdict, FollowUpResponse, ThesisInsights, ExecutionPlan
 from .foundry_adapter import FoundryEvalAdapter
+from .anthropic_adapter import AnthropicAdapter
 
 __all__ = [
+    "AIAdapter",
+    "ChatResult",
     "TradeVerdict",
     "FollowUpResponse",
     "ThesisInsights",
     "ExecutionPlan",
     "FoundryEvalAdapter",
+    "AnthropicAdapter",
 ]
