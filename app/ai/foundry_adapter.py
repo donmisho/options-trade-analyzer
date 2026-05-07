@@ -1,5 +1,9 @@
 """
-Azure AI Foundry adapter for structured output trade evaluations.
+Azure AI Foundry adapter — implements AIAdapter ABC.
+
+Calls Claude via Azure AI Foundry's Anthropic-compatible endpoint
+using raw httpx. All prompts are loaded from SKILL.md files via
+skill_loader — no hardcoded prompt text in this module.
 
 WHY Foundry instead of direct Anthropic:
   - Single gateway to any LLM via config change
@@ -11,74 +15,16 @@ WHY httpx instead of the Anthropic SDK:
   The Anthropic Python SDK does not yet expose the output_format
   parameter (structured outputs). Calling via raw httpx lets us
   pass the full Anthropic API payload, including output_format.
-
-STRUCTURED OUTPUTS:
-  We pass an output_format parameter with a JSON schema that Claude
-  is constrained to follow. This eliminates parsing fragility —
-  the verdict is always a typed field, never parsed from prose.
-
-PROMPT CACHING:
-  The system prompt is marked with cache_control: {"type": "ephemeral"}.
-  First call builds the cache (25% premium). Subsequent calls within
-  5 minutes read from cache at 90% discount. Since traders typically
-  evaluate multiple trades per session, calls 2-N are significantly
-  faster and cheaper.
 """
 
-import json
 import logging
 from typing import Optional
 
 import httpx
 
 from app.ai.base import AIAdapter, ChatResult
-from app.ai.schemas import TradeVerdict, FollowUpResponse
-from app.ai.prompts import TRADE_EVALUATION_SYSTEM_PROMPT, FOLLOW_UP_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
-
-
-def _build_json_schema(model_class) -> dict:
-    """
-    Convert a Pydantic model to a strict JSON schema for Anthropic structured outputs.
-
-    Adds additionalProperties: false and all properties in required at every
-    object level, as required by the Anthropic structured output API.
-    """
-    schema = model_class.model_json_schema()
-
-    def _enforce_strict(s):
-        if s.get("type") == "object" and "properties" in s:
-            s["additionalProperties"] = False
-            s["required"] = list(s["properties"].keys())
-            for prop in s["properties"].values():
-                _enforce_strict(prop)
-        if s.get("type") == "array" and "items" in s:
-            _enforce_strict(s["items"])
-        for def_schema in s.get("$defs", {}).values():
-            _enforce_strict(def_schema)
-        return s
-
-    return _enforce_strict(schema)
-
-
-def _extract_json(text: str) -> str:
-    """
-    Extract the JSON object from Claude's response text.
-
-    Claude occasionally wraps JSON in markdown code fences even when told
-    not to. This strips them and returns the raw JSON string.
-    """
-    text = text.strip()
-    # Strip ```json ... ``` or ``` ... ``` fences
-    if text.startswith("```"):
-        lines = text.splitlines()
-        # Drop first line (```json or ```) and last line (```)
-        inner = lines[1:] if lines[-1].strip() == "```" else lines[1:]
-        text = "\n".join(inner).strip()
-        if text.endswith("```"):
-            text = text[:-3].strip()
-    return text
 
 
 class FoundryEvalAdapter(AIAdapter):
@@ -90,8 +36,7 @@ class FoundryEvalAdapter(AIAdapter):
 
     Usage:
         adapter = FoundryEvalAdapter(api_key="...", endpoint="https://...")
-        result = await adapter.evaluate_trade(user_message="...", original_context="...")
-        print(result.verdict)  # "EXECUTE" | "WAIT" | "PASS"
+        result = await adapter.chat(system_prompt="...", user_message="...")
     """
 
     def __init__(
@@ -112,88 +57,6 @@ class FoundryEvalAdapter(AIAdapter):
             },
         )
 
-    async def evaluate_trade(self, user_message: str) -> TradeVerdict:
-        """
-        Send a trade evaluation request and get a structured verdict.
-
-        Args:
-            user_message: The formatted trade data (market context + thesis + trade details).
-                         This is the DYNAMIC part — it changes every call.
-
-        Returns:
-            TradeVerdict with typed verdict, analysis sections, and exit plan.
-        """
-        payload = {
-            "model": self.model,
-            "max_tokens": 2000,
-            "system": TRADE_EVALUATION_SYSTEM_PROMPT,
-            "messages": [
-                {"role": "user", "content": user_message}
-            ],
-        }
-
-        response = await self._client.post(self.endpoint, json=payload)
-        if not response.is_success:
-            body = response.text
-            logger.error(f"FoundryEvalAdapter: API error {response.status_code}: {body}")
-            response.raise_for_status()
-
-        data = response.json()
-
-        text = ""
-        for block in data.get("content", []):
-            if block.get("type") == "text":
-                text = block["text"]
-                break
-
-        verdict = TradeVerdict.model_validate_json(_extract_json(text))
-        return verdict
-
-    async def follow_up(
-        self,
-        original_trade_context: str,
-        original_verdict: str,
-        question: str,
-    ) -> FollowUpResponse:
-        """
-        Handle a follow-up question about a previously evaluated trade.
-
-        WHY we send the original context again: Claude has no memory between
-        API calls. We need to re-send the trade details so Claude can answer
-        in context. The system prompt is still cached, so the cost is minimal.
-        """
-        user_message = f"""ORIGINAL TRADE EVALUATION CONTEXT:
-{original_trade_context}
-
-ORIGINAL VERDICT: {original_verdict}
-
-FOLLOW-UP QUESTION:
-{question}"""
-
-        payload = {
-            "model": self.model,
-            "max_tokens": 1000,
-            "system": FOLLOW_UP_SYSTEM_PROMPT,
-            "messages": [
-                {"role": "user", "content": user_message}
-            ],
-        }
-
-        response = await self._client.post(self.endpoint, json=payload)
-        if not response.is_success:
-            logger.error(f"FoundryEvalAdapter: Follow-up error {response.status_code}: {response.text}")
-            response.raise_for_status()
-
-        data = response.json()
-
-        text = ""
-        for block in data.get("content", []):
-            if block.get("type") == "text":
-                text = block["text"]
-                break
-
-        return FollowUpResponse.model_validate_json(_extract_json(text))
-
     async def chat(
         self,
         system_prompt: str,
@@ -203,9 +66,6 @@ FOLLOW-UP QUESTION:
     ) -> ChatResult:
         """
         Call the model with fully custom system + user prompts.
-
-        Used by the structured evaluation endpoint so it can pass SKILL.md
-        prompts without being bound to the TradeVerdict output shape.
 
         extra_messages: optional additional turns to append after the initial
         user_message (e.g. assistant bad-response + correction turn for retry).
