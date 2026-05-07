@@ -1,9 +1,9 @@
 """
-MCP Server Foundation — OTA-605.
+MCP Server — OTA-605 foundation + OTA-606 market-data tools + OTA-607 SMA tool.
 
 Mounts the `ota-market-data` MCP server at /mcp inside the existing FastAPI
-process. This module provides the transport layer only — no tools are exposed
-here. Stories OTA-606 through OTA-608 add @mcp.tool() functions on top.
+process. Exposes get_quote, get_option_chain, and get_smas tools that wrap
+the active market-data provider adapter (Pattern 1 / ADR-4 pass-through).
 
 Auth: Bearer token validated against Key Vault (ADR-2 in mcp-server-spec.md).
 The BFF cookie/CSRF path does NOT apply to /mcp — claude.ai is not a browser.
@@ -13,12 +13,13 @@ user row in the users table (ADR-3). The bearer token does not encode identity.
 
 Observability: mcp_tool_observability() opens an OTel span and writes an
 agent_run_log row. Fire-and-forget — failures never block the tool response.
-Stories 2–4 call this from their tool functions.
 """
 
 import logging
+import math
 import time
 import uuid
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import select
@@ -32,6 +33,7 @@ from mcp.server.fastmcp import FastMCP
 from app.core.config import settings
 from app.core.secrets import SecretsManager
 from app.models.database import AgentRunLog, User
+from app.models.session import async_session
 
 logger = logging.getLogger(__name__)
 
@@ -80,12 +82,19 @@ async def get_system_principal(session: AsyncSession) -> User:
 # ---------------------------------------------------------------------------
 
 _secrets_manager: Optional[SecretsManager] = None
+_provider_factory = None
 
 
 def init_mcp_routes(secrets_manager: SecretsManager) -> None:
     """Called from main.py lifespan to inject the SecretsManager reference."""
     global _secrets_manager
     _secrets_manager = secrets_manager
+
+
+def init_mcp_provider(provider_factory) -> None:
+    """Called from main.py lifespan after ProviderRegistry is ready."""
+    global _provider_factory
+    _provider_factory = provider_factory
 
 
 def _get_bearer_secret_name() -> str:
@@ -228,3 +237,429 @@ async def mcp_tool_observability(
                 pass
 
     return otel_trace_id
+
+
+# ---------------------------------------------------------------------------
+# Helper — resolve market-data provider (ADR-4 pass-through)
+# ---------------------------------------------------------------------------
+
+
+def _get_provider():
+    """Return the active market-data provider via ProviderRegistry."""
+    if _provider_factory is None:
+        raise RuntimeError("MCP: ProviderRegistry not initialized")
+    return _provider_factory.get_market_data(settings.default_market_data_provider)
+
+
+# ---------------------------------------------------------------------------
+# MCP Tools — OTA-606
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+async def get_quote(ticker: str) -> dict:
+    """Get a real-time price quote for a stock or ETF.
+
+    Returns the last traded price, daily change, volume, 52-week range,
+    and previous close for the given ticker symbol. Use this to check
+    current prices before analyzing option chains.
+
+    Args:
+        ticker: Stock or ETF symbol (e.g. "QQQ", "AAPL", "SPY").
+
+    Returns:
+        A dict with ticker, price, volume, prev_close, change_pct,
+        52-week high/low, volume_ratio, and timestamp. Returns an error
+        object with error_code if the ticker is not found or the upstream
+        provider is unavailable.
+    """
+    t0 = time.monotonic()
+    user_id = None
+
+    try:
+        # Resolve system principal for observability
+        async with async_session() as db:
+            try:
+                principal = await get_system_principal(db)
+                user_id = str(principal.id)
+            except Exception:
+                pass  # Non-blocking — observability only
+
+        provider = _get_provider()
+        result = await provider.get_quote(ticker)
+
+        latency_ms = int((time.monotonic() - t0) * 1000)
+
+        # Translate adapter shape → MCP spec shape
+        response = {
+            "ticker": result["symbol"],
+            "price": result["price"],
+            "bid": None,  # Not in Schwab quote adapter
+            "ask": None,
+            "volume": result["volume"],
+            "prev_close": result.get("previous_close"),
+            "change_pct": result.get("change_pct"),
+            "timestamp": result["timestamp"].isoformat() if hasattr(result.get("timestamp", ""), "isoformat") else str(result.get("timestamp", "")),
+            "market_state": None,  # Not in adapter; omitted per Phase 1 decision
+        }
+
+        # Fire-and-forget observability
+        async with async_session() as db:
+            await mcp_tool_observability(
+                "get_quote", ticker=ticker, user_id=user_id,
+                latency_ms=latency_ms, success=True, db=db,
+            )
+
+        return response
+
+    except Exception as e:
+        latency_ms = int((time.monotonic() - t0) * 1000)
+        err_str = str(e).lower()
+
+        if "not found" in err_str or "no data" in err_str or "symbol" in err_str:
+            error_code = "TICKER_NOT_FOUND"
+        else:
+            error_code = "SCHWAB_UNAVAILABLE"
+
+        # Fire-and-forget observability
+        try:
+            async with async_session() as db:
+                await mcp_tool_observability(
+                    "get_quote", ticker=ticker, user_id=user_id,
+                    latency_ms=latency_ms, success=False,
+                    error_code=error_code, db=db,
+                )
+        except Exception:
+            pass
+
+        return {"error": True, "error_code": error_code, "message": str(e)}
+
+
+@mcp.tool()
+async def get_option_chain(
+    ticker: str,
+    expiration: str,
+    option_type: str = "both",
+    strike_range_pct: float = 0.15,
+) -> dict:
+    """Get the option chain for a ticker filtered to a specific expiration date.
+
+    Returns all option contracts (calls, puts, or both) for the given ticker
+    and expiration, filtered to strikes within a percentage range of the
+    underlying price. Each contract includes bid, ask, mid, last, volume,
+    open interest, implied volatility (as decimal), and full greeks.
+
+    Args:
+        ticker: Stock or ETF symbol (e.g. "QQQ", "AAPL").
+        expiration: Expiration date in YYYY-MM-DD format (e.g. "2026-06-20").
+        option_type: "call", "put", or "both" (default "both").
+        strike_range_pct: Fraction of underlying price to filter strikes.
+            0.15 means ±15% of current price. Default 0.15.
+
+    Returns:
+        A dict with ticker, underlying_price, expiration, dte, and an options
+        array. Each option has occ_symbol, strike, type, bid, ask, mid, last,
+        volume, open_interest, iv, delta, gamma, theta, vega. Returns an error
+        object with error_code on failure.
+    """
+    t0 = time.monotonic()
+    user_id = None
+
+    try:
+        # Resolve system principal for observability
+        async with async_session() as db:
+            try:
+                principal = await get_system_principal(db)
+                user_id = str(principal.id)
+            except Exception:
+                pass
+
+        # Compute DTE from expiration string
+        try:
+            exp_date = datetime.strptime(expiration, "%Y-%m-%d").date()
+        except ValueError:
+            return {
+                "error": True,
+                "error_code": "EXPIRATION_INVALID",
+                "message": f"Invalid date format: {expiration}. Use YYYY-MM-DD.",
+            }
+
+        today = datetime.now(timezone.utc).date()
+        dte = (exp_date - today).days
+
+        if dte < 0:
+            return {
+                "error": True,
+                "error_code": "EXPIRATION_INVALID",
+                "message": f"Expiration {expiration} is in the past.",
+            }
+
+        # Convert MCP strike_range_pct (decimal fraction) to adapter scale (percentage)
+        adapter_strike_pct = strike_range_pct * 100  # 0.15 → 15.0
+
+        # Map option_type for the adapter
+        adapter_option_type = None  # "both" → None (adapter returns all)
+        if option_type in ("call", "put"):
+            adapter_option_type = option_type
+
+        provider = _get_provider()
+        chain = await provider.get_chain(
+            symbol=ticker,
+            min_dte=dte,
+            max_dte=dte,
+            strike_range_pct=adapter_strike_pct,
+            option_type=adapter_option_type,
+        )
+
+        underlying_price = chain["underlying_price"]
+
+        # Filter contracts to the exact expiration date
+        # (adapter may return nearby dates if DTE math is off by a day)
+        filtered = []
+        for c in chain.get("contracts", []):
+            if c.get("expiration") != expiration:
+                continue
+            filtered.append({
+                "occ_symbol": c["symbol"],
+                "strike": c["strike"],
+                "type": c["option_type"],
+                "bid": c["bid"],
+                "ask": c["ask"],
+                "mid": c["mid"],
+                "last": c.get("last"),
+                "volume": c["volume"],
+                "open_interest": c["open_interest"],
+                "iv": c.get("implied_volatility"),
+                "delta": c.get("delta"),
+                "gamma": c.get("gamma"),
+                "theta": c.get("theta"),
+                "vega": c.get("vega"),
+            })
+
+        latency_ms = int((time.monotonic() - t0) * 1000)
+
+        # Check if we got any contracts — if not, expiration may be invalid
+        if not filtered and expiration not in chain.get("expirations_available", []):
+            async with async_session() as db:
+                await mcp_tool_observability(
+                    "get_option_chain", ticker=ticker, user_id=user_id,
+                    latency_ms=latency_ms, success=False,
+                    error_code="EXPIRATION_INVALID", db=db,
+                )
+            return {
+                "error": True,
+                "error_code": "EXPIRATION_INVALID",
+                "message": f"Expiration {expiration} is not available for {ticker}.",
+                "available_expirations": chain.get("expirations_available", [])[:10],
+            }
+
+        response = {
+            "ticker": chain["underlying"],
+            "underlying_price": underlying_price,
+            "expiration": expiration,
+            "dte": dte,
+            "options": filtered,
+        }
+
+        # Fire-and-forget observability
+        async with async_session() as db:
+            await mcp_tool_observability(
+                "get_option_chain", ticker=ticker, user_id=user_id,
+                latency_ms=latency_ms, success=True, db=db,
+            )
+
+        return response
+
+    except Exception as e:
+        latency_ms = int((time.monotonic() - t0) * 1000)
+        err_str = str(e).lower()
+
+        if "not found" in err_str or "no data" in err_str or "symbol" in err_str:
+            error_code = "TICKER_NOT_FOUND"
+        else:
+            error_code = "SCHWAB_UNAVAILABLE"
+
+        try:
+            async with async_session() as db:
+                await mcp_tool_observability(
+                    "get_option_chain", ticker=ticker, user_id=user_id,
+                    latency_ms=latency_ms, success=False,
+                    error_code=error_code, db=db,
+                )
+        except Exception:
+            pass
+
+        return {"error": True, "error_code": error_code, "message": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# MCP Tools — OTA-607
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+async def get_smas(ticker: str, periods: list[int] | None = None) -> dict:
+    """Get simple moving averages and trend alignment for a stock or ETF.
+
+    Returns SMA values for the requested periods, the percentage distance
+    between current price and each SMA, and an overall alignment signal
+    (bullish, bearish, mixed, or neutral). Use this to check trend
+    alignment before evaluating option trades — for example, the
+    "extended >5% below 50-day SMA" flag uses the price_vs_sma_pct field.
+
+    Args:
+        ticker: Stock or ETF symbol (e.g. "QQQ", "AAPL", "SPY").
+        periods: List of SMA periods in trading days (e.g. [8, 21, 50]).
+            Defaults to [8, 21, 50] if not provided.
+
+    Returns:
+        A dict with ticker, current_price, smas (keyed by period with
+        value and price_vs_sma_pct), alignment, and as_of date. Returns
+        an error object with error_code if the ticker is not found, the
+        provider is unavailable, or insufficient price history exists
+        for a requested period.
+    """
+    t0 = time.monotonic()
+    user_id = None
+
+    if periods is None:
+        periods = [8, 21, 50]
+
+    try:
+        # Resolve system principal for observability
+        async with async_session() as db:
+            try:
+                principal = await get_system_principal(db)
+                user_id = str(principal.id)
+            except Exception:
+                pass
+
+        provider = _get_provider()
+
+        # Determine how many months of daily history to request.
+        # ~20 trading days per month; request enough to cover the longest period.
+        max_period = max(periods)
+        needed_months = math.ceil(max_period / 20) + 1  # +1 for safety margin
+        # Schwab month periodType accepts: 1, 2, 3, 6
+        valid_months = [1, 2, 3, 6]
+        request_months = next((m for m in valid_months if m >= needed_months), None)
+
+        if request_months is None:
+            # Periods requiring > 6 months (~120 trading days) exceed
+            # what the provider returns as daily candles.
+            latency_ms = int((time.monotonic() - t0) * 1000)
+            async with async_session() as db:
+                await mcp_tool_observability(
+                    "get_smas", ticker=ticker, user_id=user_id,
+                    latency_ms=latency_ms, success=False,
+                    error_code="INSUFFICIENT_HISTORY", db=db,
+                )
+            return {
+                "error": True,
+                "error_code": "INSUFFICIENT_HISTORY",
+                "message": (
+                    f"Period {max_period} exceeds available daily price history. "
+                    f"Maximum supported period is approximately 120 trading days."
+                ),
+            }
+
+        # Fetch price history and current quote
+        candles = await provider.get_price_history(ticker, num_periods=request_months)
+        quote = await provider.get_quote(ticker)
+
+        current_price = quote.get("price", 0)
+        if not current_price or current_price <= 0:
+            latency_ms = int((time.monotonic() - t0) * 1000)
+            async with async_session() as db:
+                await mcp_tool_observability(
+                    "get_smas", ticker=ticker, user_id=user_id,
+                    latency_ms=latency_ms, success=False,
+                    error_code="TICKER_NOT_FOUND", db=db,
+                )
+            return {
+                "error": True,
+                "error_code": "TICKER_NOT_FOUND",
+                "message": f"Could not resolve current price for {ticker}.",
+            }
+
+        closes = [c["close"] for c in candles if isinstance(c.get("close"), (int, float))]
+
+        # Compute each requested SMA
+        smas = {}
+        insufficient = []
+        for period in periods:
+            if len(closes) < period:
+                insufficient.append(period)
+                continue
+            sma_value = round(sum(closes[-period:]) / period, 2)
+            pct = round(((current_price - sma_value) / sma_value) * 100, 2)
+            smas[str(period)] = {
+                "value": sma_value,
+                "price_vs_sma_pct": pct,
+            }
+
+        if insufficient:
+            latency_ms = int((time.monotonic() - t0) * 1000)
+            async with async_session() as db:
+                await mcp_tool_observability(
+                    "get_smas", ticker=ticker, user_id=user_id,
+                    latency_ms=latency_ms, success=False,
+                    error_code="INSUFFICIENT_HISTORY", db=db,
+                )
+            return {
+                "error": True,
+                "error_code": "INSUFFICIENT_HISTORY",
+                "message": (
+                    f"Only {len(closes)} trading days of history available. "
+                    f"Insufficient for period(s): {insufficient}."
+                ),
+            }
+
+        # Compute alignment
+        above = [current_price > smas[str(p)]["value"] for p in periods]
+        if all(above):
+            alignment = "bullish"
+        elif not any(above):
+            alignment = "bearish"
+        else:
+            alignment = "mixed"
+
+        latency_ms = int((time.monotonic() - t0) * 1000)
+
+        response = {
+            "ticker": ticker.upper(),
+            "current_price": current_price,
+            "smas": smas,
+            "alignment": alignment,
+            "as_of": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        }
+
+        # Fire-and-forget observability
+        async with async_session() as db:
+            await mcp_tool_observability(
+                "get_smas", ticker=ticker, user_id=user_id,
+                latency_ms=latency_ms, success=True, db=db,
+            )
+
+        return response
+
+    except Exception as e:
+        latency_ms = int((time.monotonic() - t0) * 1000)
+        err_str = str(e).lower()
+
+        if "not found" in err_str or "no data" in err_str or "symbol" in err_str:
+            error_code = "TICKER_NOT_FOUND"
+        else:
+            error_code = "SCHWAB_UNAVAILABLE"
+
+        try:
+            async with async_session() as db:
+                await mcp_tool_observability(
+                    "get_smas", ticker=ticker, user_id=user_id,
+                    latency_ms=latency_ms, success=False,
+                    error_code=error_code, db=db,
+                )
+        except Exception:
+            pass
+
+        return {"error": True, "error_code": error_code, "message": str(e)}
