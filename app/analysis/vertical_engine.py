@@ -167,6 +167,9 @@ class ScoredSpread:
     # Format: { metric_key: { raw, normalized, weight, contribution, norm_min, norm_max } }
     score_breakdown: dict = field(default_factory=dict)
 
+    # OTA-559: strategies whose DTE band includes this spread's DTE
+    fitting_strategies: list = field(default_factory=list)
+
     def to_dict(self):
         return asdict(self)
 

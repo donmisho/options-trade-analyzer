@@ -20,7 +20,7 @@ this for me" requests, not simple resource retrievals.
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from typing import Optional
@@ -39,6 +39,7 @@ from app.analysis.long_call_engine import (
 )
 from app.analysis.directional_engine import DirectionalEngine, Thesis
 from app.analysis.strategy_scorer import score_all_strategies, compute_sma_signal
+from app.analysis.strategy_definitions import STRATEGIES
 from app.analysis.black_scholes import compute_probability_matrix
 from app.models.schemas import (
     ScorecardRequest, ScorecardResponse, StrategyScoreItem,
@@ -99,6 +100,15 @@ class VerticalRequest(BaseModel):
     # Scoring filters (surfaced from frontend system vars)
     min_reward_risk: float = Field(default=0.5, ge=0.0)
     min_ev_threshold: float = Field(default=0.0)
+    # OTA-559: strategy-aware DTE filtering
+    enabled_strategies: Optional[list[str]] = Field(
+        default=None,
+        description="Strategy keys to filter by (e.g. ['steady-paycheck','weekly-grind']). None=all."
+    )
+    user_config: Optional[dict] = Field(
+        default=None,
+        description="Per-strategy DTE overrides: {'weekly-grind': {'dte_min': 10, 'dte_max': 25}}"
+    )
 
 
 class LongCallRequest(BaseModel):
@@ -213,6 +223,49 @@ async def _persist_chain_snapshot(
         return None
 
 
+# ─── OTA-559: Strategy-aware DTE helpers ─────────────────────────────
+
+
+def _resolve_strategy_bands(
+    enabled_strategies: list[str] | None,
+    user_config: dict | None,
+) -> dict[str, tuple[int, int]]:
+    """
+    Build {strategy_key: (dte_min, dte_max)} for the enabled strategies,
+    applying user_config overrides if provided. Returns empty dict when
+    no strategy filtering should be applied.
+    """
+    if enabled_strategies is not None:
+        keys = [k for k in enabled_strategies if k in STRATEGIES]
+    else:
+        keys = list(STRATEGIES.keys())
+
+    if not keys:
+        return {}
+
+    uc = user_config or {}
+    bands = {}
+    for k in keys:
+        s = STRATEGIES[k]
+        overrides = uc.get(k, {})
+        lo = overrides.get("dte_min", s.dte_min)
+        hi = overrides.get("dte_max", s.dte_max)
+        bands[k] = (int(lo), int(hi))
+    return bands
+
+
+def _spread_dte(spread: dict) -> int:
+    """Compute DTE from a spread dict's expiration field."""
+    exp = spread.get("expiration")
+    if not exp:
+        return 0
+    try:
+        exp_date = date.fromisoformat(exp[:10])
+        return max(0, (exp_date - date.today()).days)
+    except (ValueError, TypeError):
+        return 0
+
+
 # ─── Endpoints ────────────────────────────────────────────────────
 
 @router.post("/verticals")
@@ -232,10 +285,20 @@ async def analyze_verticals(
     user_id = user.get("sub")
     sym = req.symbol.upper()
 
+    # OTA-559: Compute DTE envelope from enabled strategies
+    _strategy_bands = _resolve_strategy_bands(
+        req.enabled_strategies, req.user_config
+    )
+    if _strategy_bands:
+        _env_min = min(b[0] for b in _strategy_bands.values())
+        _env_max = max(b[1] for b in _strategy_bands.values())
+    else:
+        _env_min, _env_max = req.min_dte, req.max_dte
+
     contracts, price, chain_data = await _fetch_chain(
         req.symbol, user,
-        min_dte=req.min_dte,
-        max_dte=req.max_dte,
+        min_dte=_env_min,
+        max_dte=_env_max,
         strike_range_pct=req.strike_range_pct,
     )
 
@@ -274,8 +337,21 @@ async def analyze_verticals(
     result = engine.analyze(
         contracts=contracts,
         underlying_price=price,
-        max_results=req.max_results,
+        max_results=None,  # don't truncate before strategy filter
     )
+
+    # OTA-559: Tag each spread with fitting strategies and filter
+    if _strategy_bands:
+        tagged = []
+        for s in result.get("spreads", []):
+            dte = _spread_dte(s)
+            fits = [k for k, (lo, hi) in _strategy_bands.items() if lo <= dte <= hi]
+            if fits:
+                s["fitting_strategies"] = fits
+                tagged.append(s)
+        result["spreads"] = tagged[:req.max_results] if req.max_results else tagged
+        result["total_valid"] = len(tagged)
+
     result["symbol"] = sym
 
     # ── Persist analysis data (never block the response on failure) ──

@@ -790,7 +790,7 @@ export default function TradesPage() {
   }, [candles, smaPeriods]);
 
   // ── DTE filter state (URL-persisted) ────────────────────────────────────
-  const DTE_MIN_DEFAULT = 10;   // matches fetchVerticals min_dte
+  const DTE_MIN_DEFAULT = 7;   // OTA-559: strategy bands handle filtering; LT starts at 7
   const DTE_MAX_DEFAULT = 365;
   const dteMinParam = parseInt(searchParams.get('dte_min'), 10);
   const dteMaxParam = parseInt(searchParams.get('dte_max'), 10);
@@ -848,13 +848,12 @@ export default function TradesPage() {
     setVertLoading(true);
     setVertError(null);
     try {
+      // OTA-559: strategy-aware DTE — backend computes envelope from enabled strategies
+      const enabledStrats = VERT_STRATEGY_KEYS;
       const data = await analyzeVerticals({
         symbol: sym,
         spread_types: ['bull_call', 'bear_put', 'bull_put', 'bear_call'],
-        // TODO(OTA-512): remove min_dte override once per-strategy DTE windows are
-        // honored by the backend per-strategy user_config routing.
-        // Floor at 10 DTE — evaluator hard-rejects ≤7 DTE, so scanning below 10 is waste.
-        min_dte: 10,
+        enabled_strategies: enabledStrats,
         max_results: 20,
         ...config,
       });
@@ -864,12 +863,13 @@ export default function TradesPage() {
       if (underlying > 0) {
         setCandles(prev => prev.length ? prev : generateCandles(underlying));
       }
-      // Inject stopgap strategy pills
+      // OTA-559: use backend fitting_strategies; fall back to inferStrategies for compat
       const spreads = (data.spreads || []).map(s => {
+        if (s.fitting_strategies?.length) return { ...s, strategies: s.fitting_strategies };
         const dte = s.expiration
           ? Math.max(0, Math.round((new Date(s.expiration) - new Date()) / 86400000))
           : null;
-        return { ...s, strategies: s.strategies?.length ? s.strategies : inferStrategies(s.spread_type, dte) };
+        return { ...s, strategies: inferStrategies(s.spread_type, dte) };
       });
       setVertSpreads(spreads);
     } catch (err) {
