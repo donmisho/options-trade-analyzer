@@ -1033,6 +1033,7 @@ export default function TradesPage() {
 
     async function handleFollow() {
       try {
+        const ev = evaluations[rowId];
         await followTrade({
           symbol,
           strategy_key: strategyKeys[0],
@@ -1042,6 +1043,8 @@ export default function TradesPage() {
           entry_greeks: { delta: trade.delta ?? null, gamma: trade.gamma ?? null, theta: trade.theta ?? null, vega: trade.vega ?? null },
           entry_iv_rank: trade.iv_rank ?? trade.iv ?? 0,
           entry_sma_alignment: smaAlign || {},
+          claude_score: ev?.score ?? null,
+          claude_verdict: ev?._raw ?? null,
         });
         showToast({ type: 'success', message: `Position followed (Paper) — ${symbol} ${tradeLabel(trade)}`, link: { text: 'View Positions', to: '/positions' }, duration: 4000 });
       } catch (err) {
@@ -1051,6 +1054,7 @@ export default function TradesPage() {
 
     async function handleTakePosition() {
       try {
+        const ev = evaluations[rowId];
         await takeTrade({
           symbol,
           strategy_key: strategyKeys[0],
@@ -1060,6 +1064,8 @@ export default function TradesPage() {
           entry_greeks: { delta: trade.delta ?? null, gamma: trade.gamma ?? null, theta: trade.theta ?? null, vega: trade.vega ?? null },
           entry_iv_rank: trade.iv_rank ?? trade.iv ?? 0,
           entry_sma_alignment: smaAlign || {},
+          claude_score: ev?.score ?? null,
+          claude_verdict: ev?._raw ?? null,
         });
         showToast({ type: 'success', message: `Position taken (Live) — ${symbol} ${tradeLabel(trade)}`, link: { text: 'View Positions', to: '/positions' }, duration: 4000 });
       } catch (err) {
