@@ -39,3 +39,7 @@ startup.log
 scratch/
 data/
 _doc-drafts/
+jira_updates/
+ota-commits.txt
+db-url-setting.json
+agents-qa-system.zip
