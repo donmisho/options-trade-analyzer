@@ -237,45 +237,6 @@ class UserFavorite(Base):
     )
 
 
-class SchwabToken(Base):
-    """
-    Schwab OAuth tokens for persistent storage.
-
-    WHY: Schwab tokens were previously stored in-memory in the provider instance.
-    This meant every backend restart required users to re-authenticate via OAuth.
-    By storing tokens in the database, we can:
-    1. Persist tokens across restarts
-    2. Auto-refresh expired tokens using the refresh_token
-    3. Support multiple users each with their own Schwab connection
-
-    SECURITY: In production, tokens should be encrypted at rest using Azure Key Vault
-    or similar. For now we store them as-is (database is behind auth).
-    """
-    __tablename__ = "schwab_tokens"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(String(36), ForeignKey("users.id"), unique=True, nullable=False, index=True)
-
-    # OAuth tokens
-    access_token = Column(Text, nullable=False)
-    refresh_token = Column(Text, nullable=False)
-
-    # Token expiration times
-    token_expires_at = Column(DateTime, nullable=False)
-    refresh_expires_at = Column(DateTime, nullable=False)
-
-    # Metadata
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
-
-    # Relationships
-    user = relationship("User", backref="schwab_token")
-
-    __table_args__ = (
-        Index("ix_schwab_tokens_user", "user_id"),
-    )
-
-
 class AgentRunLog(Base):
     """
     Full audit trail for every AI agent invocation.
@@ -648,27 +609,6 @@ class ValidationAssessment(Base):
         Index("ix_validation_assessments_ticker", "ticker"),
     )
 
-
-class StrategyConfig(Base):
-    """
-    Per-user overrides to strategy defaults (Phase 2.9).
-
-    Stores user-customised parameters for each strategy as a JSON blob.
-    The canonical defaults live in strategy_definitions.STRATEGY_DEFINITIONS;
-    this table holds only the deltas the user has chosen to change.
-    """
-    __tablename__ = "strategy_configs"
-
-    config_id    = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id      = Column(String(36), nullable=False)
-    strategy_key = Column(String(50), nullable=False)   # 'steady-paycheck' etc.
-    config_json  = Column(Text, nullable=False)          # JSON: user overrides to defaults
-    created_at   = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at   = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
-
-    __table_args__ = (
-        Index("ix_strategy_configs_user_key", "user_id", "strategy_key"),
-    )
 
 
 class Position(Base):

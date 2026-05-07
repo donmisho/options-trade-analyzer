@@ -16,8 +16,8 @@ const config = {
   scorecardStrategy: true,
   enabled: true,
   trade_structure: 'long_option',
-  dte_min: 25,
-  dte_max: 65,
+  dte_min: 14,
+  dte_max: 60,
 
   // ── Scoring weights ────────────────────────────────────────────────────
   scoring_weights: {
@@ -30,8 +30,8 @@ const config = {
 
   // ── ConfigDrawer schema ────────────────────────────────────────────────
   configSchema: [
-    { key: 'dte_min',           label: 'Min DTE',                       type: 'slider', min: 20,  max: 45,  default: 30,  step: 1,    unit: 'days' },
-    { key: 'dte_max',           label: 'Max DTE',                       type: 'slider', min: 45,  max: 90,  default: 60,  step: 1,    unit: 'days' },
+    { key: 'dte_min',           label: 'Min DTE',                       type: 'slider', min: 7,   max: 30,  default: 14,  step: 1,    unit: 'days' },
+    { key: 'dte_max',           label: 'Max DTE',                       type: 'slider', min: 30,  max: 90,  default: 60,  step: 1,    unit: 'days' },
     { key: 'delta_min',         label: 'Min Long Delta',                type: 'slider', min: 0.40, max: 0.70, default: 0.50, step: 0.01, unit: '\u0394' },
     { key: 'delta_max',         label: 'Max Long Delta',                type: 'slider', min: 0.50, max: 0.85, default: 0.70, step: 0.01, unit: '\u0394' },
     { key: 'iv_rank_max',       label: 'Max IV Rank (avoid overpaying)', type: 'slider', min: 40,  max: 100, default: 60,  step: 5,    unit: '%' },

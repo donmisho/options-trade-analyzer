@@ -8,7 +8,7 @@ Design note — two different DTE concepts in this codebase:
     Given a trade with N effective DTE, is this strategy a viable fit for
     how the user will actually hold it? This is a management-headroom check.
 
-    strategy_definitions.py (STRATEGIES / STRATEGY_DEFINITIONS) defines
+    strategy_definitions.py (STRATEGIES) defines
     SCORER CANDIDATE FILTERS — "should the scoring engine even consider this
     option contract for this strategy's universe?" The scorer uses these to
     narrow the options chain before computing composite scores.

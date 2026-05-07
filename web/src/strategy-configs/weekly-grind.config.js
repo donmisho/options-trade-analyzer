@@ -17,8 +17,8 @@ const config = {
   enabled: true,
   trade_structure: 'credit_spread',
   non_applicable_reason: 'requires credit spread structure',
-  dte_min: 5,
-  dte_max: 16,
+  dte_min: 14,
+  dte_max: 21,
 
   // ── Scoring weights ────────────────────────────────────────────────────
   scoring_weights: {
@@ -31,8 +31,8 @@ const config = {
 
   // ── ConfigDrawer schema ────────────────────────────────────────────────
   configSchema: [
-    { key: 'dte_min',               label: 'Min DTE',              type: 'slider', min: 3,   max: 10,  default: 5,   step: 1,    unit: 'days' },
-    { key: 'dte_max',               label: 'Max DTE',              type: 'slider', min: 7,   max: 21,  default: 14,  step: 1,    unit: 'days' },
+    { key: 'dte_min',               label: 'Min DTE',              type: 'slider', min: 7,   max: 18,  default: 14,  step: 1,    unit: 'days' },
+    { key: 'dte_max',               label: 'Max DTE',              type: 'slider', min: 14,  max: 30,  default: 21,  step: 1,    unit: 'days' },
     { key: 'delta_max',             label: 'Max Short Delta',      type: 'slider', min: 0.10, max: 0.35, default: 0.25, step: 0.01, unit: '\u0394' },
     { key: 'min_credit_width_pct',  label: 'Min Credit/Width',     type: 'slider', min: 15,  max: 40,  default: 25,  step: 1,    unit: '%' },
     { key: 'exit_profit_pct',       label: 'Take Profit At',       type: 'slider', min: 25,  max: 75,  default: 50,  step: 5,    unit: '%' },

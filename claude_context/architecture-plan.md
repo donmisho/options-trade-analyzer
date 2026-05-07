@@ -172,7 +172,7 @@ The active entities by functional area:
 
 **Positions.** `positions` (the unified PAPER/LIVE table per Pattern 4 — symbol, structure type, legs, entry price, exit levels stored at entry, status, source, health_grade, last_monitored_at), `position_history` (state transitions for audit).
 
-**Strategies and scoring.** `strategy_configs` (server-side per-user strategy parameter overrides — table exists, currently has no API routes wired and zero rows; persistence model decision is OTA-514 work).
+**Strategies and scoring.** Strategy config persistence uses Option B (OTA-546): frontend `.config.js` files are static defaults, per-user overrides in localStorage. The `strategy_configs` table was dropped.
 
 **Symbol reference and provider state.** `symbol_reference` (8,568 rows of symbol metadata including `apiSymbol` mappings for index symbols; lives in SQL because loading into browser memory was rejected as an architectural decision — too much data, slow page loads), `provider_state` (lifecycle state per provider per environment; populated under OTA-525).
 
@@ -484,7 +484,16 @@ A "strategy" in OTA is a named approach to options trading with a configuration 
 
 Frontend strategy config files live in `web/src/strategy-configs/` (`steady-paycheck.config.js`, `weekly-grind.config.js`, etc.) and are registered in `index.js`.
 
-The DTE-range source-of-truth issue (two dicts in `strategy_definitions.py` that disagree) is tracked under OTA-513 and is a Cleanup Roadmap item.
+**Strategy config persistence (Option B — OTA-546):** Frontend `.config.js` files are the static defaults. Per-user overrides persist to `localStorage` only. There is no backend `strategy_configs` table (dropped via OTA-546). No API routes exist for strategy config CRUD. This is the simplest model appropriate for a solo-user/small-team app; if multi-device sync becomes a requirement, revisit with Option C (hybrid).
+
+**Canonical strategy definitions dict:** `STRATEGIES` in `app/analysis/strategy_definitions.py` is the single source of truth for backend scoring parameters (DTE ranges, scoring weights, config schema). The former `STRATEGY_DEFINITIONS` dict was deleted (OTA-513 absorbed into OTA-546). DTE ranges align to canonical values in `business-rules.md`:
+
+| Strategy | DTE min | DTE max |
+|---|---|---|
+| Steady Paycheck (SP) | 14 | 45 |
+| Weekly Grind (WG) | 14 | 21 |
+| Trend Rider (TR) | 14 | 60 |
+| Lottery Ticket (LT) | 7 | 60 |
 
 ## The Positions System
 
@@ -658,7 +667,7 @@ app/
 │   ├── long_call_engine.py       # Long-call scorer
 │   ├── directional_engine.py     # Strategy comparator
 │   ├── strategy_scorer.py        # Multi-strategy scoring engine
-│   ├── strategy_definitions.py   # Strategy parameter dictionaries (consolidation pending under OTA-513)
+│   ├── strategy_definitions.py   # STRATEGIES dict — single canonical source for strategy parameters
 │   ├── black_scholes.py          # Probability matrix math
 │   ├── health_grade.py           # Position health grade computation
 │   ├── hard_gates/               # Registered hard gates sub-package (EarningsInWindowGate, NegativeEVGate)
@@ -869,8 +878,8 @@ The Architecture Optimization Epic (OTA-535) tracks the active drift items ident
 | ~~Rename `agent_routes.py` → `trade_evaluation_routes.py`, `agents_routes.py` → `position_monitor_routes.py`~~ | ~~Daily cognitive trap from singular/plural file naming~~ | ~~Both reviews~~ — **Done OTA-541** |
 | Formalize `AIAdapter` ABC in `app/ai/base.py` | Adapter contract is convention-only today | Opus-4.7 review |
 | ~~Resolve `watchlist_routes.py` vs `named_watchlist_routes.py` overlap~~ | ~~Two routes with overlapping semantics for the same user~~ | ~~Opus-4.7 review~~ — **Done OTA-541** |
-| Consolidate `STRATEGIES` and `STRATEGY_DEFINITIONS` dicts in `strategy_definitions.py` | Two dicts encoding the same DTE ranges with disagreeing values | OTA-513 |
-| Decide and implement strategy config persistence model (localStorage vs `strategy_configs` table) | Table exists with no API routes, zero rows | OTA-514 |
+| ~~Consolidate `STRATEGIES` and `STRATEGY_DEFINITIONS` dicts in `strategy_definitions.py`~~ | ~~Two dicts encoding the same DTE ranges with disagreeing values~~ | ~~OTA-513~~ — **Done OTA-546** |
+| ~~Decide and implement strategy config persistence model (localStorage vs `strategy_configs` table)~~ | ~~Table exists with no API routes, zero rows~~ | ~~OTA-514~~ — **Done OTA-546** |
 | ~~Wire `cors_origins` config setting to `main.py` (currently hardcoded)~~ | ~~Configuration drift~~ | ~~GPT-5.4 review~~ — **Done OTA-541** |
 | Replace `datetime.utcnow()` with `datetime.now(timezone.utc)` repo-wide | Deprecated in Python 3.12+ | GPT-5.4 review |
 | Remove ODBC installer from `main.py` startup | OS-level package install in app code; should be a startup script or custom image | GPT-5.4 review |
@@ -900,6 +909,7 @@ The Architecture Optimization Epic (OTA-535) tracks the active drift items ident
 
 | Date | Ticket | Change |
 |---|---|---|
+| 2026-05-06 UTC | OTA-546 | § The Strategy System: consolidated `STRATEGIES` and `STRATEGY_DEFINITIONS` dicts (OTA-513 absorbed); deleted `STRATEGY_DEFINITIONS`. Documented Option B persistence model (frontend `.config.js` + localStorage; no backend table). Aligned all DTE ranges to canonical `business-rules.md` values (SP 14-45, WG 14-21, TR 14-60, LT 7-60). Dropped `strategy_configs` table via Alembic migration. OTA-513 and OTA-514 absorbed. |
 | 2026-05-06 UTC | OTA-539 | § Provider Lifecycle State Machine: documented implemented routing enforcement (`ProviderRegistry._check_provider_state()`). Renamed `ProviderFactory` → `ProviderRegistry` throughout codebase. Removed `AccountProvider` and `TradingProvider` speculative ABCs from `app/providers/base.py`. Removed completed items from Should Fix table. OTA-525 absorbed. |
 | 2026-05-06 UTC | OTA-541 | Route File Consolidation: renamed `agent_routes.py` → `trade_evaluation_routes.py`, `agents_routes.py` → `position_monitor_routes.py`. Deleted `watchlist_routes.py` (frontend migrated to named watchlists API) and `validation_routes.py` (vestigial, no auth, no callers). Consolidated CORS from hardcoded list in `main.py` to `settings.cors_origins` in `config.py`. Added Route File Naming Convention subsection to § 3. Marked 3 Cleanup Roadmap items as Done. |
 | 2026-05-06 UTC | OTA-543 | Updated § Resource Shutdown Discipline: documented implemented teardown order (scheduler wait=True, token task cancel with 5s timeout, AI adapter close, provider cache clear, DB engine dispose). Marked FoundryEvalAdapter close, scheduler wait=True, and skip_auth audit as Done in Cleanup Roadmap. Marked auth route retirements as Done (OTA-538). Added `tests/lifespan/test_shutdown.py` reference. |

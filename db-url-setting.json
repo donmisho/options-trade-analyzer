@@ -1,7 +1,0 @@
-[
-  {
-    "name": "DATABASE_URL",
-    "value": "mssql+pyodbc://options-analyzer-sql.database.windows.net:1433/options-analyzer-db?driver=ODBC+Driver+18+for+SQL+Server&Encrypt=yes&TrustServerCertificate=no&authentication=ActiveDirectoryMsi",
-    "slotSetting": false
-  }
-]

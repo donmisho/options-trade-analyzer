@@ -17,8 +17,8 @@ const config = {
   scorecardStrategy: true,
   enabled: true,
   trade_structure: 'long_option',
-  dte_min: 1,
-  dte_max: 8,
+  dte_min: 7,
+  dte_max: 60,
 
   // ── Scoring weights ────────────────────────────────────────────────────
   scoring_weights: {
@@ -30,7 +30,7 @@ const config = {
 
   // ── ConfigDrawer schema ────────────────────────────────────────────────
   configSchema: [
-    { key: 'dte_max',             label: 'Max DTE',            type: 'slider', min: 1,  max: 14,  default: 7,   step: 1,   unit: 'days' },
+    { key: 'dte_max',             label: 'Max DTE',            type: 'slider', min: 14, max: 90,  default: 60,  step: 1,   unit: 'days' },
     { key: 'delta_max',           label: 'Max Delta',          type: 'slider', min: 0.05, max: 0.25, default: 0.15, step: 0.01, unit: '\u0394' },
     { key: 'min_payout_ratio',    label: 'Min Payout Ratio',   type: 'slider', min: 3,  max: 15,  default: 5,   step: 0.5, unit: ':1' },
     { key: 'max_cost_per_contract', label: 'Max Cost/Contract', type: 'number', min: 10, max: 500, default: 100, step: 10,  unit: '$' },
