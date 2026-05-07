@@ -10,11 +10,11 @@
  * WHY localStorage for favorites?
  * Favorites need to survive page refreshes and browser restarts.
  * localStorage is the simplest persistence layer for client-side data.
- * Watchlist is persisted in Azure SQL via /api/v1/watchlist.
+ * Watchlist is persisted in Azure SQL via named watchlists API (/api/v1/watchlists).
  */
 
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import { getQuotes, getWatchlist, addWatchlistSymbol, removeWatchlistSymbol, getFavorites, addFavoriteApi, removeFavoriteApi, getPositionSymbols } from '../api/client';
+import { getQuotes, getWatchlists, getWatchlistSymbols, addSymbolToWatchlist, removeSymbolFromWatchlist, getFavorites, addFavoriteApi, removeFavoriteApi, getPositionSymbols } from '../api/client';
 import { useToast } from '../components/Toast';
 
 const AppContext = createContext(null);
@@ -79,8 +79,10 @@ export function AppProvider({ children }) {
   // Session-only: do NOT read from localStorage on init (UI-DECISIONS.md / OTA-327)
   const [activeSymbol, setActiveSymbol] = useState(null);
 
-  // Dynamic watchlist — persisted in Azure SQL via /api/v1/watchlist
+  // Dynamic watchlist — persisted in Azure SQL via named watchlists API
   const [watchlist, setWatchlist] = useState([]);
+  // Default watchlist ID — resolved on mount, used for add/remove mutations
+  const defaultWatchlistIdRef = useRef(null);
 
   // Active position symbols — [{ symbol, position_count }] for SymbolSearch Tier 1 highlighting
   const [positionSymbols, setPositionSymbols] = useState([]);
@@ -149,24 +151,34 @@ export function AppProvider({ children }) {
     // Don't clear trades/context on close — allow re-open to same state
   }
 
-  // Load watchlist from DB on mount; fall back to STARTER_WATCHLIST if empty or API fails.
-  // fetchPrices is called explicitly here (and only here) for the initial price load —
-  // NOT via a [fetchPrices] useEffect dependency, which would re-fire on every mutation.
+  // Load watchlist from DB on mount via named watchlists API.
+  // Resolves the default watchlist, stores its ID for add/remove mutations.
+  // Falls back to STARTER_WATCHLIST if empty or API fails.
   useEffect(() => {
-    getWatchlist()
-      .then(data => {
-        const symbols = data?.symbols ?? (Array.isArray(data) ? data : []);
+    (async () => {
+      try {
+        const data = await getWatchlists();
+        const lists = data?.watchlists ?? [];
+        const defaultList = lists.find(w => w.is_default) || lists[0];
+        if (!defaultList) {
+          setWatchlist(STARTER_WATCHLIST);
+          fetchPrices(STARTER_WATCHLIST.map(w => w.symbol));
+          return;
+        }
+        defaultWatchlistIdRef.current = defaultList.id;
+        const entries = await getWatchlistSymbols(defaultList.id);
+        const symbols = (entries || []).map(e => (typeof e === 'string' ? e : e.symbol)).filter(Boolean);
         const items = symbols.length > 0
           ? symbols.map(s => ({ symbol: s, name: SYMBOL_NAMES[s] || '' }))
           : STARTER_WATCHLIST;
         setWatchlist(items);
         fetchPrices(items.map(w => w.symbol));
-      })
-      .catch(err => {
-        console.error('[AppContext] getWatchlist failed, using starter:', err);
+      } catch (err) {
+        console.error('[AppContext] getWatchlists failed, using starter:', err);
         setWatchlist(STARTER_WATCHLIST);
         fetchPrices(STARTER_WATCHLIST.map(w => w.symbol));
-      });
+      }
+    })();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Live prices keyed by symbol: { SPY: { price: 598.12, change: -2.31, change_pct: -0.38 }, ... }
@@ -240,8 +252,10 @@ export function AppProvider({ children }) {
       const filtered = prev.filter(w => w.symbol !== sym);
       return [{ symbol: sym, name: SYMBOL_NAMES[sym] || '' }, ...filtered];
     });
-    // Persist to DB (best-effort)
-    addWatchlistSymbol(sym).catch(() => {});
+    // Persist to DB via named watchlist API (best-effort)
+    if (defaultWatchlistIdRef.current) {
+      addSymbolToWatchlist(defaultWatchlistIdRef.current, sym).catch(() => {});
+    }
     // Fetch price for the new symbol if we don't have it yet
     if (!prices[sym]) {
       getQuotes([sym]).then(quotes => {
@@ -259,7 +273,9 @@ export function AppProvider({ children }) {
   const removeFromWatchlist = useCallback((symbol) => {
     const sym = symbol.toUpperCase();
     setWatchlist(prev => prev.filter(w => w.symbol !== sym));
-    removeWatchlistSymbol(sym).catch(() => {});
+    if (defaultWatchlistIdRef.current) {
+      removeSymbolFromWatchlist(defaultWatchlistIdRef.current, sym).catch(() => {});
+    }
   }, []);
 
   // Favorites — loaded from backend on mount, localStorage as fallback

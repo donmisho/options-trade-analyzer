@@ -188,7 +188,7 @@ Primary key types are inconsistent across tables (`User.id` is `String(36)`, `Tr
 
 Every CRUD endpoint that takes a resource ID **must** filter by `user_id`. This is non-negotiable, even in the current single-user development phase, because the system is designed for multi-user from day one and a missing filter is a data isolation bug regardless of how many users exist today.
 
-The Opus-4.7 review caught one violation: `DELETE /recommendations/{trade_key}` in `agent_routes.py` does not filter by `user_id`, meaning any authenticated user who knows another user's trade_key format could delete that recommendation. This is fixed under the Cleanup Roadmap and added to the contract test suite to prevent regression.
+The Opus-4.7 review caught one violation: `DELETE /recommendations/{trade_key}` in `trade_evaluation_routes.py` (formerly `agent_routes.py`) does not filter by `user_id`, meaning any authenticated user who knows another user's trade_key format could delete that recommendation. This is fixed under the Cleanup Roadmap and added to the contract test suite to prevent regression.
 
 The invariant is enforced by:
 
@@ -245,7 +245,7 @@ class ContextSource(ABC):
     def ttl_seconds(self) -> int
 ```
 
-The dispatch happens through `ProviderFactory` (`app/providers/factory.py`), which is currently misnamed — it's a singleton container with caching, not a factory. It is scheduled for rename to `ProviderRegistry` in the Cleanup Roadmap. The existing `AccountProvider` and `TradingProvider` ABCs in `base.py` have zero implementations; they were placeholders for Phase 5 (live trading) work and are scheduled for deletion. When Phase 5 begins, a `BrokerageProvider` ABC will be added at that time with a clean shape informed by the actual brokerage requirements, not the current speculative shape.
+The dispatch happens through `ProviderRegistry` (`app/providers/factory.py`), a singleton container with caching that enforces lifecycle state routing rules. Only `MarketDataProvider` and `ContextSource` ABCs remain in `base.py`; speculative ABCs were removed via OTA-539. When Phase 5 (live trading) begins, a `BrokerageProvider` ABC will be added with a shape informed by actual requirements.
 
 Adding a new provider requires:
 
@@ -258,21 +258,28 @@ Engines, routes, and the frontend require zero changes. The `_get_provider()` he
 
 ## Provider Lifecycle State Machine
 
-Every provider has one of four lifecycle states. The state machine is formalized under OTA-525.
+Every provider has one of four lifecycle states. Implemented via OTA-539 (absorbing OTA-525).
+
+The `PROVIDER_REGISTRY` dict in `app/providers/factory.py` encodes each provider's state. The `ProviderRegistry` class (renamed from `ProviderFactory` via OTA-539) enforces routing rules based on state:
+
+- `active` → routable, normal selection
+- `inactive` → routable only when explicitly requested via `settings.default_market_data_provider`
+- `deprecated` → routable with warning logged on each invocation; entry includes `end_date` and `migration_target`
+- `removed` → not routable; raises `ValueError` pointing at migration_target. Entry dropped from registry.
 
 | State | Meaning | Encoding |
 |---|---|---|
-| **Active** | Registered in factory, live credentials in Key Vault, selectable at runtime, used by at least one code path | `PROVIDER_REGISTRY` entry with `state: "active"` |
-| **Inactive** | Registered in factory, credentials may or may not exist in Key Vault, no live code path routes through it. Reactivation is a config flag flip, not a code change. | `PROVIDER_REGISTRY` entry with `state: "inactive"` |
+| **Active** | Registered in registry, live credentials in Key Vault, selectable at runtime, used by at least one code path | `PROVIDER_REGISTRY` entry with `state: "active"` |
+| **Inactive** | Registered in registry, credentials may or may not exist in Key Vault, no live code path routes through it. Reactivation is a config flag flip, not a code change. | `PROVIDER_REGISTRY` entry with `state: "inactive"` |
 | **Deprecated** | In codebase but flagged not for new use, with a documented end-date and migration plan for any callers | `PROVIDER_REGISTRY` entry with `state: "deprecated"` plus `end_date` and `migration_target` |
-| **Removed** | Gone from codebase entirely, Key Vault credentials cleaned up | Not in `PROVIDER_REGISTRY` at all; no adapter file, no factory entry |
+| **Removed** | Gone from codebase entirely, Key Vault credentials cleaned up | Not in `PROVIDER_REGISTRY` at all; no adapter file, no registry entry |
 
 **Legal transitions:**
 
-- *Active → Inactive* (deactivation): keep code, mark factory entry `inactive`, optionally retain credentials. Single Story per deactivation.
+- *Active → Inactive* (deactivation): keep code, mark registry entry `inactive`, optionally retain credentials. Single Story per deactivation.
 - *Inactive → Active* (reactivation): flip flag, verify credentials, smoke test. Single Story per reactivation.
 - *Active or Inactive → Deprecated*: add end_date, document migration_target, communicate to users. Story.
-- *Deprecated → Removed*: full code cleanup (adapter file, factory entry, config schema, env example, Key Vault credentials). Story (this is what OTA-524 did to Tradier).
+- *Deprecated → Removed*: full code cleanup (adapter file, registry entry, config schema, env example, Key Vault credentials). Story (this is what OTA-524 did to Tradier).
 - *Removed → anything*: not a transition. Returning a removed provider requires a fresh adapter implementation as a new Story.
 
 **Current state (as of this document's last update):**
@@ -283,7 +290,9 @@ Every provider has one of four lifecycle states. The state machine is formalized
 - **Anthropic Direct** — Active for local dev fallback only. Production traffic routes through Foundry.
 - **Azure AI Foundry (Claude Sonnet 4.6)** — Active. Production AI provider.
 
-The lifecycle state field is read from code at runtime. The frontend's data-source-picker conceptually already knows about state (the previous Tradier entry was labeled `active: False, "Market Data (Deprecated)"`); the formalized state field replaces that ad-hoc encoding.
+The lifecycle state field is enforced at runtime by `ProviderRegistry._check_provider_state()`. No frontend data-source picker exists today; when one is built, it should read `state` from the `/api/v1/config/providers` endpoint (which calls `registry.list_providers()`).
+
+**Speculative ABCs removed (OTA-539):** `AccountProvider` and `TradingProvider` abstract classes were deleted from `app/providers/base.py`. They had zero implementations. When Phase 5 (live trading) begins, the appropriate ABCs will be designed from actual requirements.
 
 ## External Credential Management
 
@@ -299,7 +308,7 @@ Each provider adapter owns its credential lifecycle. The calling code calls `pro
 
 `SecretsManager` (`app/core/secrets.py`) wraps Azure Key Vault with a `.env` fallback for local development. In Azure environments the App Service uses managed identity to read from Key Vault; the `.env` fallback is never used in production.
 
-The JWT signing key (used by the legacy `auth_routes.py` local-password flow that is scheduled for removal) is auto-generated on first run and written back to Key Vault if absent. This pattern has a known failure mode: if Key Vault is unreachable on first startup, a new key is generated in memory but not persisted, invalidating all sessions on next restart. Cleanup item: enforce that the key must exist in Key Vault before app startup proceeds.
+The JWT signing key (used by the legacy local-password flow (removed in OTA-538)) is auto-generated on first run and written back to Key Vault if absent. This pattern has a known failure mode: if Key Vault is unreachable on first startup, a new key is generated in memory but not persisted, invalidating all sessions on next restart. Cleanup item: enforce that the key must exist in Key Vault before app startup proceeds.
 
 ## Schwab Integration
 
@@ -327,22 +336,22 @@ Routes live under `app/api/`. Current route file inventory:
 | `market_routes.py` | `/market` | Quotes, option chains, symbol search, symbol reference lookup. | Active |
 | `analysis_routes.py` | `/analyze` | Vertical, long-call, directional analysis endpoints. | Active |
 | `evaluation_routes.py` | `/evaluate` | Structured Claude trade evaluation (`/evaluate/structured`, `/evaluate/follow-up`). The primary AI evaluation path. | Active |
-| `agent_routes.py` | `/agent` | Trade agent triage / deep-dive / followup pipeline. Uses the SDK-based AI stack (legacy). Scheduled for rename to `trade_evaluation_routes.py` and migration to the unified AI adapter. | Active but drift |
-| `agents_routes.py` | `/agents` | Position monitor scheduled-job status and on-demand runs. Scheduled for rename to `position_monitor_routes.py` to eliminate the singular/plural confusion. | Active |
+| `trade_evaluation_routes.py` | `/agent` | Trade agent triage / deep-dive / followup pipeline + recommendations CRUD. Renamed from `agent_routes.py` (OTA-541). | Active |
+| `position_monitor_routes.py` | `/agents` | Position monitor scheduled-job status and on-demand runs. Renamed from `agents_routes.py` (OTA-541). | Active |
 | `position_routes.py` | `/positions` | Position CRUD, follow, take, close. | Active |
 | `insight_routes.py` | `/insights` | Insight Engine output for the dashboard. | Active |
 | `dashboard_routes.py` | `/dashboard` | Dashboard layout, widget config, media SAS URL generation. | Active |
-| `watchlist_routes.py` | `/watchlist` | Flat watchlist CRUD. | Active — overlaps with named_watchlist_routes; consolidation pending |
-| `named_watchlist_routes.py` | `/watchlists` | Multi-list watchlist with scan sources. | Active — overlaps with watchlist_routes; consolidation pending |
+| `named_watchlist_routes.py` | `/watchlists` | Multi-list watchlist with scan sources. Sole watchlist route file after OTA-541 consolidation. | Active |
 | `config_routes.py` | `/config` | User config GET/PUT. | Active |
 | `service_routes.py` | `/services` | Service registry endpoints (data source picker). | Active |
 | `health_routes.py` | `/health` | Liveness, readiness, dependency checks. | Active |
 | `user_routes.py` | `/users` | User profile endpoints. | Active |
 | `admin_routes.py` | `/admin` | Admin operations. | Active |
-| `validation_routes.py` | `/validation` | Validation endpoints (purpose needs verification). | Active — needs review |
-| `test_routes.py` | `/test` | Test endpoints. Should not exist in production. | Cleanup item |
+| `test_routes.py` | `/test` | Dev-only MSFT anchor regression. Gated: `app_env != "production"`. | Active (dev-only) |
 
-The route layer is fragmented relative to its size. Consolidating overlapping route files (the two watchlist files, the two agent files) is in the Cleanup Roadmap.
+### Route File Naming Convention (OTA-541)
+
+Route files are named by **domain function**, not by mechanism or agent name. One router per file, single responsibility. Dev-only routes are gated on `app_env != "production"`. Legacy files are deleted outright when no callers remain; no deprecated stubs.
 
 ---
 
@@ -403,7 +412,7 @@ The contract is enforced by:
 - The ABC itself (Python's `abc.abstractmethod`).
 - A planned contract test that asserts `chat()` returns the documented dict shape for each adapter, run before any adapter swap.
 
-Why the contract matters: today, swapping `agent_routes.py` from the SDK adapter to the httpx adapter (the cleanup goal) requires reading both adapters carefully because the convention is informal. With a real ABC, the swap is a one-line import change with confidence.
+Why the contract matters: today, swapping `trade_evaluation_routes.py` from the SDK adapter to the httpx adapter (the cleanup goal) requires reading both adapters carefully because the convention is informal. With a real ABC, the swap is a one-line import change with confidence.
 
 ## Claude Structured Evaluation
 
@@ -419,7 +428,7 @@ The primary AI evaluation flow is:
 
 The `TradeVerdict` schema (`app/ai/schemas.py`) defines the structured output shape. This is the contract between Claude and the frontend; changes to the verdict shape require coordinated changes to the prompt schema and the frontend renderer.
 
-For agent-style multi-turn flows (triage, deep-dive, follow-up), the flow uses `agent_routes.py` and the `claude-trade-agent` SKILL.md sections. After the AI stack merge, both flows use the same `FoundryEvalAdapter`; the difference is the SKILL.md section loaded.
+For agent-style multi-turn flows (triage, deep-dive, follow-up), the flow uses `trade_evaluation_routes.py` and the `claude-trade-agent` SKILL.md sections. After the AI stack merge, both flows use the same `FoundryEvalAdapter`; the difference is the SKILL.md section loaded.
 
 ## Agent Inventory and Agent CLAUDE.md Convention
 
@@ -633,7 +642,7 @@ app/
 │   └── migrations.py             # Alembic configuration entry
 ├── providers/
 │   ├── base.py                   # MarketDataProvider, ContextSource ABCs
-│   ├── factory.py                # ProviderRegistry (currently misnamed ProviderFactory; rename pending)
+│   ├── factory.py                # ProviderRegistry class + PROVIDER_REGISTRY dict
 │   ├── schwab.py                 # SchwabMarketData adapter
 │   ├── schwab_token_manager.py   # Schwab OAuth token lifecycle
 │   ├── schwab_context_source.py  # Schwab context source for the Symbol Context Store
@@ -853,19 +862,16 @@ The Architecture Optimization Epic (OTA-535) tracks the active drift items ident
 
 | Item | Why | Source |
 |---|---|---|
-| Merge AI stacks: delete `app/providers/ai/` directory after migrating `agent_routes.py` to use `FoundryEvalAdapter` | Two complete AI invocation stacks doing overlapping jobs | Both reviews |
+| Merge AI stacks: delete `app/providers/ai/` directory after migrating `trade_evaluation_routes.py` to use `FoundryEvalAdapter` | Two complete AI invocation stacks doing overlapping jobs | Both reviews |
 | Migrate `TRADE_EVALUATION_SYSTEM_PROMPT` and `FOLLOW_UP_SYSTEM_PROMPT` to `app/skills/trade-evaluation/SKILL.md` | Closes the Pattern 2 violation in the primary evaluation path | Both reviews |
 | ~~Retire `entra_auth_routes.py` (MSAL bridge)~~ | ~~Returns JWT to browser, violating Pattern 6~~ | ~~Both reviews~~ — **Done OTA-538** |
 | ~~Retire `auth_routes.py` (legacy local-password flow)~~ | ~~Three auth flows registered simultaneously~~ | ~~Opus-4.7 review~~ — **Done OTA-538** |
-| Rename `agent_routes.py` → `trade_evaluation_routes.py`, `agents_routes.py` → `position_monitor_routes.py` | Daily cognitive trap from singular/plural file naming | Both reviews |
-| Rename `ProviderFactory` → `ProviderRegistry` | Misnomer; actual behavior is a singleton container with caching | Opus-4.7 review |
-| Wire OTA-525 lifecycle states into `PROVIDER_REGISTRY` and `_SERVICE_REGISTRY` schemas | Lifecycle states defined but not encoded in code today | OTA-525 |
+| ~~Rename `agent_routes.py` → `trade_evaluation_routes.py`, `agents_routes.py` → `position_monitor_routes.py`~~ | ~~Daily cognitive trap from singular/plural file naming~~ | ~~Both reviews~~ — **Done OTA-541** |
 | Formalize `AIAdapter` ABC in `app/ai/base.py` | Adapter contract is convention-only today | Opus-4.7 review |
-| Delete `AccountProvider` and `TradingProvider` ABCs from `providers/base.py` | Speculative; zero implementations | Both reviews |
-| Resolve `watchlist_routes.py` vs `named_watchlist_routes.py` overlap | Two routes with overlapping semantics for the same user | Opus-4.7 review |
+| ~~Resolve `watchlist_routes.py` vs `named_watchlist_routes.py` overlap~~ | ~~Two routes with overlapping semantics for the same user~~ | ~~Opus-4.7 review~~ — **Done OTA-541** |
 | Consolidate `STRATEGIES` and `STRATEGY_DEFINITIONS` dicts in `strategy_definitions.py` | Two dicts encoding the same DTE ranges with disagreeing values | OTA-513 |
 | Decide and implement strategy config persistence model (localStorage vs `strategy_configs` table) | Table exists with no API routes, zero rows | OTA-514 |
-| Wire `cors_origins` config setting to `main.py` (currently hardcoded) | Configuration drift | GPT-5.4 review |
+| ~~Wire `cors_origins` config setting to `main.py` (currently hardcoded)~~ | ~~Configuration drift~~ | ~~GPT-5.4 review~~ — **Done OTA-541** |
 | Replace `datetime.utcnow()` with `datetime.now(timezone.utc)` repo-wide | Deprecated in Python 3.12+ | GPT-5.4 review |
 | Remove ODBC installer from `main.py` startup | OS-level package install in app code; should be a startup script or custom image | GPT-5.4 review |
 | Delete dead frontend files: `_archive/`, `Header.jsx`, `Header.css`, `msalConfig.js`, orphaned CSS files, `_old.png`, `react.svg` | Dead weight, surfaces in greps | Both reviews |
@@ -894,6 +900,8 @@ The Architecture Optimization Epic (OTA-535) tracks the active drift items ident
 
 | Date | Ticket | Change |
 |---|---|---|
+| 2026-05-06 UTC | OTA-539 | § Provider Lifecycle State Machine: documented implemented routing enforcement (`ProviderRegistry._check_provider_state()`). Renamed `ProviderFactory` → `ProviderRegistry` throughout codebase. Removed `AccountProvider` and `TradingProvider` speculative ABCs from `app/providers/base.py`. Removed completed items from Should Fix table. OTA-525 absorbed. |
+| 2026-05-06 UTC | OTA-541 | Route File Consolidation: renamed `agent_routes.py` → `trade_evaluation_routes.py`, `agents_routes.py` → `position_monitor_routes.py`. Deleted `watchlist_routes.py` (frontend migrated to named watchlists API) and `validation_routes.py` (vestigial, no auth, no callers). Consolidated CORS from hardcoded list in `main.py` to `settings.cors_origins` in `config.py`. Added Route File Naming Convention subsection to § 3. Marked 3 Cleanup Roadmap items as Done. |
 | 2026-05-06 UTC | OTA-543 | Updated § Resource Shutdown Discipline: documented implemented teardown order (scheduler wait=True, token task cancel with 5s timeout, AI adapter close, provider cache clear, DB engine dispose). Marked FoundryEvalAdapter close, scheduler wait=True, and skip_auth audit as Done in Cleanup Roadmap. Marked auth route retirements as Done (OTA-538). Added `tests/lifespan/test_shutdown.py` reference. |
 | 2026-05-06 UTC | OTA-601 | Added § Deployment Architecture subsection "Cold-start and runtime OS dependencies" recording the OTA-553 Option B decision: ODBC Driver 18 install in `app/main.py` lifespan is the intentional pattern. Documents the ~90s cold-start cost mitigated by Always On, the deferred Option A alternative (custom container image), and the explicit prohibition against retrying the user-supplied `startup.sh` approach (OTA-545 Phase 2, reverted 2026-05-02). |
 | 2026-05-06 03:00 UTC | OTA-554 | Corrected Pattern 7 and Deployment Architecture to reflect actual request routing: Cloudflare proxies custom domains (`oa-dev.tmtctech.ai`, `oa.tmtctech.ai`) directly to the App Service — the SWA is not in the request path. Added "Request Routing — Cloudflare to App Service Direct" subsection with verification commands and health endpoint inventory. Fixed SWA SKU (was "Standard", actually "Free") and URL in Azure Resources Summary. Marked SWA as orphan candidate for cleanup. Removed incorrect claims that the `static/` directory is absent from the deployment artifact and that the SPA fallback in `main.py` is dead code — the build workflow bundles the SPA into `static/` and the App Service actively serves it. |

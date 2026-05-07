@@ -24,7 +24,7 @@ from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
 from app.models.database import Base, TradeRecommendation, NamedWatchlist, WatchlistEntry, \
-    UserWatchlist, UserFavorite, Position
+    UserFavorite, Position
 
 USER_A_ID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 USER_B_ID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
@@ -55,9 +55,8 @@ def _build_app(user_id: str) -> FastAPI:
     from app.auth.dependencies import require_read, require_write, get_current_user
     from app.models.session import get_db
 
-    from app.api.agent_routes import router as agent_router
+    from app.api.trade_evaluation_routes import router as agent_router
     from app.api.named_watchlist_routes import router as named_watchlist_router
-    from app.api.watchlist_routes import router as watchlist_router
     from app.api.user_routes import router as user_router
     from app.api.position_routes import router as position_router
     from app.api.dashboard_routes import router as dashboard_router
@@ -67,7 +66,6 @@ def _build_app(user_id: str) -> FastAPI:
     app = FastAPI()
     app.include_router(agent_router, prefix="/api/v1")
     app.include_router(named_watchlist_router, prefix="/api/v1")
-    app.include_router(watchlist_router, prefix="/api/v1")
     app.include_router(user_router, prefix="/api/v1")
     app.include_router(position_router, prefix="/api/v1")
     app.include_router(dashboard_router, prefix="/api/v1")
@@ -241,27 +239,6 @@ class TestNamedWatchlistIsolation:
         wl_id = await self._seed_watchlist()
         resp = await client_b.delete(f"/api/v1/watchlists/{wl_id}/symbols/TSLA")
         assert resp.status_code == 404
-
-
-# ── Legacy Watchlist (watchlist_routes) ──────────────────────────────────────
-
-class TestLegacyWatchlistIsolation:
-
-    async def _seed_watchlist(self):
-        async with _test_session_factory() as db:
-            db.add(UserWatchlist(user_id=USER_A_ID, symbol="MSFT", position=0))
-            await db.commit()
-
-    @pytest.mark.asyncio
-    async def test_delete_symbol_cross_user_returns_404(self, client_a, client_b):
-        await self._seed_watchlist()
-        resp = await client_b.delete("/api/v1/watchlist/MSFT")
-        assert resp.status_code == 404
-
-        # User A's symbol is still there
-        resp = await client_a.get("/api/v1/watchlist")
-        assert resp.status_code == 200
-        assert "MSFT" in resp.text
 
 
 # ── Favorites (user_routes) ─────────────────────────────────────────────────

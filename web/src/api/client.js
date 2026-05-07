@@ -318,25 +318,8 @@ export async function updateUserConfig(configData) {
   });
 }
 // ═══════════════════════════════════════════════════════════════════
-// USER PREFERENCES — Watchlist & Favorites
+// USER PREFERENCES — Favorites
 // ═══════════════════════════════════════════════════════════════════
-
-export async function getWatchlist() {
-  return apiFetch("/watchlist");
-}
-
-export async function addWatchlistSymbol(symbol) {
-  return apiFetch("/watchlist", {
-    method: "POST",
-    body: JSON.stringify({ symbol }),
-  });
-}
-
-export async function removeWatchlistSymbol(symbol) {
-  return apiFetch(`/watchlist/${encodeURIComponent(symbol)}`, {
-    method: "DELETE",
-  });
-}
 
 export async function getFavorites() {
   return apiFetch("/user/favorites");

@@ -4,7 +4,7 @@ Options Analyzer API — Main Application
 This is the entry point. It wires together:
   - Security: SecretsManager → AuthService → middleware
   - Database: SQLAlchemy models → async sessions
-  - Providers: ProviderFactory → Tradier/Schwab adapters
+  - Providers: ProviderRegistry → Schwab adapter
   - Routes: Auth, Market Data, Config, (Analysis, Portfolio, Trading later)
   
 Run locally:
@@ -33,7 +33,7 @@ from app.core.config import settings
 from app.core.secrets import SecretsManager
 from app.models.session import init_db
 from app.auth.dependencies import init_auth
-from app.providers.factory import ProviderFactory
+from app.providers.factory import ProviderRegistry
 from app.api.market_routes import router as market_router, init_market_routes
 from app.api.config_routes import router as config_router
 from app.api.analysis_routes import router as analysis_router, init_analysis_routes
@@ -41,18 +41,16 @@ from app.api.schwab_auth_routes import router as schwab_auth_router, init_schwab
 from app.providers.schwab_token_manager import SchwabTokenManager
 from app.api.evaluation_routes import router as evaluation_router, init_evaluation_routes
 from app.api.user_routes import router as user_router
-from app.api.watchlist_routes import router as watchlist_router
 from app.api.named_watchlist_routes import router as named_watchlist_router, init_named_watchlist_routes
 from app.api.identity_routes import router as identity_router, init_identity_routes
 from app.auth.session_manager import SessionManager
 from app.auth.client_assertion import ClientAssertionBuilder
 from app.auth.dependencies import init_session
-from app.api.agent_routes import router as agent_router, init_agent_routes
+from app.api.trade_evaluation_routes import router as agent_router, init_agent_routes
 from app.api.admin_routes import router as admin_router
 from app.api.position_routes import router as position_router, init_position_routes
-from app.api.agents_routes import router as agents_router, init_agents_routes, update_next_run_at
+from app.api.position_monitor_routes import router as agents_router, init_agents_routes, update_next_run_at
 from app.api.insight_routes import router as insight_router
-from app.api.validation_routes import router as validation_router
 from app.api.dashboard_routes import router as dashboard_router
 from app.api.health_routes import router as health_router, init_health_routes
 from app.api.service_routes import router as service_router, init_service_routes
@@ -228,7 +226,7 @@ async def lifespan(app: FastAPI):
     logger.info("BFF: SessionManager initialized")
 
     # 4. Initialize provider factory
-    provider_factory = ProviderFactory(secrets_manager)
+    provider_factory = ProviderRegistry(secrets_manager)
     init_market_routes(provider_factory)
     init_analysis_routes(provider_factory)
     init_position_routes(provider_factory)
@@ -244,7 +242,7 @@ async def lifespan(app: FastAPI):
     token_refresh_task = asyncio.create_task(schwab_token_manager.start_background_refresh())
     logger.info("Schwab OAuth token manager initialized (background refresh started)")
 
-    logger.info(f"Provider factory initialized. Available: {provider_factory.list_providers()}")
+    logger.info(f"Provider registry initialized. Available: {provider_factory.list_providers()}")
     _log_startup_timing("providers_initialized", _app_startup_start)
 
     # 6. Initialize unified AI adapter (single adapter for both agent + eval routes)
@@ -405,13 +403,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "https://localhost:5173",
-        "https://127.0.0.1:5173",
-        "https://oa.tmtctech.ai",
-        "https://oa-dev.tmtctech.ai",
-    ],
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -433,14 +425,12 @@ app.include_router(analysis_router, prefix="/api/v1")
 app.include_router(schwab_auth_router, prefix="/api/v1")
 app.include_router(evaluation_router, prefix="/api/v1")
 app.include_router(user_router, prefix="/api/v1")
-app.include_router(watchlist_router, prefix="/api/v1")
 app.include_router(named_watchlist_router, prefix="/api/v1")
 app.include_router(agent_router, prefix="/api/v1")
 app.include_router(admin_router, prefix="/api/v1")
 app.include_router(position_router, prefix="/api/v1")
 app.include_router(agents_router, prefix="/api/v1")
 app.include_router(insight_router, prefix="/api/v1")
-app.include_router(validation_router, prefix="/api/v1")
 app.include_router(dashboard_router, prefix="/api/v1")
 app.include_router(service_router, prefix="/api/v1")
 app.include_router(health_router, prefix="/api/v1")

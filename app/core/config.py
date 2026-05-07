@@ -62,7 +62,14 @@ class Settings(BaseSettings):
     login_lockout_minutes: int = 15
 
     # --- CORS ---
-    cors_origins: list[str] = ["http://localhost:3000", "http://localhost:5173"]
+    # Dev origins + production custom domains. Override via CORS_ORIGINS env var in App Service.
+    cors_origins: list[str] = [
+        "http://localhost:5173",
+        "https://localhost:5173",
+        "https://127.0.0.1:5173",
+        "https://oa.tmtctech.ai",
+        "https://oa-dev.tmtctech.ai",
+    ]
 
     # --- Entra ID (Azure AD) Authentication ---
     entra_tenant_id: str = ""
