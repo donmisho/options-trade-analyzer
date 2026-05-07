@@ -34,7 +34,6 @@ from app.core.secrets import SecretsManager
 from app.models.session import init_db
 from app.auth.dependencies import init_auth
 from app.providers.factory import ProviderFactory
-from app.api.auth_routes import router as auth_router
 from app.api.market_routes import router as market_router, init_market_routes
 from app.api.config_routes import router as config_router
 from app.api.analysis_routes import router as analysis_router, init_analysis_routes
@@ -44,7 +43,6 @@ from app.api.evaluation_routes import router as evaluation_router, init_evaluati
 from app.api.user_routes import router as user_router
 from app.api.watchlist_routes import router as watchlist_router
 from app.api.named_watchlist_routes import router as named_watchlist_router, init_named_watchlist_routes
-from app.api.entra_auth_routes import router as entra_auth_router
 from app.api.identity_routes import router as identity_router, init_identity_routes
 from app.auth.session_manager import SessionManager
 from app.auth.client_assertion import ClientAssertionBuilder
@@ -58,14 +56,13 @@ from app.api.validation_routes import router as validation_router
 from app.api.dashboard_routes import router as dashboard_router
 from app.api.health_routes import router as health_router, init_health_routes
 from app.api.service_routes import router as service_router, init_service_routes
-from app.providers.ai import AnthropicAdapter, FoundryAdapter
+from app.ai import AnthropicAdapter, FoundryEvalAdapter
 from app.api.changelog_routes import router as changelog_router, init_changelog_routes
 from app.middleware.csrf import CSRFMiddleware
 
 # Dev-only test routes — imported and registered only outside production
 if settings.app_env != "production":
     from app.api.test_routes import router as test_router, init_test_routes as _init_test_routes  # noqa: E402
-from app.ai.foundry_adapter import FoundryEvalAdapter
 from app.agents.telemetry import init_agent_telemetry
 
 
@@ -168,6 +165,13 @@ async def lifespan(app: FastAPI):
     _log_startup_timing("app_start", _app_startup_start)
     _log_startup_timing("routers_registered", _app_startup_start)
 
+    # 0a. Fail-fast: skip_auth must never be True in production (OTA-538)
+    if settings.skip_auth and settings.app_env == "production":
+        raise RuntimeError(
+            "FATAL: skip_auth=True is not permitted in production. "
+            "Disable skip_auth or set APP_ENV to a non-production value."
+        )
+
     # 0. Install ODBC Driver 18 if on Azure App Service Linux (needed for Azure SQL)
     _install_odbc_if_needed()
 
@@ -178,6 +182,22 @@ async def lifespan(app: FastAPI):
 
     # 2. Initialize secrets manager (Key Vault or .env fallback)
     secrets_manager = SecretsManager(vault_url=settings.azure_keyvault_url)
+
+    # 2a. Fail-loud: required secrets must exist in production (OTA-538)
+    if settings.app_env == "production":
+        _required_secrets = [
+            "jwt-signing-key",
+            "session-encryption-key",
+            "schwab-app-key",
+            "schwab-app-secret",
+        ]
+        missing = [s for s in _required_secrets if not secrets_manager.get(s)]
+        if missing:
+            raise RuntimeError(
+                f"FATAL: Required secrets missing from Key Vault: {', '.join(missing)}. "
+                "The app cannot start safely without these secrets."
+            )
+        logger.info(f"Required secrets validated: {len(_required_secrets)} OK")
 
     # 2b. Initialize changelog routes (deploy recording token from Key Vault)
     init_changelog_routes(secrets_manager)
@@ -227,49 +247,33 @@ async def lifespan(app: FastAPI):
     logger.info(f"Provider factory initialized. Available: {provider_factory.list_providers()}")
     _log_startup_timing("providers_initialized", _app_startup_start)
 
-    # 6. Initialize AI provider for agent routes (SDK-based: triage, deep-dive, followup)
-    if settings.ai_provider == "foundry":
-        ai_provider = FoundryAdapter(
-            resource=settings.foundry_resource,
-            deployment=settings.foundry_deployment,
-            api_key=secrets_manager.get("foundry-api-key"),
-        )
-        logger.info(f"Agent AI provider: Azure Foundry SDK ({settings.foundry_resource})")
-    else:
-        api_key = secrets_manager.get("anthropic-api-key")
-        if not api_key:
-            logger.warning("Agent AI provider: No API key found — agent routes disabled")
-            ai_provider = None
-        else:
-            ai_provider = AnthropicAdapter(api_key=api_key)
-            logger.info("Agent AI provider: Anthropic (direct)")
-
-    if ai_provider:
-        init_agent_routes(ai_provider)
-
-    # 6b. Initialize evaluation adapter (httpx-based, structured outputs via output_format)
-    #     Prefers Foundry (FOUNDRY_ENDPOINT + foundry-api-key from Key Vault).
-    #     Falls back to the already-initialized ai_provider (Anthropic) so that
-    #     /evaluate/structured works in local dev without a Foundry deployment.
+    # 6. Initialize unified AI adapter (single adapter for both agent + eval routes)
+    #    Prefers Foundry (FOUNDRY_ENDPOINT + foundry-api-key from Key Vault).
+    #    Falls back to Anthropic direct (ANTHROPIC_API_KEY from Key Vault).
+    ai_adapter = None
     foundry_endpoint = settings.foundry_endpoint
     foundry_api_key = secrets_manager.get("foundry-api-key")
     if foundry_endpoint and foundry_api_key:
-        eval_adapter = FoundryEvalAdapter(
+        ai_adapter = FoundryEvalAdapter(
             api_key=foundry_api_key,
             endpoint=foundry_endpoint,
             model=settings.foundry_model,
         )
-        init_evaluation_routes(eval_adapter)
-        logger.info(f"Evaluation AI provider: Foundry httpx ({foundry_endpoint})")
-    elif ai_provider is not None:
-        # AnthropicAdapter.chat() matches the FoundryEvalAdapter.chat() signature
-        init_evaluation_routes(ai_provider)
-        logger.info("Evaluation AI provider: Anthropic fallback (no FOUNDRY_ENDPOINT set)")
+        logger.info(f"AI adapter: Foundry httpx ({foundry_endpoint})")
     else:
-        logger.warning(
-            "Evaluation AI provider: neither Foundry nor Anthropic configured — "
-            "/evaluate/structured will return 503"
-        )
+        api_key = secrets_manager.get("anthropic-api-key")
+        if api_key:
+            ai_adapter = AnthropicAdapter(api_key=api_key)
+            logger.info("AI adapter: Anthropic (direct)")
+        else:
+            logger.warning(
+                "AI adapter: neither Foundry nor Anthropic configured — "
+                "agent routes and /evaluate/structured will return 503"
+            )
+
+    if ai_adapter:
+        init_agent_routes(ai_adapter)
+        init_evaluation_routes(ai_adapter)
 
     # 6c. Register hard gates (OTA-502+). Gates must be registered ONCE at startup,
     #     in evaluation order. First triggered gate wins (first-match-wins).
@@ -396,10 +400,7 @@ app.add_middleware(CSRFMiddleware)
 
 
 # --- ROUTES ---
-# identity_router must be registered BEFORE auth_router: both have GET /auth/me
-# and the session-cookie version (identity) should take precedence during BFF migration.
 app.include_router(identity_router, prefix="/api/v1")
-app.include_router(auth_router, prefix="/api/v1")
 app.include_router(market_router, prefix="/api/v1")
 app.include_router(config_router, prefix="/api/v1")
 app.include_router(analysis_router, prefix="/api/v1")
@@ -408,7 +409,6 @@ app.include_router(evaluation_router, prefix="/api/v1")
 app.include_router(user_router, prefix="/api/v1")
 app.include_router(watchlist_router, prefix="/api/v1")
 app.include_router(named_watchlist_router, prefix="/api/v1")
-app.include_router(entra_auth_router, prefix="/api/v1")
 app.include_router(agent_router, prefix="/api/v1")
 app.include_router(admin_router, prefix="/api/v1")
 app.include_router(position_router, prefix="/api/v1")

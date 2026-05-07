@@ -28,7 +28,7 @@ from urllib.parse import unquote
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse
 
-from app.auth.dependencies import get_session_user
+from app.auth.dependencies import get_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +67,7 @@ async def schwab_debug_url():
 
 
 @router.get("/get-url")
-async def schwab_get_url(user: dict = Depends(get_session_user)):
+async def schwab_get_url(user: dict = Depends(get_current_user)):
     """
     Return the Schwab authorization URL as JSON.
 
@@ -82,7 +82,7 @@ async def schwab_get_url(user: dict = Depends(get_session_user)):
 
 
 @router.get("/login")
-async def schwab_login(user: dict = Depends(get_session_user)):
+async def schwab_login(user: dict = Depends(get_current_user)):
     """
     Redirect the user to Schwab's login page.
 
@@ -195,7 +195,7 @@ async def schwab_callback(request: Request):
 # ------------------------------------------------------------------
 
 @router.post("/refresh")
-async def schwab_refresh(user: dict = Depends(get_session_user)):
+async def schwab_refresh(user: dict = Depends(get_current_user)):
     """
     Manually trigger a Schwab token refresh.
 
@@ -221,7 +221,7 @@ async def schwab_refresh(user: dict = Depends(get_session_user)):
 # ------------------------------------------------------------------
 
 @router.get("/status")
-async def schwab_status(user: dict = Depends(get_session_user)):
+async def schwab_status(user: dict = Depends(get_current_user)):
     """
     Check the current state of Schwab authentication.
 
@@ -243,7 +243,7 @@ async def schwab_status(user: dict = Depends(get_session_user)):
 # ------------------------------------------------------------------
 
 @router.post("/disconnect")
-async def schwab_disconnect(user: dict = Depends(get_session_user)):
+async def schwab_disconnect(user: dict = Depends(get_current_user)):
     """
     Disconnect Schwab by clearing all stored tokens.
 

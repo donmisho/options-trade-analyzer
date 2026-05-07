@@ -26,6 +26,8 @@ import uuid
 from datetime import datetime, timezone, date, timedelta
 from typing import Any, Optional, List
 
+import httpx
+
 logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -35,7 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require_read
 from app.core.config import settings
-from app.ai.foundry_adapter import FoundryEvalAdapter
+from app.ai.base import AIAdapter
 from app.models.session import get_db
 from app.models.database import AgentRunLog
 from app.models.schemas import (
@@ -58,14 +60,12 @@ from app.analysis.strategy_scorer import StrategyScore
 
 router = APIRouter(prefix="/evaluate", tags=["Trade Evaluation"])
 
-# Initialized in main.py at startup.
-# Type is Any because Foundry (httpx-based FoundryEvalAdapter) and Anthropic
-# (SDK-based AnthropicAdapter) both expose a compatible .chat() method.
-_eval_adapter: Optional[Any] = None
+# Initialized in main.py at startup — any AIAdapter implementation.
+_eval_adapter: Optional[AIAdapter] = None
 
 
-def init_evaluation_routes(adapter: Any):
-    """Called from main.py to inject the evaluation adapter (Foundry or Anthropic)."""
+def init_evaluation_routes(adapter: AIAdapter):
+    """Called from main.py to inject the AI adapter."""
     global _eval_adapter
     _eval_adapter = adapter
 
@@ -228,7 +228,15 @@ def _build_structured_user_message(
         if score is not None:
             lines.append(f"Score: {score} / 100")
         if trade:
-            lines.append(f"Trade data: {json.dumps(trade)}")
+            # OTA-558: Safely serialize trade dict (handles NaN/Infinity from scoring)
+            try:
+                trade_json = json.dumps(trade, default=str, allow_nan=False)
+            except (ValueError, TypeError):
+                trade_json = json.dumps(
+                    {k: v for k, v in trade.items() if not (isinstance(v, float) and (math.isnan(v) or math.isinf(v)))},
+                    default=str,
+                )
+            lines.append(f"Trade data: {trade_json}")
 
     lines += [
         "",
@@ -599,6 +607,24 @@ async def evaluate_structured(
         try:
             result = await adapter.chat(system_prompt, user_message, max_tokens=3000)
         except Exception as e:
+            # OTA-558: Surface full error details for diagnosis
+            err_details = {
+                "exception_type": type(e).__name__,
+                "message": str(e),
+                "symbol": request.symbol,
+                "strategy_keys": request.strategy_keys,
+                "trade_type": request.trade.get("option_type") or request.trade.get("spread_type") if request.trade else None,
+                "user_message_preview": user_message[:500],
+            }
+            if isinstance(e, httpx.HTTPStatusError):
+                err_details["status_code"] = e.response.status_code
+                err_details["response_body"] = e.response.text[:1000]
+            logger.error(
+                f"AI evaluation failed for {request.symbol} "
+                f"(strategies={request.strategy_keys}): "
+                f"{type(e).__name__}: {e}",
+                extra={"eval_error_details": err_details},
+            )
             raise HTTPException(status_code=502, detail=f"AI evaluation failed: {e}")
 
         span_ctx["input_tokens"] = result["input_tokens"]
@@ -630,8 +656,12 @@ async def evaluate_structured(
             result["input_tokens"] += retry_result["input_tokens"]
             result["output_tokens"] += retry_result["output_tokens"]
             evaluations = _try_parse_cards(raw_text)
-        except Exception:
-            pass  # fall through to error below
+        except Exception as retry_exc:
+            # OTA-558: Log retry failure for diagnosis
+            logger.warning(
+                f"AI evaluation retry failed for {request.symbol}: "
+                f"{type(retry_exc).__name__}: {retry_exc}"
+            )
 
     if evaluations is None:
         raise HTTPException(

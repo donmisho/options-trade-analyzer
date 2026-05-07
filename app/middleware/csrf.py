@@ -22,7 +22,7 @@ EXEMPTIONS (routes where CSRF is not checked):
   - skip_auth=True (local dev)
 
 OPTIMIZATION: When this middleware validates a session, it stores the session
-dict in request.state.bff_session so the route's get_session_user dependency
+dict in request.state.bff_session so the route's get_current_user dependency
 can skip the second DB round-trip.
 """
 
@@ -89,7 +89,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             # Expired or invalid session → let the route return 401
             return await call_next(request)
 
-        # Cache session in request state to avoid a second DB hit in get_session_user
+        # Cache session in request state to avoid a second DB hit in get_current_user
         request.state.bff_session = session
 
         # Verify CSRF token

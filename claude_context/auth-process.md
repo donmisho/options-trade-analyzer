@@ -1,4 +1,4 @@
-# Options Analyzer — auth-process.md (Updated 2026-04-12 10:00)
+# Options Analyzer — auth-process.md (Updated 2026-05-06 UTC)
 # Epic: OTA-477 | Feature: OTA-482
 
 ## Table of Contents
@@ -28,7 +28,9 @@
 **Change Log:** Initial decision
 
 FastAPI acts as a confidential OIDC client using the Backend-for-Frontend (BFF)
-pattern.
+pattern. **BFF OIDC is the only sanctioned auth path.** Legacy local-password
+auth (`auth_routes.py`) and the MSAL bridge (`entra_auth_routes.py`) were
+retired in OTA-538.
 
 - The React SPA never handles, stores, or sees identity tokens
 - The backend exchanges authorization codes for tokens server-to-server
@@ -342,7 +344,7 @@ the React app.
 |------|---------|
 | `app/auth/providers.py` | IdP provider registry — all OIDC config per provider |
 | `app/auth/session_manager.py` | Server-side session CRUD, token encryption/decryption, background refresh |
-| `app/auth/dependencies.py` | `get_session_user` FastAPI dependency — accepts cookie or JWT Bearer |
+| `app/auth/dependencies.py` | `get_current_user` FastAPI dependency — accepts cookie or JWT Bearer |
 | `app/auth/client_assertion.py` | Builds JWT client assertions signed with Key Vault cert |
 | `app/api/identity_routes.py` | BFF auth endpoints: login, callback, me, logout, session/status |
 | `app/middleware/csrf.py` | CSRF protection middleware — validates X-CSRF-Token header |
@@ -352,3 +354,11 @@ the React app.
 | `web/src/api/client.js` | API client with `credentials: 'include'` and CSRF header injection |
 | `agents/identity-security/` | Validation test suite and diagnostic tool for auth flows |
 | `auth-process.md` | This document |
+
+---
+
+## Change Log
+
+| Date | Ticket | Change |
+|---|---|---|
+| 2026-05-06 UTC | OTA-538 | Retired `entra_auth_routes.py` (MSAL bridge) and `auth_routes.py` (legacy local-password auth). BFF OIDC via `identity_routes.py` is now the only auth path. Merged `get_session_user` and `get_current_user` into a single `get_current_user` resolver. Added `skip_auth` production assertion and required-secrets fail-loud check at startup. Updated Files Reference to reflect resolver rename. |
