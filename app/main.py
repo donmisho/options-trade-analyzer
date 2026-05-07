@@ -57,6 +57,7 @@ from app.api.service_routes import router as service_router, init_service_routes
 from app.ai import AnthropicAdapter, FoundryEvalAdapter
 from app.api.changelog_routes import router as changelog_router, init_changelog_routes
 from app.middleware.csrf import CSRFMiddleware
+from app.api.mcp_routes import get_mcp_app, init_mcp_routes, start_mcp_session_manager
 
 # Dev-only test routes — imported and registered only outside production
 if settings.app_env != "production":
@@ -197,7 +198,10 @@ async def lifespan(app: FastAPI):
             )
         logger.info(f"Required secrets validated: {len(_required_secrets)} OK")
 
-    # 2b. Initialize changelog routes (deploy recording token from Key Vault)
+    # 2b. Initialize MCP bearer auth (reads token from Key Vault)
+    init_mcp_routes(secrets_manager)
+
+    # 2c. Initialize changelog routes (deploy recording token from Key Vault)
     init_changelog_routes(secrets_manager)
 
     # 3. Initialize auth system with secrets
@@ -349,6 +353,11 @@ async def lifespan(app: FastAPI):
     # 9. Wire health routes — inject startup time + token manager for uptime/Schwab checks
     init_health_routes(_app_startup_start, schwab_token_manager)
 
+    # 10. Start MCP session manager (OTA-605)
+    # FastAPI does not propagate lifespan to mounted sub-apps, so we start it explicitly.
+    mcp_session_ctx = await start_mcp_session_manager()
+    logger.info("MCP session manager started (ota-market-data at /mcp)")
+
     logger.info(f"{settings.app_name} ready at http://{settings.host}:{settings.port}")
     _log_startup_timing("startup_complete", _app_startup_start)
 
@@ -357,6 +366,13 @@ async def lifespan(app: FastAPI):
     # --- SHUTDOWN (OTA-543: Resource Shutdown Discipline) ---
     # Order: scheduler first (let in-progress jobs finish), then background
     # tasks, then long-lived HTTP clients, then provider cache, then DB engine.
+
+    # 0. MCP session manager (OTA-605)
+    try:
+        await mcp_session_ctx.__aexit__(None, None, None)
+        logger.info("Shutdown: MCP session manager stopped")
+    except Exception as e:
+        logger.warning(f"Shutdown: MCP session manager exit: {e}")
 
     # 1. APScheduler — wait for in-progress jobs to complete
     if scheduler is not None:
@@ -437,6 +453,14 @@ app.include_router(health_router, prefix="/api/v1")
 app.include_router(changelog_router, prefix="/api/v1")
 if settings.app_env != "production":
     app.include_router(test_router, prefix="/api/v1/test")
+
+# --- MCP Server (OTA-605) ---
+# Mounted as ASGI sub-app at /mcp. Bearer auth is handled by MCPBearerAuthMiddleware
+# inside the sub-app — the BFF cookie/CSRF path does not apply.
+# Canonical URL: /mcp/ (with trailing slash). Starlette Mount strips the /mcp prefix
+# and passes / to the sub-app's internal route. Configure the claude.ai connector
+# with the trailing-slash URL: https://oa.tmtctech.ai/mcp/
+app.mount("/mcp", get_mcp_app())
 
 
 # --- Health Check ---

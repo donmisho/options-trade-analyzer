@@ -41,6 +41,7 @@ _STATE_CHANGING_METHODS = {"POST", "PATCH", "PUT", "DELETE"}
 _CSRF_EXEMPT_PREFIXES = (
     "/api/v1/auth/",        # all identity and legacy auth routes
     "/api/v1/health",       # health checks
+    "/mcp",                 # MCP server — bearer auth, not BFF cookies (OTA-605)
     "/docs",                # Swagger UI
     "/openapi.json",
     "/redoc",

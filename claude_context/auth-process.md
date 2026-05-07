@@ -1,4 +1,4 @@
-# Options Analyzer — auth-process.md (Updated 2026-05-06 UTC)
+# Options Analyzer — auth-process.md (Updated 2026-05-07 UTC)
 # Epic: OTA-477 | Feature: OTA-482
 
 ## Table of Contents
@@ -357,8 +357,52 @@ the React app.
 
 ---
 
+## MCP Bearer Token Auth (OTA-605)
+
+**Decision Date:** 2026-05-07
+**Change Log:** Initial decision
+
+The MCP server at `/mcp` uses a separate auth path from the BFF session-cookie
+flow. claude.ai is not a browser — it does not carry cookies, CSRF tokens, or
+session state.
+
+### How it works
+
+1. A bearer token is stored in the `options-analyzer` Key Vault as two
+   per-environment secrets: `mcp-bearer-token-dev` and `mcp-bearer-token-prod`
+2. The MCP route code derives the correct secret name from `settings.app_env`
+3. Every request to `/mcp/*` must include `Authorization: Bearer <token>`
+4. `MCPBearerAuthMiddleware` (ASGI middleware wrapping the MCP sub-app) validates
+   the token against the Key Vault value. Missing or invalid → HTTP 401, no body.
+5. Valid requests resolve to a **system principal**: the active admin user row in
+   the `users` table (`role='admin' AND is_active=True`). The bearer token does
+   not encode user identity.
+
+### Token rotation
+
+Update the secret value in Key Vault. No code change or redeploy required — the
+`SecretsManager` cache is populated on first use and survives until the process
+restarts. For immediate rotation, restart the App Service after updating the
+secret.
+
+### What does NOT apply to /mcp
+
+- BFF session cookies (`ota_session`)
+- CSRF middleware (`X-CSRF-Token` header)
+- Entra OIDC login/callback flow
+
+### Files
+
+| File | Purpose |
+|------|---------|
+| `app/api/mcp_routes.py` | MCP server, bearer auth middleware, system principal resolver, observability wrapper |
+| `app/middleware/csrf.py` | CSRF exemption for `/mcp` prefix |
+
+---
+
 ## Change Log
 
 | Date | Ticket | Change |
 |---|---|---|
+| 2026-05-07 UTC | OTA-605 | Added MCP Bearer Token Auth section. MCP server mounted at `/mcp` with bearer token auth via Key Vault (`mcp-bearer-token-dev` / `mcp-bearer-token-prod`). System principal resolved from `users` table (active admin row). CSRF middleware exempts `/mcp` prefix. |
 | 2026-05-06 UTC | OTA-538 | Retired `entra_auth_routes.py` (MSAL bridge) and `auth_routes.py` (legacy local-password auth). BFF OIDC via `identity_routes.py` is now the only auth path. Merged `get_session_user` and `get_current_user` into a single `get_current_user` resolver. Added `skip_auth` production assertion and required-secrets fail-loud check at startup. Updated Files Reference to reflect resolver rename. |
