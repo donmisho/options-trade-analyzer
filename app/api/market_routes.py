@@ -15,39 +15,39 @@ from app.models.schemas import Quote, OptionChainResponse
 from app.models.session import get_db
 from app.models.database import SymbolQuote
 from app.auth.dependencies import require_read, require_write
-from app.providers.factory import ProviderFactory
+from app.providers.factory import ProviderRegistry
 from app.core.config import settings
 
 router = APIRouter(prefix="/market", tags=["Market Data"])
 log = logging.getLogger(__name__)
 
 # Initialized in main.py at startup
-_provider_factory: Optional[ProviderFactory] = None
+_provider_registry: Optional[ProviderRegistry] = None
 
 
-def init_market_routes(factory: ProviderFactory):
-    global _provider_factory
-    _provider_factory = factory
+def init_market_routes(registry: ProviderRegistry):
+    global _provider_registry
+    _provider_registry = registry
 
 
-def _get_factory() -> ProviderFactory:
-    if _provider_factory is None:
-        raise RuntimeError("Provider factory not initialized")
-    return _provider_factory
+def _get_registry() -> ProviderRegistry:
+    if _provider_registry is None:
+        raise RuntimeError("Provider registry not initialized")
+    return _provider_registry
 
 
-def _get_provider(factory: ProviderFactory, user_id: Optional[str]):
+def _get_provider(registry: ProviderRegistry, user_id: Optional[str]):
     """
     Return the market data provider to use for this request.
 
     Schwab is the primary provider. If Schwab is connected (OAuth tokens
     present), use it. Otherwise fall back to the configured default
-    (Tradier) so dev/testing still works without Schwab credentials.
+    via settings.default_market_data_provider.
     """
-    token_mgr = getattr(factory, '_schwab_token_manager', None)
+    token_mgr = getattr(registry, '_schwab_token_manager', None)
     if token_mgr and token_mgr.get_status().get('connected'):
-        return factory.get_market_data("schwab", user_id=user_id)
-    return factory.get_market_data(settings.default_market_data_provider, user_id=user_id)
+        return registry.get_market_data("schwab", user_id=user_id)
+    return registry.get_market_data(settings.default_market_data_provider, user_id=user_id)
 
 
 @router.get("/quote/{symbol}", response_model=Quote)
@@ -62,12 +62,12 @@ async def get_quote(
     Uses Schwab if connected (includes earnings/dividend dates), falls back to Tradier.
     Every successful quote is persisted to symbol_quotes for historical analysis.
     """
-    factory = _get_factory()
+    registry = _get_registry()
     user_id = user.get("sub")
     sym = symbol.upper()
 
     try:
-        provider = _get_provider(factory, user_id)
+        provider = _get_provider(registry, user_id)
         data = await provider.get_quote(sym)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Provider error: {str(e)}")
@@ -125,8 +125,8 @@ async def get_option_chain(
     The user's config defaults are used if no query params are provided.
     Query params override config defaults for this request.
     """
-    factory = _get_factory()
-    provider = _get_provider(factory, user.get("sub"))
+    registry = _get_registry()
+    provider = _get_provider(registry, user.get("sub"))
 
     try:
         data = await provider.get_chain(
@@ -147,8 +147,8 @@ async def get_expirations(
     user: dict = Depends(require_read),
 ):
     """List available expiration dates for a symbol."""
-    factory = _get_factory()
-    provider = _get_provider(factory, user.get("sub"))
+    registry = _get_registry()
+    provider = _get_provider(registry, user.get("sub"))
 
     try:
         expirations = await provider.get_expirations(symbol.upper())
@@ -167,8 +167,8 @@ async def get_symbol_history(
     Get the closing price for a symbol on a specific date.
     Used by the dashboard to compute YTD returns.
     """
-    factory = _get_factory()
-    provider = _get_provider(factory, user.get("sub"))
+    registry = _get_registry()
+    provider = _get_provider(registry, user.get("sub"))
 
     if not hasattr(provider, "get_daily_close"):
         raise HTTPException(status_code=501, detail="Historical data not supported by this provider")
@@ -187,8 +187,8 @@ async def get_strikes(
     user: dict = Depends(require_read),
 ):
     """List available strike prices for a specific expiration."""
-    factory = _get_factory()
-    provider = _get_provider(factory, user.get("sub"))
+    registry = _get_registry()
+    provider = _get_provider(registry, user.get("sub"))
 
     try:
         strikes = await provider.get_strikes(symbol.upper(), expiration)
@@ -207,8 +207,8 @@ async def get_market_overview(
 
     Full path: GET /api/v1/market/overview
     """
-    factory = _get_factory()
-    provider = _get_provider(factory, user.get("sub"))
+    registry = _get_registry()
+    provider = _get_provider(registry, user.get("sub"))
     symbols = ["SPY", "QQQ", "IWM", "VIX"]
     quotes = {}
     for sym in symbols:
@@ -231,8 +231,8 @@ async def search_instruments(
     Full path: GET /api/v1/market/instruments?symbol={query}
     Returns: [{ symbol, name, type }]
     """
-    factory = _get_factory()
-    provider = _get_provider(factory, user.get("sub"))
+    registry = _get_registry()
+    provider = _get_provider(registry, user.get("sub"))
 
     if not hasattr(provider, "search_instruments"):
         return {"instruments": []}
@@ -260,7 +260,7 @@ async def trigger_chain_collection(
     """
     from app.analysis.chain_collection import collect_chain_snapshot
 
-    factory = _get_factory()
+    registry = _get_registry()
     results = []
     for symbol in symbols:
         result = await collect_chain_snapshot(symbol.upper(), db, factory)

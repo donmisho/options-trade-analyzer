@@ -28,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require_read
 from app.core.config import settings
-from app.providers.factory import ProviderFactory
+from app.providers.factory import ProviderRegistry
 from app.models.session import get_db
 from app.models.database import OptionChainSnapshot, AnalysisRun, AnalyzedTrade
 from app.analysis.vertical_engine import (
@@ -50,18 +50,18 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/analyze", tags=["Analysis"])
 
 # Initialized in main.py at startup
-_provider_factory: Optional[ProviderFactory] = None
+_provider_registry: Optional[ProviderRegistry] = None
 
 
-def init_analysis_routes(factory: ProviderFactory):
-    global _provider_factory
-    _provider_factory = factory
+def init_analysis_routes(registry: ProviderRegistry):
+    global _provider_registry
+    _provider_registry = registry
 
 
-def _get_factory() -> ProviderFactory:
-    if _provider_factory is None:
-        raise RuntimeError("Provider factory not initialized")
-    return _provider_factory
+def _get_registry() -> ProviderRegistry:
+    if _provider_registry is None:
+        raise RuntimeError("Provider registry not initialized")
+    return _provider_registry
 
 
 # ─── Request Schemas ──────────────────────────────────────────────
@@ -152,8 +152,8 @@ async def _fetch_chain(
     Extracting it avoids duplicating the provider lookup + error handling.
     The raw chain dict is returned so callers can persist it.
     """
-    factory = _get_factory()
-    provider = factory.get_market_data(settings.default_market_data_provider, user_id=user.get("sub"))
+    registry = _get_registry()
+    provider = registry.get_market_data(settings.default_market_data_provider, user_id=user.get("sub"))
 
     try:
         chain_data = await provider.get_chain(
@@ -541,8 +541,8 @@ async def get_strategy_scorecard(
     IMPORTANT: exactly one chain fetch happens regardless of how many strategies are scored.
     """
     sym = req.symbol.upper()
-    factory = _get_factory()
-    provider = factory.get_market_data(settings.default_market_data_provider, user_id=user.get("sub"))
+    registry = _get_registry()
+    provider = registry.get_market_data(settings.default_market_data_provider, user_id=user.get("sub"))
 
     # Fetch strategy scores, quote, and price history in parallel
     scores_task = score_all_strategies(symbol=sym, provider=provider, user_config=req.user_config)

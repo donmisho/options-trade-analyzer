@@ -11,14 +11,14 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 
 from app.core.config import settings
-from app.providers.factory import ProviderFactory
+from app.providers.factory import ProviderRegistry
 from app.analysis.vertical_engine import VerticalSpreadEngine, ScoringWeights, SpreadFilters
 
 log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Test"])
 
-_provider_factory: Optional[ProviderFactory] = None
+_provider_registry: Optional[ProviderRegistry] = None
 
 # May 15, 2026 anchor expiration
 _TARGET_EXP = "2026-05-15"
@@ -53,9 +53,9 @@ _ANCHORS = [
 ]
 
 
-def init_test_routes(factory: ProviderFactory):
-    global _provider_factory
-    _provider_factory = factory
+def init_test_routes(registry: ProviderRegistry):
+    global _provider_registry
+    _provider_registry = registry
 
 
 @router.post("/filter-validation/msft-anchor")
@@ -75,10 +75,10 @@ async def msft_anchor_regression():
     if settings.app_env == "production":
         raise HTTPException(status_code=403, detail="Not available in production")
 
-    if _provider_factory is None:
-        raise HTTPException(status_code=503, detail="Provider factory not initialized")
+    if _provider_registry is None:
+        raise HTTPException(status_code=503, detail="Provider registry not initialized")
 
-    provider = _provider_factory.get_market_data(settings.default_market_data_provider)
+    provider = _provider_registry.get_market_data(settings.default_market_data_provider)
 
     # Fetch MSFT chain with a wide DTE window, then filter to the target expiration.
     # strike_range_pct=30 covers strikes 325-420 for any MSFT price in the $350-$450 range.
