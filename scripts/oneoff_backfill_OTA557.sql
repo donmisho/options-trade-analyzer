@@ -1,0 +1,23 @@
+-- OTA-557: Backfill missing expiration in trade_structure for existing positions.
+--
+-- RUN MANUALLY by Don. Do NOT execute from Claude Code.
+--
+-- Step 1: Identify affected rows (positions with no expiration in trade_structure):
+--
+-- SELECT position_id, symbol, strategy_key, trade_structure
+-- FROM positions
+-- WHERE status IN ('FOLLOWING', 'LIVE')
+--   AND trade_structure NOT LIKE '%"expiration"%';
+--
+-- Step 2: For each row, update trade_structure JSON to include the expiration.
+--         Replace <POSITION_ID> and <EXPIRATION_DATE> with actual values.
+--         Expiration date format: YYYY-MM-DD
+--
+-- Example (SQL Server JSON_MODIFY):
+--
+-- UPDATE positions
+-- SET trade_structure = JSON_MODIFY(trade_structure, '$.expiration', '<EXPIRATION_DATE>'),
+--     updated_at = GETUTCDATE()
+-- WHERE position_id = '<POSITION_ID>';
+--
+-- Repeat for each affected position. Verify with Step 1 query after completion.

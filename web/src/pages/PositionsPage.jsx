@@ -569,8 +569,6 @@ export default function PositionsPage() {
             noExpiration.map(p => ({ id: p.id, symbol: p.symbol, strategy: p.strategy_key })));
         }
         if (expired.length > 0) {
-          console.info(`[PositionsPage] Auto-archiving ${expired.length} expired position(s):`,
-            expired.map(p => ({ id: p.id, symbol: p.symbol, expiration: p.expiration })));
           _archiveExpiredBatch(expired);
         }
       } catch (err) {

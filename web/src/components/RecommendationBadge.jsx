@@ -13,6 +13,7 @@ const VERDICT_COLORS = {
   EXECUTE: C.green,
   WAIT: C.amber,
   PASS: C.red,
+  WAIT_FOR_EARNINGS: C.verdictWaitEarnings,
 };
 
 export default function RecommendationBadge({ verdict, trade, marketContext }) {

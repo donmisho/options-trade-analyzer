@@ -378,11 +378,18 @@ async def follow_position(
     if not _user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
+    # OTA-557: ensure trade_structure always has expiration for auto-archive sweep
+    _ts = req.trade_structure or {}
+    if not _ts.get("expiration"):
+        legs = _ts.get("legs")
+        if legs and isinstance(legs, list) and len(legs) > 0:
+            _ts["expiration"] = legs[0].get("expiration")
+
     pos = Position(
         user_id=_user_id,
         symbol=req.symbol.upper(),
         strategy_key=req.strategy_key,
-        trade_structure=json.dumps(req.trade_structure),
+        trade_structure=json.dumps(_ts),
         source="PAPER",
         status="FOLLOWING",
         entry_price=req.entry_price,
@@ -417,11 +424,18 @@ async def take_position(
     if not _user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
+    # OTA-557: ensure trade_structure always has expiration for auto-archive sweep
+    _ts = req.trade_structure or {}
+    if not _ts.get("expiration"):
+        legs = _ts.get("legs")
+        if legs and isinstance(legs, list) and len(legs) > 0:
+            _ts["expiration"] = legs[0].get("expiration")
+
     pos = Position(
         user_id=_user_id,
         symbol=req.symbol.upper(),
         strategy_key=req.strategy_key,
-        trade_structure=json.dumps(req.trade_structure),
+        trade_structure=json.dumps(_ts),
         source="LIVE",
         status="LIVE",
         entry_price=req.entry_price,

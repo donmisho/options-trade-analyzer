@@ -330,12 +330,15 @@ class TradeEvaluationCard(BaseModel):
     effective_dte: Optional[int] = None      # DTE used for scoring (may differ from nominal if gate override applied)
     asymmetry_penalty: Optional[int] = None    # OTA-505: points deducted for probability skew (0, 8, 15, or 25)
     asymmetry_ratio: Optional[float] = None    # OTA-505: p_max_loss / p_max_profit diagnostic (None if undefined)
+    # OTA-515: earnings routing fields
+    dte_after_earnings: Optional[int] = None   # trading days remaining post-earnings within trade window
+    reevaluate_on: Optional[str] = None        # mm-dd-yyyy date to re-evaluate (next trading day after earnings)
 
     @field_validator("verdict")
     @classmethod
     def verdict_must_be_valid(cls, v: str) -> str:
-        if v not in ("EXECUTE", "WAIT", "PASS"):
-            raise ValueError(f"verdict must be EXECUTE, WAIT, or PASS; got {v!r}")
+        if v not in ("EXECUTE", "WAIT", "PASS", "WAIT_FOR_EARNINGS"):
+            raise ValueError(f"verdict must be EXECUTE, WAIT, PASS, or WAIT_FOR_EARNINGS; got {v!r}")
         return v
 
     @field_validator("key_risks", "thesis_invalidators")

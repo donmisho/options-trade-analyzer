@@ -49,9 +49,10 @@ const formatCurrency = (val) => {
 // ─── Verdict config ───────────────────────────────────────────────────────────
 
 const VERDICT_CONFIG = {
-  EXECUTE: { label: 'EXECUTE', bg: '#20C997', textColor: '#000' },
-  WAIT:    { label: 'WAIT',    bg: C.amber,   textColor: '#000' },
-  PASS:    { label: 'PASS',    bg: C.red,     textColor: '#fff' },
+  EXECUTE:            { label: 'EXECUTE',            bg: '#20C997',              textColor: '#000' },
+  WAIT:              { label: 'WAIT',               bg: C.amber,                textColor: '#000' },
+  PASS:              { label: 'PASS',               bg: C.red,                  textColor: '#fff' },
+  WAIT_FOR_EARNINGS: { label: 'WAIT FOR EARNINGS',  bg: C.verdictWaitEarnings,  textColor: '#fff' },
 };
 
 // ─── Score color (mirrors StrategyScorecard) ──────────────────────────────────
@@ -197,6 +198,20 @@ function CardHeader({ card }) {
           </span>
         </div>
       </div>
+
+      {/* Re-evaluate date (WAIT_FOR_EARNINGS only) */}
+      {card.verdict === 'WAIT_FOR_EARNINGS' && card.reevaluate_on && (
+        <div style={{
+          padding: '4px 16px 4px',
+          backgroundColor: C.verdictWaitEarnings + '18',
+          fontSize: 11,
+          color: C.verdictWaitEarnings,
+          fontFamily: mono,
+        }}>
+          Re-evaluate on {card.reevaluate_on}
+          {card.dte_after_earnings != null && ` · ${card.dte_after_earnings} DTE post-earnings`}
+        </div>
+      )}
 
       {/* Strategy label */}
       <div style={{
@@ -492,17 +507,20 @@ function ActionBar({ card, symbol, currentPrice, smaData, tradeData, activeStrat
   const navigate = useNavigate();
 
   const buildPayload = () => {
-    // Prefer tradeData for structured fields; fall back to card fields
+    // Prefer tradeData for structured fields; fall back to card fields.
+    // OTA-557: Always include expiration so auto-archive sweep can detect expired positions.
+    const expiration = tradeData?.expiration || null;
     const tradeStructure = tradeData
       ? {
           spread_type:  tradeData.spread_type,
           short_strike: tradeData.short_strike,
           long_strike:  tradeData.long_strike,
-          expiration:   tradeData.expiration,
+          expiration,
           dte:          tradeData.dte,
         }
       : {
           trade_description: card.trade_structure,
+          expiration,
         };
 
     return {

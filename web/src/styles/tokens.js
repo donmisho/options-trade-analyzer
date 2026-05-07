@@ -53,6 +53,9 @@ export const C = {
   candleGreen: "#26a69a",
   candleRed: "#ef5350",
 
+  // Verdict — WAIT_FOR_EARNINGS (burnt orange)
+  verdictWaitEarnings: "#e67e22",
+
   // Claude / AI branding
   claude: "#d97706",
   claudeDim: "#1c1408",

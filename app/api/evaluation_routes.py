@@ -454,12 +454,18 @@ async def evaluate_structured(
         expected_value=_gate_ev,
     )
     _gate_result = await evaluate_hard_gates(_gate_ctx)
+    _wait_for_earnings = False  # OTA-515: set when verdict is WAIT_FOR_EARNINGS
 
     if _gate_result and _gate_result.triggered:
-        # Hard block — feed into the existing auto-pass short-circuit below
-        auto_pass_reason = _gate_result.reason
+        if _gate_result.verdict == "WAIT_FOR_EARNINGS":
+            # OTA-515: Route 2 or 3 — short-circuit with WAIT_FOR_EARNINGS cards
+            _wait_for_earnings = True
+            auto_pass_reason = _gate_result.reason
+        else:
+            # Hard block (PASS) — feed into the existing auto-pass short-circuit
+            auto_pass_reason = _gate_result.reason
     elif _gate_result and not _gate_result.triggered:
-        # Modifier-only result (e.g. earnings warning band)
+        # Modifier-only result (Route 4: pre-earnings momentum play)
         if _gate_result.effective_dte_override is not None:
             dte = _gate_result.effective_dte_override
         if _gate_result.penalty_points:
@@ -504,11 +510,22 @@ async def evaluate_structured(
                         f"Maximum 40% permitted (${_spread_width * 0.40:.2f} maximum debit)."
                     )
 
-    # ─── Auto-PASS: return immediately, NO Claude API call ────────────────────
+    # ─── Auto-PASS / WAIT_FOR_EARNINGS: return immediately, NO Claude API call ─
     if auto_pass_reason:
+        _verdict = "WAIT_FOR_EARNINGS" if _wait_for_earnings else "PASS"
         logger.info(
-            f"Auto-PASS for {request.symbol} (strategy_keys={request.strategy_keys}): {auto_pass_reason[:80]}"
+            f"Auto-{_verdict} for {request.symbol} (strategy_keys={request.strategy_keys}): {auto_pass_reason[:80]}"
         )
+
+        # OTA-515: Build claude_read differentiated by debit/credit when WAIT_FOR_EARNINGS
+        _claude_read = ""
+        if _wait_for_earnings:
+            _is_credit = (request.trade or {}).get("net_debit", 0)
+            if isinstance(_is_credit, (int, float)) and _is_credit < 0:
+                _claude_read = "Wait trades premium for safety — credit will be smaller but gap risk eliminated."
+            else:
+                _claude_read = "Wait is strictly better — entry improves post-crush."
+
         auto_pass_cards = []
         for _key in request.strategy_keys:
             _label = _key.replace("-", " ").title()
@@ -526,13 +543,15 @@ async def evaluate_structured(
                 exit_stop_debit=0.0,
                 probability_matrix={},
                 score=0,
-                verdict="PASS",
-                claude_read="",
+                verdict=_verdict,
+                claude_read=_claude_read,
                 key_risks=[],
                 thesis_invalidators=[],
                 auto_pass_reason=auto_pass_reason,
                 credit_pct_of_width=credit_pct_of_width,
                 debit_pct_of_width=debit_pct_of_width,
+                dte_after_earnings=_gate_result._dte_after_earnings if _wait_for_earnings and _gate_result else None,
+                reevaluate_on=_gate_result._reevaluate_on if _wait_for_earnings and _gate_result else None,
             ))
 
         db.add(AgentRunLog(
@@ -548,7 +567,7 @@ async def evaluate_structured(
             trade_snapshot={"strategy_keys": request.strategy_keys, "trade": request.trade},
             model_response_raw=auto_pass_reason,
             verdict=None,
-            verdict_summary=f"AUTO_PASS: {auto_pass_reason[:120]}",
+            verdict_summary=f"AUTO_{_verdict}: {auto_pass_reason[:120]}",
             otel_trace_id=None,
             input_tokens=0,
             output_tokens=0,

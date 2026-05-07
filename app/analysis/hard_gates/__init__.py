@@ -63,16 +63,19 @@ class GateResult:
     Result returned by a single gate's evaluate() call.
 
     triggered=True  → hard-block: pipeline short-circuits, verdict forced to
-                       the value in `verdict` (typically "PASS").
+                       the value in `verdict` (typically "PASS" or "WAIT_FOR_EARNINGS").
     triggered=False → pass-through: pipeline continues, but may apply
                        penalty_points and/or effective_dte_override.
     """
     triggered: bool
-    verdict: Optional[str] = None               # "PASS" when triggered hard
+    verdict: Optional[str] = None               # "PASS" or "WAIT_FOR_EARNINGS" when triggered
     reason: Optional[str] = None                # human-readable explanation
     penalty_points: int = 0                     # deducted from score post-parse
     effective_dte_override: Optional[int] = None  # replaces nominal DTE for scoring
     gate_id: str = ""                           # for audit trail
+    # OTA-515: earnings routing metadata (only set by EarningsInWindowGate)
+    _dte_after_earnings: Optional[int] = None
+    _reevaluate_on: Optional[str] = None        # mm-dd-yyyy
 
 
 # ─── Abstract gate ────────────────────────────────────────────────────────────

@@ -1,18 +1,23 @@
 """
-EarningsInWindowGate — OTA-502.
+EarningsInWindowGate — OTA-502 + OTA-515.
 
 Hard gate that fires when an earnings event falls inside a trade's hold window.
 
 User framework rule: never hold through earnings.
 
-Two modes:
-  ≤ 7 trading days to earnings  → triggered=True, verdict=PASS
-                                   (no time to enter and exit before catalyst)
-  8-13 trading days to earnings → triggered=False, penalty_points=15,
-                                   effective_dte_override = days_to_earnings - 1
-                                   (warning band: reduce effective window, penalise)
-  > 13 trading days or out of   → GateResult(triggered=False) — no action
-  window or earnings unknown
+OTA-515 Decision Tree (4 routes):
+  Route 1 — dte_before ≤ 7 AND dte_after < 14:
+      verdict=PASS — no viable window on either side
+  Route 2 — dte_before ≤ 7 AND dte_after >= 14:
+      verdict=WAIT_FOR_EARNINGS — can't enter pre-earnings, strong post window
+  Route 3 — dte_before >= 8 AND dte_after >= 21:
+      verdict=WAIT_FOR_EARNINGS — post-earnings entry likely better
+  Route 4 — dte_before >= 8 AND dte_after < 21:
+      score normally using effective_DTE = dte_before_earnings
+      (pre-earnings momentum play)
+
+Legacy (OTA-502) warning band (8-13 DTE to earnings with no post-window routing):
+  Superseded by routes 3/4. The 15-point penalty in Route 4 is preserved.
 
 "Trading days" = business days; weekends are not counted.
 
@@ -49,6 +54,14 @@ def _business_days_between(start: date, end: date) -> int:
             count += 1
         current += timedelta(days=1)
     return count
+
+
+def _next_business_day(d: date) -> date:
+    """Return the next weekday after the given date."""
+    nxt = d + timedelta(days=1)
+    while nxt.weekday() >= 5:  # skip Sat/Sun
+        nxt += timedelta(days=1)
+    return nxt
 
 
 # ─── Gate implementation ──────────────────────────────────────────────────────
@@ -115,33 +128,68 @@ class EarningsInWindowGate(HardGate):
             )
             return GateResult(triggered=False, gate_id=self.gate_id)
 
-        days_to_earnings = _business_days_between(ctx.entry_date, earnings_date)
+        # OTA-515: Compute both windows
+        dte_before = _business_days_between(ctx.entry_date, earnings_date)
+        dte_after = _business_days_between(earnings_date, ctx.expiry_date) if ctx.expiry_date else 0
         earnings_str = earnings_date.isoformat()
 
-        if days_to_earnings <= 7:
+        # Compute reevaluate_on: next business day after earnings
+        reeval_date = _next_business_day(earnings_date)
+        reeval_str = reeval_date.strftime("%m-%d-%Y")
+
+        # Route 1 — no viable window on either side
+        if dte_before <= 7 and dte_after < 14:
             return GateResult(
                 triggered=True,
                 verdict="PASS",
                 reason=(
-                    f"Earnings {earnings_str} falls {days_to_earnings} trading "
-                    f"days into trade window. Insufficient time to enter and exit "
-                    f"before catalyst."
+                    f"Earnings {earnings_str} — insufficient time both before "
+                    f"({dte_before} trading days) and after ({dte_after} trading days) catalyst."
                 ),
                 gate_id=self.gate_id,
             )
-        else:
-            # 8-13 trading days: warning band — does not force verdict
+
+        # Route 2 — can't enter pre-earnings, but strong post-earnings window
+        if dte_before <= 7 and dte_after >= 14:
             return GateResult(
-                triggered=False,
-                effective_dte_override=days_to_earnings - 1,
-                penalty_points=15,
+                triggered=True,
+                verdict="WAIT_FOR_EARNINGS",
                 reason=(
-                    f"Earnings {earnings_str} in window at {days_to_earnings} "
-                    f"trading days. Effective DTE reduced to {days_to_earnings - 1}, "
-                    f"15-point scoring penalty applied."
+                    f"Re-evaluate {reeval_str}. {dte_after} DTE remaining post-IV crush."
                 ),
                 gate_id=self.gate_id,
+                # Stash routing metadata for the response builder
+                _dte_after_earnings=dte_after,
+                _reevaluate_on=reeval_str,
             )
+
+        # Route 3 — pre-earnings window viable, but post-earnings entry likely better
+        if dte_after >= 21:
+            return GateResult(
+                triggered=True,
+                verdict="WAIT_FOR_EARNINGS",
+                reason=(
+                    "Post-earnings entry likely better. Waiting preserves most of "
+                    f"window ({dte_after} trading days post-earnings)."
+                ),
+                gate_id=self.gate_id,
+                _dte_after_earnings=dte_after,
+                _reevaluate_on=reeval_str,
+            )
+
+        # Route 4 — pre-earnings window is the only viable one
+        # Score normally with effective_DTE = dte_before, 15-point penalty
+        return GateResult(
+            triggered=False,
+            effective_dte_override=dte_before - 1,
+            penalty_points=15,
+            reason=(
+                f"Earnings {earnings_str} in window. Pre-earnings momentum play: "
+                f"effective DTE={dte_before - 1}, 15-point penalty. "
+                f"Post-earnings window too short ({dte_after} days)."
+            ),
+            gate_id=self.gate_id,
+        )
 
     async def _fetch_earnings_date(
         self, symbol: str, db=None
