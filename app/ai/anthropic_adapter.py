@@ -76,3 +76,8 @@ class AnthropicAdapter(AIAdapter):
         except Exception as e:
             logger.error(f"AnthropicAdapter: Health check failed: {e}")
             return False
+
+    async def close(self) -> None:
+        if self._client is not None:
+            await self._client.close()
+            self._client = None

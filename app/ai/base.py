@@ -36,3 +36,6 @@ class AIAdapter(ABC):
     @abstractmethod
     async def health_check(self) -> bool:
         ...
+
+    async def close(self) -> None:
+        """Release long-lived resources (httpx clients, SDK connections)."""

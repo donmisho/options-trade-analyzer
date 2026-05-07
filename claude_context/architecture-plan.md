@@ -592,17 +592,18 @@ Today only AI calls are instrumented. Auth flows, market-data fetches, and DB op
 
 The lifespan teardown must close every async resource cleanly. Failure to close a resource causes connection leaks, abandoned DB sessions, or worse — partial writes mid-shutdown.
 
-Resources that must close:
+Teardown order (implemented in `app/main.py` lifespan, OTA-543):
 
-- **httpx clients** — the `FoundryEvalAdapter` creates a persistent `httpx.AsyncClient` in `__init__`. Its `close()` must be called during lifespan teardown. (Current state: not called. Cleanup Roadmap item.)
-- **APScheduler** — `scheduler.shutdown(wait=True)` (not `wait=False`) so in-progress jobs complete before the process exits. Currently uses `wait=False`, which can leave a Position Monitor run with an abandoned DB session mid-write. Cleanup item.
-- **Async DB engine** — `engine.dispose()` in the lifespan teardown.
-- **Token refresh background task** — `task.cancel()` plus an `await task` to allow graceful exit.
+1. **APScheduler** — `scheduler.shutdown(wait=True)` so in-progress jobs (e.g. Position Monitor) complete before the process exits.
+2. **Token refresh background task** — `task.cancel()` + `await asyncio.wait_for(task, timeout=5.0)` for graceful exit with a 5-second cap to prevent hangs.
+3. **AI adapter** — `await ai_adapter.close()` closes the persistent `httpx.AsyncClient` in `FoundryEvalAdapter` (or the SDK client in `AnthropicAdapter`).
+4. **Provider cache** — `await provider_factory.clear_cache()`.
+5. **Async DB engine** — `await engine.dispose()` closes all pooled connections.
 
 This is enforced by:
 
 - A documented checklist in this section.
-- A test (planned) that exercises lifespan startup-then-immediate-shutdown and asserts no resource leaks.
+- `tests/lifespan/test_shutdown.py` — exercises lifespan startup-then-immediate-shutdown and asserts no unclosed-resource warnings.
 - Code review on every PR that adds a new long-lived async resource.
 
 When adding a new async resource that needs cleanup, add it to the list above and to the lifespan teardown in `app/main.py`.
@@ -843,9 +844,9 @@ The Architecture Optimization Epic (OTA-535) tracks the active drift items ident
 | Item | Why | Source |
 |---|---|---|
 | Add `user_id` filter to `DELETE /recommendations/{trade_key}` | Data isolation bug — any authenticated user could delete another user's recommendation | Opus-4.7 review |
-| Close `FoundryEvalAdapter` httpx client on lifespan shutdown | Resource leak; not called today | Opus-4.7 review |
-| Change scheduler shutdown from `wait=False` to `wait=True` | In-progress monitor runs can be abandoned mid-write on process exit | Opus-4.7 review |
-| Audit `skip_auth` default and env guards | Production safety — accidental enable would bypass all auth | Opus-4.7 review |
+| ~~Close `FoundryEvalAdapter` httpx client on lifespan shutdown~~ | ~~Resource leak~~ | ~~Opus-4.7 review~~ — **Done OTA-543** |
+| ~~Change scheduler shutdown from `wait=False` to `wait=True`~~ | ~~Abandoned mid-write~~ | ~~Opus-4.7 review~~ — **Done OTA-543** |
+| ~~Audit `skip_auth` default and env guards~~ | ~~Production safety~~ | ~~Opus-4.7 review~~ — **Done OTA-538** |
 | Initialize Alembic with baseline migration matching production schema | OTA-522. No production schema change can ship safely without it | OTA-522, both reviews |
 
 ## Should Fix — Drift, Duplication, Cognitive Load
@@ -854,8 +855,8 @@ The Architecture Optimization Epic (OTA-535) tracks the active drift items ident
 |---|---|---|
 | Merge AI stacks: delete `app/providers/ai/` directory after migrating `agent_routes.py` to use `FoundryEvalAdapter` | Two complete AI invocation stacks doing overlapping jobs | Both reviews |
 | Migrate `TRADE_EVALUATION_SYSTEM_PROMPT` and `FOLLOW_UP_SYSTEM_PROMPT` to `app/skills/trade-evaluation/SKILL.md` | Closes the Pattern 2 violation in the primary evaluation path | Both reviews |
-| Retire `entra_auth_routes.py` (MSAL bridge) | Returns JWT to browser, violating Pattern 6 | Both reviews |
-| Retire `auth_routes.py` (legacy local-password flow) or restrict to `/register` only | Three auth flows registered simultaneously | Opus-4.7 review |
+| ~~Retire `entra_auth_routes.py` (MSAL bridge)~~ | ~~Returns JWT to browser, violating Pattern 6~~ | ~~Both reviews~~ — **Done OTA-538** |
+| ~~Retire `auth_routes.py` (legacy local-password flow)~~ | ~~Three auth flows registered simultaneously~~ | ~~Opus-4.7 review~~ — **Done OTA-538** |
 | Rename `agent_routes.py` → `trade_evaluation_routes.py`, `agents_routes.py` → `position_monitor_routes.py` | Daily cognitive trap from singular/plural file naming | Both reviews |
 | Rename `ProviderFactory` → `ProviderRegistry` | Misnomer; actual behavior is a singleton container with caching | Opus-4.7 review |
 | Wire OTA-525 lifecycle states into `PROVIDER_REGISTRY` and `_SERVICE_REGISTRY` schemas | Lifecycle states defined but not encoded in code today | OTA-525 |
@@ -893,6 +894,7 @@ The Architecture Optimization Epic (OTA-535) tracks the active drift items ident
 
 | Date | Ticket | Change |
 |---|---|---|
+| 2026-05-06 UTC | OTA-543 | Updated § Resource Shutdown Discipline: documented implemented teardown order (scheduler wait=True, token task cancel with 5s timeout, AI adapter close, provider cache clear, DB engine dispose). Marked FoundryEvalAdapter close, scheduler wait=True, and skip_auth audit as Done in Cleanup Roadmap. Marked auth route retirements as Done (OTA-538). Added `tests/lifespan/test_shutdown.py` reference. |
 | 2026-05-06 UTC | OTA-601 | Added § Deployment Architecture subsection "Cold-start and runtime OS dependencies" recording the OTA-553 Option B decision: ODBC Driver 18 install in `app/main.py` lifespan is the intentional pattern. Documents the ~90s cold-start cost mitigated by Always On, the deferred Option A alternative (custom container image), and the explicit prohibition against retrying the user-supplied `startup.sh` approach (OTA-545 Phase 2, reverted 2026-05-02). |
 | 2026-05-06 03:00 UTC | OTA-554 | Corrected Pattern 7 and Deployment Architecture to reflect actual request routing: Cloudflare proxies custom domains (`oa-dev.tmtctech.ai`, `oa.tmtctech.ai`) directly to the App Service — the SWA is not in the request path. Added "Request Routing — Cloudflare to App Service Direct" subsection with verification commands and health endpoint inventory. Fixed SWA SKU (was "Standard", actually "Free") and URL in Azure Resources Summary. Marked SWA as orphan candidate for cleanup. Removed incorrect claims that the `static/` directory is absent from the deployment artifact and that the SPA fallback in `main.py` is dead code — the build workflow bundles the SPA into `static/` and the App Service actively serves it. |
 | 2026-05-01 21:30 UTC | OTA-540 | Schema Migration Strategy section updated: Alembic is now operational (baseline `f9e59a180957` ships with OTA-540). `init_db()` now runs `alembic upgrade head` in dev/staging; production migrations are manual (stamping procedure in `docs/runbooks/alembic-stamp-prod.md`). Updated § 2 to remove the "OTA-522 remains open" note and document the prod migration deploy procedure. |

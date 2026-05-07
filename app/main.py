@@ -290,7 +290,7 @@ async def lifespan(app: FastAPI):
 
     # 8. Initialize Position Monitor Agent + APScheduler
     scheduler = None
-    _eval_adapter_for_monitor = eval_adapter if (foundry_endpoint and foundry_api_key) else None
+    _eval_adapter_for_monitor = ai_adapter if (foundry_endpoint and foundry_api_key) else None
     if _eval_adapter_for_monitor is not None:
         from app.agents.position_monitor import PositionMonitorAgent
         from app.providers.schwab_context_source import SchwabPriceContextSource
@@ -356,11 +356,37 @@ async def lifespan(app: FastAPI):
 
     yield  # App runs here
 
-    # --- SHUTDOWN ---
-    token_refresh_task.cancel()
+    # --- SHUTDOWN (OTA-543: Resource Shutdown Discipline) ---
+    # Order: scheduler first (let in-progress jobs finish), then background
+    # tasks, then long-lived HTTP clients, then provider cache, then DB engine.
+
+    # 1. APScheduler — wait for in-progress jobs to complete
     if scheduler is not None:
-        scheduler.shutdown(wait=False)
+        scheduler.shutdown(wait=True)
+        logger.info("Shutdown: APScheduler stopped (in-progress jobs completed)")
+
+    # 2. Token refresh background task — cancel with grace period
+    if not token_refresh_task.done():
+        token_refresh_task.cancel()
+        try:
+            await asyncio.wait_for(token_refresh_task, timeout=5.0)
+        except (asyncio.CancelledError, asyncio.TimeoutError):
+            pass
+    logger.info("Shutdown: Token refresh task stopped")
+
+    # 3. AI adapter httpx client
+    if ai_adapter is not None and hasattr(ai_adapter, "close"):
+        await ai_adapter.close()
+        logger.info("Shutdown: AI adapter closed")
+
+    # 4. Provider cache
     await provider_factory.clear_cache()
+
+    # 5. Async DB engine
+    from app.models.session import engine as _db_engine
+    await _db_engine.dispose()
+    logger.info("Shutdown: DB engine disposed")
+
     logger.info(f"{settings.app_name} shut down")
 
 
