@@ -216,9 +216,48 @@ Background: var(--bg2). Border: 1px solid var(--border). Border-radius: 4px.
 - Every page that needs it imports `<QuoteBar />` — zero inline reimplementations
 
 ### SMA Chart
-Candlestick chart with configurable moving averages. Moving average periods and
-date range are user-selectable via the SMA Configuration and Chart Range controls.
-Defaults: 8/21/50 day SMAs, 90-day range — but these are configurable, not fixed.
+File: `web/src/components/SmaPanel.jsx`
+
+Candlestick chart with configurable moving averages and date range. Two
+independent controls in the chart header (right side):
+
+1. **Range dropdown** — selects the chart date window. Options: 7d, 14d, 30d,
+   60d, 90d (default), 180d, 365d. On change, refetches candles from backend
+   with the appropriate Schwab interval.
+2. **Periods button** — toggles the SMA period editor (fast/medium/slow inputs).
+   Default: 8/21/50 day SMAs.
+
+Changing Range does not change SMA periods, and vice versa.
+
+**Range → Schwab interval mapping:**
+
+| Range | Schwab interval | Approx bars |
+|-------|-----------------|-------------|
+| 7d    | 30-minute       | ~65         |
+| 14d   | 30-minute       | ~130        |
+| 30d   | daily           | ~21         |
+| 60d   | daily           | ~42         |
+| 90d   | daily           | ~63         |
+| 180d  | daily           | ~126        |
+| 365d  | weekly          | ~52         |
+
+**X-axis date label density:**
+- 7d/14d (intraday): one label per trading day (at session-open bar)
+- 30d: every 2nd bar
+- 60d: every 5th bar
+- 90d: every 7th bar (weekly cadence)
+- 180d: every 14th bar (bi-weekly)
+- 365d: every 4th bar (monthly)
+
+Labels are `mm-dd-yyyy` via `formatDate()`, 10px monospace, `var(--muted)`.
+Adjacent labels that would overlap are skipped (72px minimum gap).
+
+**SMA truncation rule:** Each SMA line renders only for bars where full lookback
+data exists. The first `(period - 1)` bars are gaps — no line drawn. For a 7d
+window, only the 8-period SMA has any visible line; 21 and 50 are all-gaps.
+
+**Range capping:** If the backend returns fewer days than requested, a muted
+note appears in the chart header: "Showing Nd (max available)" — 9px monospace.
 
 ### ResultsTable
 File: `web/src/components/ResultsTable.jsx`

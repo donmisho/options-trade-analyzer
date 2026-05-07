@@ -180,6 +180,48 @@ async def get_symbol_history(
         raise HTTPException(status_code=502, detail=f"Provider error: {str(e)}")
 
 
+_ALLOWED_RANGES = {7, 14, 30, 60, 90, 180, 365}
+
+
+@router.get("/candles/{symbol}")
+async def get_candles(
+    symbol: str,
+    range_days: int = Query(90, description="Chart range in days: 7, 14, 30, 60, 90, 180, 365"),
+    user: dict = Depends(require_read),
+):
+    """
+    Return OHLC candle series for a symbol. Interval is auto-selected by range.
+
+    | range_days | interval   |
+    |------------|------------|
+    | 7, 14      | 30-minute  |
+    | 30–180     | daily      |
+    | 365        | weekly     |
+    """
+    if range_days not in _ALLOWED_RANGES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"range_days must be one of {sorted(_ALLOWED_RANGES)}",
+        )
+
+    registry = _get_registry()
+    provider = _get_provider(registry, user.get("sub"))
+
+    if not hasattr(provider, "get_candles"):
+        raise HTTPException(status_code=501, detail="Candle data not supported by this provider")
+
+    try:
+        candles = await provider.get_candles(symbol.upper(), range_days)
+        return {
+            "symbol": symbol.upper(),
+            "range_days": range_days,
+            "count": len(candles),
+            "candles": candles,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Provider error: {str(e)}")
+
+
 @router.get("/strikes/{symbol}/{expiration}")
 async def get_strikes(
     symbol: str,

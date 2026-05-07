@@ -333,6 +333,17 @@ class SchwabMarketData(MarketDataProvider):
 
         return sorted(strikes)
 
+    # Range → Schwab API parameter mapping
+    _RANGE_PARAMS = {
+        7:   {"periodType": "day",   "period": "10",  "frequencyType": "minute", "frequency": "30"},
+        14:  {"periodType": "day",   "period": "20",  "frequencyType": "minute", "frequency": "30"},
+        30:  {"periodType": "month", "period": "1",   "frequencyType": "daily",  "frequency": "1"},
+        60:  {"periodType": "month", "period": "2",   "frequencyType": "daily",  "frequency": "1"},
+        90:  {"periodType": "month", "period": "3",   "frequencyType": "daily",  "frequency": "1"},
+        180: {"periodType": "month", "period": "6",   "frequencyType": "daily",  "frequency": "1"},
+        365: {"periodType": "year",  "period": "1",   "frequencyType": "weekly", "frequency": "1"},
+    }
+
     async def get_price_history(self, symbol: str, num_periods: int = 3) -> list[dict]:
         """
         GET /marketdata/v1/pricehistory
@@ -362,6 +373,46 @@ class SchwabMarketData(MarketDataProvider):
             return [{"close": c["close"], "datetime": c.get("datetime")} for c in candles if "close" in c]
         except Exception as e:
             logger.warning(f"get_price_history failed for {symbol}: {e}")
+            return []
+
+    async def get_candles(self, symbol: str, range_days: int = 90) -> list[dict]:
+        """
+        GET /marketdata/v1/pricehistory — full OHLC candle series.
+
+        Returns list of candles ordered oldest → newest, each with:
+          { "open": float, "high": float, "low": float, "close": float, "datetime": int, "volume": int }
+
+        The interval (daily / 30-min / weekly) is determined by range_days
+        per the OTA-610 mapping table.
+        """
+        params_map = self._RANGE_PARAMS.get(range_days)
+        if not params_map:
+            logger.warning(f"get_candles: unsupported range_days={range_days}")
+            return []
+        try:
+            headers = await self._get_headers()
+            resp = await self._client.get(
+                "/pricehistory",
+                headers=headers,
+                params={"symbol": symbol.upper(), **params_map},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            raw = data.get("candles", [])
+            return [
+                {
+                    "open": c["open"],
+                    "high": c["high"],
+                    "low": c["low"],
+                    "close": c["close"],
+                    "datetime": c.get("datetime", 0),
+                    "volume": c.get("volume", 0),
+                }
+                for c in raw
+                if "close" in c and "open" in c
+            ]
+        except Exception as e:
+            logger.warning(f"get_candles failed for {symbol} range={range_days}: {e}")
             return []
 
     async def health_check(self) -> bool:

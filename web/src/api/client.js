@@ -114,6 +114,10 @@ export async function getHistoricalClose(symbol, date) {
   return apiFetch(`/market/history/${symbol.toUpperCase()}?date=${encodeURIComponent(date)}`);
 }
 
+export async function getCandles(symbol, rangeDays = 90) {
+  return apiFetch(`/market/candles/${symbol.toUpperCase()}?range_days=${rangeDays}`);
+}
+
 export async function getOptionChain(symbol, params = {}) {
   const query = new URLSearchParams();
   if (params.min_dte !== undefined) query.set("min_dte", params.min_dte);

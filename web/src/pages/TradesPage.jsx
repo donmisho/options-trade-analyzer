@@ -22,7 +22,7 @@ import ResultsTable from '../components/ResultsTable';
 import { SectionA, SectionB, SectionC, SectionE } from '../components/TradeDetail';
 import { verticalsColumns } from '../config/verticals-columns';
 import { longOptionsColumns } from '../config/long-options-columns';
-import { analyzeVerticals, analyzeLongCalls, searchSymbolsStatic, searchInstruments, getQuote, evaluateStructured, followTrade, takeTrade, evaluateFollowUp } from '../api/client';
+import { analyzeVerticals, analyzeLongCalls, searchSymbolsStatic, searchInstruments, getQuote, getCandles, evaluateStructured, followTrade, takeTrade, evaluateFollowUp } from '../api/client';
 import { useToast } from '../components/Toast';
 import { STRATEGY_CONFIGS, SCORECARD_STRATEGIES } from '../strategy-configs/index';
 
@@ -768,6 +768,7 @@ export default function TradesPage() {
   // ── SMA chart state ──────────────────────────────────────────────────────
   const [smaPeriods, setSmaPeriods] = useState({ short: 8, mid: 21, long: 50 });
   const [candles, setCandles] = useState([]);
+  const [rangeDays, setRangeDays] = useState(90);
 
   // ── SMA alignment derived from chart candles ─────────────────────────────
   const smaAlignment = useMemo(() => {
@@ -833,10 +834,39 @@ export default function TradesPage() {
     if (symbol) fetchCalls(symbol, config);
   }
 
+  // ── Fetch real candle data from Schwab via backend ──────────────────────
+  async function fetchCandlesData(sym, range = rangeDays) {
+    if (!sym) return;
+    try {
+      const data = await getCandles(sym, range);
+      if (data?.candles?.length) {
+        setCandles(data.candles);
+      } else {
+        // Fallback to synthetic if no candle data (e.g. Schwab disconnected)
+        const q = await getQuote(sym).catch(() => null);
+        const price = q?.last || q?.close || q?.price;
+        if (price) setCandles(generateCandles(price));
+      }
+    } catch {
+      // Fallback to synthetic on error
+      try {
+        const q = await getQuote(sym);
+        const price = q?.last || q?.close || q?.price;
+        if (price) setCandles(generateCandles(price));
+      } catch { /* no chart data available */ }
+    }
+  }
+
+  function handleRangeChange(newRange) {
+    setRangeDays(newRange);
+    if (symbol) fetchCandlesData(symbol, newRange);
+  }
+
   // ── Auto-fetch on mount when symbol is pre-set from URL ──────────────────
   // Handles /trades?symbol=X (from scan card click) and /trades?strategy=X
   useEffect(() => {
     if (!symbol) return;
+    fetchCandlesData(symbol);
     if (!_isLongOptStrat) fetchVerticals(symbol);
     if (_isLongOptStrat)  fetchCalls(symbol);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -859,7 +889,7 @@ export default function TradesPage() {
       });
       const underlying = data.underlying_price || 0;
       setVertUnderlying(underlying);
-      // Use underlying price to seed chart if quote fetch hasn't already
+      // Seed chart with synthetic data if real candles haven't loaded yet
       if (underlying > 0) {
         setCandles(prev => prev.length ? prev : generateCandles(underlying));
       }
@@ -923,12 +953,8 @@ export default function TradesPage() {
     setExpandedRowId(null);
     setEvaluations({});
     setCandles([]);
-    // Fetch quote immediately to seed SMA chart
-    try {
-      const q = await getQuote(sym);
-      const price = q?.last || q?.close || q?.price;
-      if (price) setCandles(generateCandles(price));
-    } catch { /* chart will fall back to underlying price when analysis returns */ }
+    // Fetch real candle data for the SMA chart
+    fetchCandlesData(sym);
     if (vertExpanded) fetchVerticals(sym);
     if (callsExpanded) fetchCalls(sym);
   }
@@ -1206,6 +1232,9 @@ export default function TradesPage() {
               candles={candles}
               smaPeriods={smaPeriods}
               onPeriodsChange={setSmaPeriods}
+              rangeDays={rangeDays}
+              onRangeChange={handleRangeChange}
+              requestedRange={rangeDays}
               symbol={symbol}
             />
           ) : (
