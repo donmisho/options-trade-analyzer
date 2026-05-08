@@ -1,5 +1,5 @@
 """
-MCP Server — OTA-605 Entra OAuth 2.1 Resource Server + OTA-606/607 tools.
+MCP Server — OTA-605 Entra OAuth 2.1 Resource Server + OTA-606/607/608 tools.
 
 Mounts the `ota-market-data` MCP server at /mcp inside the existing FastAPI
 process. Auth follows the OAuth 2.1 Resource Server pattern: Microsoft Entra
@@ -20,12 +20,12 @@ import logging
 import math
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Optional
 
 import jwt
 from jwt import PyJWKClient
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.types import ASGIApp
 
@@ -38,6 +38,7 @@ from app.core.config import settings
 from app.core.secrets import SecretsManager
 from app.models.database import AgentRunLog, User
 from app.models.session import async_session
+from app.providers.factory import CONTEXT_SOURCE_REGISTRY
 
 logger = logging.getLogger(__name__)
 
@@ -696,3 +697,163 @@ async def get_smas(ticker: str, periods: list[int] | None = None) -> dict:
             pass
 
         return {"error": True, "error_code": error_code, "message": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# MCP Tools — OTA-608
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+async def get_earnings_date(ticker: str) -> dict:
+    """Get the next confirmed earnings date for a stock, or confirm ETF status.
+
+    For equities and ADRs, returns the next scheduled earnings date from
+    Finnhub's confirmed-events feed, the time of day (before open / after
+    close), and the number of calendar days until the event. Use this to
+    check the no-earnings-holds rule before recommending option trades.
+
+    For ETFs and other non-equity security types, returns immediately with
+    next_earnings: null and is_etf: true — ETFs don't report earnings and
+    automatically satisfy the no-earnings-holds rule.
+
+    Args:
+        ticker: Stock or ETF symbol (e.g. "MSFT", "QQQ", "SPY").
+
+    Returns:
+        For equities: ticker, next_earnings (date, time, confirmed, source),
+        and days_until. For ETFs: ticker, next_earnings null, is_etf true.
+        Returns an error object if the ticker is not in the symbol reference
+        database or if Finnhub has no earnings record for the ticker.
+    """
+    t0 = time.monotonic()
+    user_id = _get_mcp_user_id()
+
+    try:
+        # Step 1: Look up security type from symbol_reference (no ORM model)
+        async with async_session() as db:
+            result = await db.execute(
+                text("SELECT asset_type FROM symbol_reference WHERE symbol = :sym"),
+                {"sym": ticker.upper()},
+            )
+            row = result.fetchone()
+
+        if row is None:
+            latency_ms = int((time.monotonic() - t0) * 1000)
+            try:
+                async with async_session() as db:
+                    await mcp_tool_observability(
+                        "get_earnings_date", ticker=ticker, user_id=user_id,
+                        latency_ms=latency_ms, success=False,
+                        error_code="TICKER_NOT_FOUND", db=db,
+                    )
+            except Exception:
+                pass
+            return {
+                "error": True,
+                "error_code": "TICKER_NOT_FOUND",
+                "message": f"Ticker {ticker.upper()} not found in symbol reference.",
+            }
+
+        asset_type = row[0]
+
+        # Step 2: Non-equity, non-ADR → ETF short-circuit (no Finnhub call)
+        if asset_type not in ("Equity", "ADR"):
+            latency_ms = int((time.monotonic() - t0) * 1000)
+            async with async_session() as db:
+                await mcp_tool_observability(
+                    "get_earnings_date", ticker=ticker, user_id=user_id,
+                    latency_ms=latency_ms, success=True, db=db,
+                )
+            return {
+                "ticker": ticker.upper(),
+                "next_earnings": None,
+                "is_etf": True,
+            }
+
+        # Step 3: Equity/ADR → call FinnhubEarnings adapter
+        source = CONTEXT_SOURCE_REGISTRY.get("finnhub_earnings")
+        if source is None:
+            latency_ms = int((time.monotonic() - t0) * 1000)
+            try:
+                async with async_session() as db:
+                    await mcp_tool_observability(
+                        "get_earnings_date", ticker=ticker, user_id=user_id,
+                        latency_ms=latency_ms, success=False,
+                        error_code="EARNINGS_DATA_UNAVAILABLE", db=db,
+                    )
+            except Exception:
+                pass
+            return {
+                "error": True,
+                "error_code": "EARNINGS_DATA_UNAVAILABLE",
+                "message": "Finnhub earnings provider not registered.",
+            }
+
+        raw = await source.fetch(ticker.upper())
+        normalized = source.normalize(raw)
+
+        earnings_date_str = normalized.get("next_earnings_date")
+
+        if not earnings_date_str:
+            latency_ms = int((time.monotonic() - t0) * 1000)
+            async with async_session() as db:
+                await mcp_tool_observability(
+                    "get_earnings_date", ticker=ticker, user_id=user_id,
+                    latency_ms=latency_ms, success=False,
+                    error_code="EARNINGS_DATA_UNAVAILABLE", db=db,
+                )
+            return {
+                "error": True,
+                "error_code": "EARNINGS_DATA_UNAVAILABLE",
+                "message": f"No upcoming earnings date found for {ticker.upper()}.",
+            }
+
+        # Compute days_until
+        earnings_date = date.fromisoformat(earnings_date_str)
+        today = date.today()
+        days_until = (earnings_date - today).days
+
+        # Map Finnhub time_of_day codes to spec labels
+        time_map = {"bmo": "before_open", "amc": "after_close", "dmh": "during_market_hours"}
+        time_label = time_map.get(normalized.get("time_of_day"), normalized.get("time_of_day"))
+
+        latency_ms = int((time.monotonic() - t0) * 1000)
+
+        response = {
+            "ticker": ticker.upper(),
+            "next_earnings": {
+                "date": earnings_date_str,
+                "time": time_label,
+                "confirmed": True,
+                "source": "finnhub",
+            },
+            "days_until": days_until,
+        }
+
+        async with async_session() as db:
+            await mcp_tool_observability(
+                "get_earnings_date", ticker=ticker, user_id=user_id,
+                latency_ms=latency_ms, success=True, db=db,
+            )
+
+        return response
+
+    except Exception as e:
+        latency_ms = int((time.monotonic() - t0) * 1000)
+
+        try:
+            async with async_session() as db:
+                await mcp_tool_observability(
+                    "get_earnings_date", ticker=ticker, user_id=user_id,
+                    latency_ms=latency_ms, success=False,
+                    error_code="EARNINGS_DATA_UNAVAILABLE", db=db,
+                )
+        except Exception:
+            pass
+
+        return {
+            "error": True,
+            "error_code": "EARNINGS_DATA_UNAVAILABLE",
+            "message": str(e),
+        }
