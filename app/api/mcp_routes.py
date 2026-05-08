@@ -105,12 +105,12 @@ class EntraTokenVerifier:
             logger.warning(f"MCP auth: unexpected error during token validation: {e}")
             return None
 
-        # Check required scope
-        scopes = claims.get("scp", "").split()
-        if self._required_scope not in scopes:
+        # Check required scope (Entra JWT uses short form e.g. "mcp.invoke")
+        scopes_short = claims.get("scp", "").split()
+        if self._required_scope not in scopes_short:
             logger.warning(
                 f"MCP auth: token missing required scope '{self._required_scope}' "
-                f"(has: {scopes})"
+                f"(has: {scopes_short})"
             )
             return None
 
@@ -135,10 +135,18 @@ class EntraTokenVerifier:
         # Store resolved user_id in contextvar for tool handlers
         _mcp_user_id_var.set(str(user.id))
 
+        # Include both short ("mcp.invoke") and fully qualified
+        # ("api://<client-id>/mcp.invoke") scope forms. Entra JWT uses
+        # short form; SDK middleware checks against AuthSettings.required_scopes
+        # which uses the fully qualified form.
+        scopes_full = scopes_short + [
+            f"{self._audience}/{s}" for s in scopes_short
+        ]
+
         return AccessToken(
             token=token,
             client_id=claims.get("appid", claims.get("azp", "")),
-            scopes=scopes,
+            scopes=scopes_full,
             expires_at=claims.get("exp"),
         )
 
@@ -165,7 +173,7 @@ mcp = FastMCP(
     auth=AuthSettings(
         issuer_url=f"https://login.microsoftonline.com/{settings.entra_tenant_id}/v2.0",
         resource_server_url=_get_resource_server_url(),
-        required_scopes=[settings.entra_mcp_required_scope],
+        required_scopes=[f"{settings.entra_mcp_application_id_uri}/{settings.entra_mcp_required_scope}"],
     ),
     streamable_http_path="/",
     stateless_http=True,
