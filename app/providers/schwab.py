@@ -108,6 +108,7 @@ class SchwabMarketData(MarketDataProvider):
 
         return {
             "symbol": symbol_data.get("symbol", symbol.upper()),
+            "description": symbol_data.get("description", ""),
             "price": quote.get("lastPrice", 0),
             "change": quote.get("netChange", 0),
             "change_pct": quote.get("netPercentChange", 0),

@@ -2,11 +2,11 @@
  * ScanCard — Displays a single symbol's scan result on the Security Strategies page.
  *
  * Props:
- *   symbol, price, change, changePercent, volume, signal, isNew,
+ *   symbol, description, price, change, changePercent, volume, signal, isNew,
  *   strategies: [{key, label, score}], signalSummary, ivRank, onClick
  */
 
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { C, mono } from '../styles/tokens';
 import './ScanCard.css';
 
@@ -38,10 +38,17 @@ function formatVolume(v) {
 }
 
 export default function ScanCard({
-  symbol, price, change, changePercent, volume,
+  symbol, description, price, change, changePercent, volume,
   signal, isNew, strategies = [], signalSummary, ivRank, onClick, onRemove,
 }) {
   const [hovered, setHovered] = useState(false);
+  const nameRef = useRef(null);
+  const [isTruncated, setIsTruncated] = useState(false);
+
+  useEffect(() => {
+    const el = nameRef.current;
+    if (el) setIsTruncated(el.scrollWidth > el.clientWidth);
+  }, [description]);
 
   const sig = (signal || 'NEUTRAL').toUpperCase();
   const badge = SIGNAL_BADGE[sig] || SIGNAL_BADGE.NEUTRAL;
@@ -96,15 +103,16 @@ export default function ScanCard({
         >×</button>
       )}
 
-      {/* ── Header: symbol · signal badge · NEW badge ── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 14, fontWeight: 700, color: '#e6edf3', fontFamily: mono }}>
+      {/* ── Header: symbol · signal badge · NEW badge · description ── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, minWidth: 0 }}>
+        <span style={{ fontSize: 14, fontWeight: 700, color: '#e6edf3', fontFamily: mono, flexShrink: 0 }}>
           {symbol}
         </span>
         <span style={{
           fontSize: 9, fontWeight: 700, fontFamily: mono,
           padding: '2px 5px', borderRadius: 3,
           background: badge.bg, color: badge.color,
+          flexShrink: 0,
         }}>
           {sig}
         </span>
@@ -113,8 +121,28 @@ export default function ScanCard({
             fontSize: 8, fontWeight: 700, fontFamily: mono,
             padding: '1px 4px', borderRadius: 3,
             background: 'rgba(45,212,191,0.2)', color: '#2dd4bf',
+            flexShrink: 0,
           }}>
             NEW
+          </span>
+        )}
+        {description && (
+          <span
+            ref={nameRef}
+            title={isTruncated ? description : undefined}
+            style={{
+              fontSize: 10,
+              fontWeight: 400,
+              color: 'var(--muted)',
+              fontFamily: mono,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              flex: 1,
+              minWidth: 0,
+            }}
+          >
+            {description}
           </span>
         )}
       </div>

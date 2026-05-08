@@ -122,6 +122,7 @@ function buildScanResult(sym, data, extra = {}) {
   const ivRaw = strats[0]?.best_trade?.iv_rank ?? strats[0]?.best_trade?.iv;
   return {
     symbol:        sym,
+    description:   data.quote?.description || '',
     price:         data.quote?.price,
     change:        data.quote?.change,
     changePercent: data.quote?.change_pct,

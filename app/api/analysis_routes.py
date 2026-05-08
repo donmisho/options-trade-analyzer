@@ -652,6 +652,7 @@ async def get_strategy_scorecard(
             "change_pct":  q.get("change_pct"),
             "volume":      q.get("volume"),
             "rel_volume":  q.get("volume_ratio"),
+            "description": q.get("description", ""),
         }
 
     sma_signal = None
