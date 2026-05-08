@@ -487,7 +487,9 @@ async def oauth_protected_resource_metadata():
         "authorization_servers": [
             f"https://login.microsoftonline.com/{settings.entra_tenant_id}/v2.0"
         ],
-        "scopes_supported": [settings.entra_mcp_required_scope],
+        "scopes_supported": [
+            f"{settings.entra_mcp_application_id_uri}/{settings.entra_mcp_required_scope}"
+        ],
         "bearer_methods_supported": ["header"],
     }
 
