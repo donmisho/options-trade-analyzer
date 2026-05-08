@@ -1,20 +1,21 @@
 """
-MCP Server — OTA-605 foundation + OTA-606 market-data tools + OTA-607 SMA tool.
+MCP Server — OTA-605 Entra OAuth 2.1 Resource Server + OTA-606/607 tools.
 
 Mounts the `ota-market-data` MCP server at /mcp inside the existing FastAPI
-process. Exposes get_quote, get_option_chain, and get_smas tools that wrap
-the active market-data provider adapter (Pattern 1 / ADR-4 pass-through).
+process. Auth follows the OAuth 2.1 Resource Server pattern: Microsoft Entra
+is the Authorization Server; OTA's /mcp is the Resource Server. The MCP Python
+SDK's TokenVerifier validates each access token (JWKS signature, audience,
+scope, expiry). User identity is resolved from the JWT's oid claim to a User
+row in the users table (User.id == Entra OID).
 
-Auth: Bearer token validated against Key Vault (ADR-2 in mcp-server-spec.md).
 The BFF cookie/CSRF path does NOT apply to /mcp — claude.ai is not a browser.
 
-System principal: Every authenticated MCP request resolves to the active admin
-user row in the users table (ADR-3). The bearer token does not encode identity.
-
 Observability: mcp_tool_observability() opens an OTel span and writes an
-agent_run_log row. Fire-and-forget — failures never block the tool response.
+agent_run_log row per request with the resolved user_id. Fire-and-forget —
+failures never block the tool response.
 """
 
+import contextvars
 import logging
 import math
 import time
@@ -22,13 +23,16 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
+import jwt
+from jwt import PyJWKClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from starlette.requests import Request
-from starlette.responses import Response
-from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette.types import ASGIApp
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.auth.provider import AccessToken
+from mcp.server.auth.settings import AuthSettings
+from mcp.server.auth.middleware.auth_context import get_access_token
 
 from app.core.config import settings
 from app.core.secrets import SecretsManager
@@ -38,47 +42,138 @@ from app.models.session import async_session
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
+# Contextvar: resolved user_id for the current MCP request
+# ---------------------------------------------------------------------------
+# Set during token verification; read by tool handlers for observability.
+_mcp_user_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "mcp_user_id", default=None
+)
+
+
+# ---------------------------------------------------------------------------
+# Entra JWT Token Verifier (implements MCP SDK TokenVerifier protocol)
+# ---------------------------------------------------------------------------
+
+class EntraTokenVerifier:
+    """Validate Entra-issued JWTs for the MCP Resource Server.
+
+    Implements the mcp.server.auth.provider.TokenVerifier protocol:
+        async def verify_token(self, token: str) -> AccessToken | None
+
+    Validates: JWKS signature (RS256), audience, issuer, expiry, required scope.
+    Resolves: oid claim → User row (User.id == Entra OID). Returns None if the
+    user is not provisioned — the SDK treats this as a 401.
+    """
+
+    def __init__(self):
+        self._jwks_url = (
+            f"https://login.microsoftonline.com/{settings.entra_tenant_id}"
+            f"/discovery/v2.0/keys"
+        )
+        # Accept both v1.0 and v2.0 issuer formats. Which one Entra uses depends
+        # on the accessTokenAcceptedVersion in the app registration manifest.
+        # az CLI issues v1.0 tokens; claude.ai may issue either.
+        tenant = settings.entra_tenant_id
+        self._valid_issuers = [
+            f"https://login.microsoftonline.com/{tenant}/v2.0",
+            f"https://sts.windows.net/{tenant}/",
+        ]
+        self._audience = settings.entra_mcp_application_id_uri
+        self._required_scope = settings.entra_mcp_required_scope
+        self._jwks_client = PyJWKClient(self._jwks_url, cache_keys=True)
+
+    async def verify_token(self, token: str) -> AccessToken | None:
+        """Verify a bearer token and return access info if valid."""
+        try:
+            signing_key = self._jwks_client.get_signing_key_from_jwt(token)
+            claims = jwt.decode(
+                token,
+                signing_key.key,
+                algorithms=["RS256"],
+                audience=self._audience,
+                issuer=self._valid_issuers,
+                options={"verify_exp": True},
+            )
+        except jwt.ExpiredSignatureError:
+            logger.debug("MCP auth: token expired")
+            return None
+        except jwt.InvalidTokenError as e:
+            logger.debug(f"MCP auth: token validation failed: {e}")
+            return None
+        except Exception as e:
+            logger.warning(f"MCP auth: unexpected error during token validation: {e}")
+            return None
+
+        # Check required scope
+        scopes = claims.get("scp", "").split()
+        if self._required_scope not in scopes:
+            logger.warning(
+                f"MCP auth: token missing required scope '{self._required_scope}' "
+                f"(has: {scopes})"
+            )
+            return None
+
+        # Resolve oid → User
+        oid = claims.get("oid")
+        if not oid:
+            logger.warning("MCP auth: token missing oid claim")
+            return None
+
+        try:
+            async with async_session() as db:
+                result = await db.execute(select(User).where(User.id == oid))
+                user = result.scalar_one_or_none()
+        except Exception as e:
+            logger.error(f"MCP auth: DB lookup failed for oid {oid}: {e}")
+            return None
+
+        if user is None:
+            logger.warning(f"MCP auth: oid {oid} not provisioned in users table")
+            return None
+
+        # Store resolved user_id in contextvar for tool handlers
+        _mcp_user_id_var.set(str(user.id))
+
+        return AccessToken(
+            token=token,
+            client_id=claims.get("appid", claims.get("azp", "")),
+            scopes=scopes,
+            expires_at=claims.get("exp"),
+        )
+
+
+# ---------------------------------------------------------------------------
 # FastMCP server instance — Stories 2–4 import this to register @mcp.tool()
 # ---------------------------------------------------------------------------
 
+def _get_resource_server_url() -> str:
+    """Derive the MCP resource server URL from the environment."""
+    if settings.app_env == "production":
+        return "https://oa.tmtctech.ai/mcp"
+    elif settings.app_env != "development" or settings.azure_keyvault_url:
+        # Deployed dev/staging environment
+        return "https://oa-dev.tmtctech.ai/mcp"
+    return "https://127.0.0.1:8000/mcp"
+
+
+_token_verifier = EntraTokenVerifier()
+
 mcp = FastMCP(
     "ota-market-data",
+    token_verifier=_token_verifier,
+    auth=AuthSettings(
+        issuer_url=f"https://login.microsoftonline.com/{settings.entra_tenant_id}/v2.0",
+        resource_server_url=_get_resource_server_url(),
+        required_scopes=[settings.entra_mcp_required_scope],
+    ),
     streamable_http_path="/",
     stateless_http=True,
     host="0.0.0.0",  # Disables auto DNS-rebinding protection (prod is behind Cloudflare)
 )
 
-# ---------------------------------------------------------------------------
-# System principal resolver (ADR-3)
-# ---------------------------------------------------------------------------
-
-# Cached after first resolution — no per-request DB hit.
-# If multiple admin users ever exist, add an is_system_principal boolean
-# column or disambiguate by username.
-_system_principal: Optional[User] = None
-
-
-async def get_system_principal(session: AsyncSession) -> User:
-    """Resolve the user_id that MCP tool calls act on behalf of."""
-    global _system_principal
-    if _system_principal is None:
-        result = await session.execute(
-            select(User)
-            .where(User.role == "admin")
-            .where(User.is_active == True)  # noqa: E712
-            .limit(1)
-        )
-        _system_principal = result.scalar_one_or_none()
-        if _system_principal is None:
-            raise RuntimeError(
-                "MCP system principal unresolvable: no active admin user. "
-                "Create an admin User row before enabling MCP."
-            )
-    return _system_principal
-
 
 # ---------------------------------------------------------------------------
-# Bearer token auth middleware (ADR-2)
+# Initialization — called from main.py lifespan
 # ---------------------------------------------------------------------------
 
 _secrets_manager: Optional[SecretsManager] = None
@@ -97,62 +192,15 @@ def init_mcp_provider(provider_factory) -> None:
     _provider_factory = provider_factory
 
 
-def _get_bearer_secret_name() -> str:
-    """Derive the Key Vault secret name from the current environment."""
-    if settings.app_env == "production":
-        return "mcp-bearer-token-prod"
-    return "mcp-bearer-token-dev"
-
-
-class MCPBearerAuthMiddleware:
-    """
-    ASGI middleware that enforces Bearer token auth on all MCP requests.
-
-    Wraps the Starlette app returned by FastMCP.streamable_http_app().
-    Missing or invalid token → 401 with no body.
-    """
-
-    def __init__(self, app: ASGIApp) -> None:
-        self.app = app
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http":
-            await self.app(scope, receive, send)
-            return
-
-        request = Request(scope)
-        auth_header = request.headers.get("authorization", "")
-
-        if not auth_header.startswith("Bearer "):
-            response = Response(status_code=401)
-            await response(scope, receive, send)
-            return
-
-        token = auth_header[7:]  # Strip "Bearer " prefix
-
-        if _secrets_manager is None:
-            logger.error("MCP: SecretsManager not initialized — rejecting request")
-            response = Response(status_code=401)
-            await response(scope, receive, send)
-            return
-
-        expected_token = _secrets_manager.get(_get_bearer_secret_name())
-        if not expected_token or token != expected_token:
-            response = Response(status_code=401)
-            await response(scope, receive, send)
-            return
-
-        await self.app(scope, receive, send)
-
-
 def get_mcp_app() -> ASGIApp:
-    """Return the MCP Starlette app wrapped with bearer auth middleware.
+    """Return the MCP Starlette app with Entra OAuth auth.
 
-    Also initializes the session manager so it can be started in main.py's lifespan
-    via start_mcp_session_manager(). FastAPI does not propagate lifespan events to
-    mounted sub-apps, so we manage it explicitly.
+    The SDK's streamable_http_app() automatically wires:
+    - BearerAuthBackend (validates JWT via EntraTokenVerifier)
+    - AuthContextMiddleware (populates auth_context_var)
+    - RequireAuthMiddleware (checks scopes, returns 401/403 with WWW-Authenticate)
     """
-    return MCPBearerAuthMiddleware(mcp.streamable_http_app())
+    return mcp.streamable_http_app()
 
 
 async def start_mcp_session_manager():
@@ -251,6 +299,15 @@ def _get_provider():
     return _provider_factory.get_market_data(settings.default_market_data_provider)
 
 
+def _get_mcp_user_id() -> str | None:
+    """Return the resolved user_id from the current MCP request context.
+
+    Set by EntraTokenVerifier.verify_token() during auth. Returns None if
+    called outside an authenticated MCP request (e.g., during startup).
+    """
+    return _mcp_user_id_var.get()
+
+
 # ---------------------------------------------------------------------------
 # MCP Tools — OTA-606
 # ---------------------------------------------------------------------------
@@ -274,17 +331,9 @@ async def get_quote(ticker: str) -> dict:
         provider is unavailable.
     """
     t0 = time.monotonic()
-    user_id = None
+    user_id = _get_mcp_user_id()
 
     try:
-        # Resolve system principal for observability
-        async with async_session() as db:
-            try:
-                principal = await get_system_principal(db)
-                user_id = str(principal.id)
-            except Exception:
-                pass  # Non-blocking — observability only
-
         provider = _get_provider()
         result = await provider.get_quote(ticker)
 
@@ -363,17 +412,9 @@ async def get_option_chain(
         object with error_code on failure.
     """
     t0 = time.monotonic()
-    user_id = None
+    user_id = _get_mcp_user_id()
 
     try:
-        # Resolve system principal for observability
-        async with async_session() as db:
-            try:
-                principal = await get_system_principal(db)
-                user_id = str(principal.id)
-            except Exception:
-                pass
-
         # Compute DTE from expiration string
         try:
             exp_date = datetime.strptime(expiration, "%Y-%m-%d").date()
@@ -520,20 +561,12 @@ async def get_smas(ticker: str, periods: list[int] | None = None) -> dict:
         for a requested period.
     """
     t0 = time.monotonic()
-    user_id = None
+    user_id = _get_mcp_user_id()
 
     if periods is None:
         periods = [8, 21, 50]
 
     try:
-        # Resolve system principal for observability
-        async with async_session() as db:
-            try:
-                principal = await get_system_principal(db)
-                user_id = str(principal.id)
-            except Exception:
-                pass
-
         provider = _get_provider()
 
         # Determine how many months of daily history to request.

@@ -57,7 +57,7 @@ from app.api.service_routes import router as service_router, init_service_routes
 from app.ai import AnthropicAdapter, FoundryEvalAdapter
 from app.api.changelog_routes import router as changelog_router, init_changelog_routes
 from app.middleware.csrf import CSRFMiddleware
-from app.api.mcp_routes import get_mcp_app, init_mcp_routes, start_mcp_session_manager
+from app.api.mcp_routes import get_mcp_app, init_mcp_routes, init_mcp_provider, start_mcp_session_manager
 
 # Dev-only test routes — imported and registered only outside production
 if settings.app_env != "production":
@@ -198,8 +198,18 @@ async def lifespan(app: FastAPI):
             )
         logger.info(f"Required secrets validated: {len(_required_secrets)} OK")
 
-    # 2b. Initialize MCP bearer auth (reads token from Key Vault)
+    # 2b. Initialize MCP auth (Entra OAuth 2.1 Resource Server — OTA-605)
     init_mcp_routes(secrets_manager)
+
+    # Verify mcp-entra-client-secret is accessible (used by OTA-609 connector config)
+    _mcp_secret = secrets_manager.get("mcp-entra-client-secret")
+    if _mcp_secret:
+        logger.info("MCP: mcp-entra-client-secret accessible in Key Vault")
+    else:
+        logger.warning(
+            "MCP: mcp-entra-client-secret not found in Key Vault — "
+            "claude.ai connector configuration (OTA-609) will need it"
+        )
 
     # 2c. Initialize changelog routes (deploy recording token from Key Vault)
     init_changelog_routes(secrets_manager)
@@ -235,6 +245,7 @@ async def lifespan(app: FastAPI):
     init_analysis_routes(provider_factory)
     init_position_routes(provider_factory)
     init_named_watchlist_routes(provider_factory)
+    init_mcp_provider(provider_factory)
     if settings.app_env != "production":
         _init_test_routes(provider_factory)
 
@@ -455,12 +466,30 @@ if settings.app_env != "production":
     app.include_router(test_router, prefix="/api/v1/test")
 
 # --- MCP Server (OTA-605) ---
-# Mounted as ASGI sub-app at /mcp. Bearer auth is handled by MCPBearerAuthMiddleware
-# inside the sub-app — the BFF cookie/CSRF path does not apply.
+# Mounted as ASGI sub-app at /mcp. Entra OAuth 2.1 Resource Server auth is handled
+# by the MCP SDK's BearerAuthBackend + RequireAuthMiddleware inside the sub-app —
+# the BFF cookie/CSRF path does not apply.
 # Canonical URL: /mcp/ (with trailing slash). Starlette Mount strips the /mcp prefix
 # and passes / to the sub-app's internal route. Configure the claude.ai connector
 # with the trailing-slash URL: https://oa.tmtctech.ai/mcp/
 app.mount("/mcp", get_mcp_app())
+
+
+# --- OAuth Protected Resource Metadata (RFC 9728) ---
+# Discovery endpoint for MCP auth — reachable without auth so clients can
+# discover the authorization server before obtaining a token.
+@app.get("/.well-known/oauth-protected-resource/mcp")
+async def oauth_protected_resource_metadata():
+    """RFC 9728 OAuth Protected Resource Metadata for the MCP server."""
+    from app.api.mcp_routes import _get_resource_server_url
+    return {
+        "resource": _get_resource_server_url(),
+        "authorization_servers": [
+            f"https://login.microsoftonline.com/{settings.entra_tenant_id}/v2.0"
+        ],
+        "scopes_supported": [settings.entra_mcp_required_scope],
+        "bearer_methods_supported": ["header"],
+    }
 
 
 # --- Health Check ---

@@ -78,6 +78,11 @@ class Settings(BaseSettings):
     entra_redirect_uri_dev: str = "https://127.0.0.1:8000/api/v1/auth/entra/callback"
     entra_redirect_uri_prod: str = "https://oa.tmtctech.ai/api/v1/auth/entra/callback"
 
+    # --- Entra ID — MCP Resource Server (OTA-605) ---
+    entra_mcp_client_id: str = ""
+    entra_mcp_application_id_uri: str = ""
+    entra_mcp_required_scope: str = "mcp.invoke"
+
     # --- BFF Session Management (OTA-461) ---
     session_ttl_hours: int = 24
     session_cookie_name: str = "ota_session"

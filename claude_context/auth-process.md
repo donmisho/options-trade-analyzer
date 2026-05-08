@@ -1,4 +1,4 @@
-# Options Analyzer — auth-process.md (Updated 2026-05-07 UTC)
+# Options Analyzer — auth-process.md (Updated 2026-05-07 22:00 UTC)
 # Epic: OTA-477 | Feature: OTA-482
 
 ## Table of Contents
@@ -357,45 +357,77 @@ the React app.
 
 ---
 
-## MCP Bearer Token Auth (OTA-605)
+## ADR-3: MCP Resource Server Auth (OTA-605)
 
 **Decision Date:** 2026-05-07
-**Change Log:** Initial decision
+**Change Log:** Initial decision (bearer token model). Replaced same day with Entra OAuth 2.1 Resource Server pattern.
 
-The MCP server at `/mcp` uses a separate auth path from the BFF session-cookie
-flow. claude.ai is not a browser — it does not carry cookies, CSRF tokens, or
-session state.
+The MCP server at `/mcp` uses the OAuth 2.1 Resource Server pattern per the
+MCP specification. Microsoft Entra is the Authorization Server; OTA's `/mcp`
+is the Resource Server. claude.ai is not a browser — it does not carry cookies,
+CSRF tokens, or session state.
 
 ### How it works
 
-1. A bearer token is stored in the `options-analyzer` Key Vault as two
-   per-environment secrets: `mcp-bearer-token-dev` and `mcp-bearer-token-prod`
-2. The MCP route code derives the correct secret name from `settings.app_env`
-3. Every request to `/mcp/*` must include `Authorization: Bearer <token>`
-4. `MCPBearerAuthMiddleware` (ASGI middleware wrapping the MCP sub-app) validates
-   the token against the Key Vault value. Missing or invalid → HTTP 401, no body.
-5. Valid requests resolve to a **system principal**: the active admin user row in
-   the `users` table (`role='admin' AND is_active=True`). The bearer token does
-   not encode user identity.
+1. The `ota-mcp-server` Entra app registration exposes the `mcp.invoke` scope
+   and has a client secret stored in Key Vault (`mcp-entra-client-secret`).
+2. claude.ai's custom connector is configured with the app registration's Client
+   ID and Client Secret. When a user invokes an MCP tool, claude.ai obtains an
+   access token from Entra via the OAuth 2.1 authorization code flow.
+3. Every request to `/mcp/*` includes `Authorization: Bearer <entra-jwt>`.
+4. The MCP SDK's `BearerAuthBackend` calls `EntraTokenVerifier.verify_token()`,
+   which validates:
+   - RS256 signature against Entra's JWKS endpoint
+   - `aud` matches `ENTRA_MCP_APPLICATION_ID_URI` (the app registration's Application ID URI)
+   - `iss` matches `https://login.microsoftonline.com/<tenant>/v2.0`
+   - `exp` is in the future
+   - `scp` contains `mcp.invoke`
+5. The `oid` claim is extracted and used to look up a `User` row (`User.id == oid`).
+   Unprovisioned OIDs are rejected (token treated as invalid → 401).
+6. The resolved `user_id` is stored in a contextvar and used by tool handlers for
+   `agent_run_log` observability rows.
 
-### Token rotation
+### Discovery endpoint
 
-Update the secret value in Key Vault. No code change or redeploy required — the
-`SecretsManager` cache is populated on first use and survives until the process
-restarts. For immediate rotation, restart the App Service after updating the
-secret.
+`GET /.well-known/oauth-protected-resource/mcp` returns RFC 9728 JSON listing
+Entra as the authorization server and `mcp.invoke` as the supported scope.
+Reachable without auth. The SDK includes the discovery URL in the
+`WWW-Authenticate` header on 401 responses.
+
+### Settings
+
+| Setting | Source | Purpose |
+|---------|--------|---------|
+| `ENTRA_MCP_CLIENT_ID` | Env / App Service config | App registration's Application (Client) ID |
+| `ENTRA_MCP_APPLICATION_ID_URI` | Env / App Service config | JWT audience claim (`api://<client-id>`) |
+| `ENTRA_MCP_REQUIRED_SCOPE` | Env (default `mcp.invoke`) | Required scope in the JWT |
+| `ENTRA_TENANT_ID` | Env / App Service config | Shared with BFF — Entra tenant ID |
+
+### Credentials
+
+| Credential | Where Stored | Used By |
+|------------|-------------|---------|
+| `mcp-entra-client-secret` | Key Vault (`options-analyzer`) | claude.ai connector (OTA-609) — NOT by the RS |
+| Entra JWKS signing keys | Fetched at runtime from `login.microsoftonline.com` | `EntraTokenVerifier` for signature validation |
+
+The RS does not use the client secret — it only validates JWTs via JWKS.
+The client secret is consumed by the OAuth client (claude.ai) to obtain tokens.
+Credential rotation procedure is documented separately in OTA-609.
 
 ### What does NOT apply to /mcp
 
 - BFF session cookies (`ota_session`)
 - CSRF middleware (`X-CSRF-Token` header)
 - Entra OIDC login/callback flow
+- `app/auth/dependencies.py` — MCP has its own auth path
 
 ### Files
 
 | File | Purpose |
 |------|---------|
-| `app/api/mcp_routes.py` | MCP server, bearer auth middleware, system principal resolver, observability wrapper |
+| `app/api/mcp_routes.py` | MCP server, `EntraTokenVerifier`, OID-to-User resolver, observability wrapper |
+| `app/core/config.py` | `ENTRA_MCP_*` settings |
+| `app/main.py` | RFC 9728 discovery endpoint, MCP mount |
 | `app/middleware/csrf.py` | CSRF exemption for `/mcp` prefix |
 
 ---
@@ -404,5 +436,5 @@ secret.
 
 | Date | Ticket | Change |
 |---|---|---|
-| 2026-05-07 UTC | OTA-605 | Added MCP Bearer Token Auth section. MCP server mounted at `/mcp` with bearer token auth via Key Vault (`mcp-bearer-token-dev` / `mcp-bearer-token-prod`). System principal resolved from `users` table (active admin row). CSRF middleware exempts `/mcp` prefix. |
+| 2026-05-07 UTC | OTA-605 | Replaced MCP Bearer Token Auth section with ADR-3: MCP Resource Server Auth. Pivoted from static bearer token to Entra OAuth 2.1 Resource Server pattern. Auth via JWKS-validated JWT with audience, scope, and OID-to-User resolution. Discovery endpoint at `/.well-known/oauth-protected-resource/mcp` per RFC 9728. Settings: `ENTRA_MCP_CLIENT_ID`, `ENTRA_MCP_APPLICATION_ID_URI`, `ENTRA_MCP_REQUIRED_SCOPE`. |
 | 2026-05-06 UTC | OTA-538 | Retired `entra_auth_routes.py` (MSAL bridge) and `auth_routes.py` (legacy local-password auth). BFF OIDC via `identity_routes.py` is now the only auth path. Merged `get_session_user` and `get_current_user` into a single `get_current_user` resolver. Added `skip_auth` production assertion and required-secrets fail-loud check at startup. Updated Files Reference to reflect resolver rename. |
