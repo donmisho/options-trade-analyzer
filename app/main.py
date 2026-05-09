@@ -481,9 +481,8 @@ app.mount("/mcp", get_mcp_app())
 @app.get("/.well-known/oauth-protected-resource/mcp")
 async def oauth_protected_resource_metadata():
     """RFC 9728 OAuth Protected Resource Metadata for the MCP server."""
-    from app.api.mcp_routes import _get_resource_server_url
     return {
-        "resource": _get_resource_server_url(),
+        "resource": settings.entra_mcp_application_id_uri,
         "authorization_servers": [
             f"https://login.microsoftonline.com/{settings.entra_tenant_id}/v2.0"
         ],
