@@ -43,6 +43,7 @@ from app.api.export_routes import (
     _build_chain_calls_table,
     _build_options_chain_section,
     _build_options_chain_section_position,
+    _build_score_breakdown,
 )
 
 
@@ -1600,3 +1601,87 @@ class TestInvalidationNoAdapterImport:
         assert "from app.providers.ai" not in source
         assert "AnthropicAdapter" not in source
         assert "FoundryAdapter" not in source
+
+
+# ─── OTA-643: Score breakdown table ─────────────────────────────────────────
+
+class TestScoreBreakdownTable:
+    """OTA-643: _build_score_breakdown renders a markdown table."""
+
+    @pytest.fixture
+    def components_no_penalty(self):
+        return {
+            "component_breakdown": [
+                {"key": "ev_score", "label": "Expected value (EV)", "score": 85, "weight": 0.35, "contribution": 29.8},
+                {"key": "rr_score", "label": "Structure fit (vs profile)", "score": 70, "weight": 0.25, "contribution": 17.5},
+                {"key": "prob_score", "label": "Cushion / strike placement", "score": 60, "weight": 0.20, "contribution": 12.0},
+                {"key": "liquidity_score", "label": "Liquidity (bid-ask, volume)", "score": 90, "weight": 0.15, "contribution": 13.5},
+                {"key": "theta_score", "label": "IV environment", "score": 50, "weight": 0.05, "contribution": 2.5},
+            ],
+            "raw_total": 75.3,
+            "adjusted_total": 75,
+            "penalty_reason": None,
+        }
+
+    @pytest.fixture
+    def components_with_penalty(self):
+        return {
+            "component_breakdown": [
+                {"key": "ev_score", "label": "Expected value (EV)", "score": 80, "weight": 0.35, "contribution": 28.0},
+                {"key": "rr_score", "label": "Structure fit (vs profile)", "score": 65, "weight": 0.25, "contribution": 16.3},
+                {"key": "prob_score", "label": "Cushion / strike placement", "score": 55, "weight": 0.20, "contribution": 11.0},
+                {"key": "liquidity_score", "label": "Liquidity (bid-ask, volume)", "score": 85, "weight": 0.15, "contribution": 12.8},
+                {"key": "theta_score", "label": "IV environment", "score": 45, "weight": 0.05, "contribution": 2.3},
+            ],
+            "raw_total": 70.4,
+            "adjusted_total": 55,
+            "penalty_reason": "cushion penalty",
+        }
+
+    def test_heading_present(self, components_no_penalty):
+        result = _build_score_breakdown(components_no_penalty)
+        assert "### Score breakdown" in result
+
+    def test_table_header(self, components_no_penalty):
+        result = _build_score_breakdown(components_no_penalty)
+        assert "| Component | Score | Weight | Contribution |" in result
+
+    def test_five_rows(self, components_no_penalty):
+        result = _build_score_breakdown(components_no_penalty)
+        data_rows = [l for l in result.splitlines() if l.startswith("| ") and not l.startswith("| Component") and not l.startswith("|---") and not l.startswith("| **")]
+        assert len(data_rows) == 5
+
+    def test_ev_row_format(self, components_no_penalty):
+        result = _build_score_breakdown(components_no_penalty)
+        assert "| Expected value (EV) | 85 | 0.35 | 29.8 |" in result
+
+    def test_total_no_penalty(self, components_no_penalty):
+        result = _build_score_breakdown(components_no_penalty)
+        assert "| **Total** | | | **75** |" in result
+
+    def test_total_with_penalty(self, components_with_penalty):
+        result = _build_score_breakdown(components_with_penalty)
+        assert "| **Total** | | | **70.4 → 55 (cushion penalty)** |" in result
+
+    def test_empty_components(self):
+        result = _build_score_breakdown({})
+        assert result == ""
+
+    def test_no_breakdown_key(self):
+        result = _build_score_breakdown({"some_other_key": 42})
+        assert result == ""
+
+    def test_integer_scores(self, components_no_penalty):
+        """Scores are integer, not ##.00."""
+        result = _build_score_breakdown(components_no_penalty)
+        # "85" should appear but not "85.00"
+        assert "| 85 |" in result
+        assert "| 85.00 |" not in result
+
+    def test_weight_two_decimals(self, components_no_penalty):
+        result = _build_score_breakdown(components_no_penalty)
+        assert "| 0.35 |" in result
+
+    def test_contribution_one_decimal(self, components_no_penalty):
+        result = _build_score_breakdown(components_no_penalty)
+        assert "| 29.8 |" in result

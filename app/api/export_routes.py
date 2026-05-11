@@ -1207,6 +1207,53 @@ def _build_greeks_iv_section(legs: list, iv_rank: float | None) -> str:
     return "\n".join(lines)
 
 
+def _build_score_breakdown(components: dict) -> str:
+    """Build the ### Score breakdown table from pipeline_components JSON.
+
+    Reads the structured component_breakdown list persisted by the scoring
+    pipeline (OTA-643 precursor).  Returns empty string if no breakdown data.
+
+    # NOTE: Formatting deviates from the general ##.00 score rule in CLAUDE.md
+    # House Style.  The breakdown table uses integer scores, two-decimal weights,
+    # and one-decimal contributions for readability.  This matches the v2 QA
+    # handoff sample convention.  Do not "fix" to ##.00.  (OTA-643)
+    """
+    breakdown = components.get("component_breakdown")
+    if not breakdown:
+        return ""
+
+    raw_total = components.get("raw_total")
+    adjusted_total = components.get("adjusted_total")
+    penalty_reason = components.get("penalty_reason")
+
+    lines = [
+        "### Score breakdown",
+        "",
+        "| Component | Score | Weight | Contribution |",
+        "|---|---|---|---|",
+    ]
+
+    for comp in breakdown:
+        label = comp.get("label", comp.get("key", "—"))
+        score = comp.get("score", 0)
+        weight = comp.get("weight", 0)
+        contribution = comp.get("contribution", 0)
+        lines.append(f"| {label} | {int(score)} | {weight:.2f} | {contribution:.1f} |")
+
+    # Total row
+    if raw_total is not None and adjusted_total is not None:
+        adj_int = int(round(float(adjusted_total)))
+        raw_1d = float(raw_total)
+        if penalty_reason and abs(raw_1d - adj_int) >= 1:
+            lines.append(f"| **Total** | | | **{raw_1d:.1f} → {adj_int} ({penalty_reason})** |")
+        else:
+            lines.append(f"| **Total** | | | **{adj_int}** |")
+    elif raw_total is not None:
+        lines.append(f"| **Total** | | | **{int(round(float(raw_total)))}** |")
+
+    return "\n".join(lines)
+
+
 # ─── Trade candidate export ──────────────────────────────────────────────────
 
 async def _build_trade_markdown(
@@ -1343,11 +1390,11 @@ async def _build_trade_markdown(
         f"**App score:** {_fmt(score)}",
     ])
 
-    # Score breakdown (only if pipeline_components present)
+    # Score breakdown table (OTA-643)
     if components:
-        lines.extend(["", "### App score breakdown", ""])
-        for comp_name, comp_val in components.items():
-            lines.append(f"- {comp_name}: {_fmt(comp_val) if isinstance(comp_val, (int, float)) else comp_val}")
+        breakdown_section = _build_score_breakdown(components)
+        if breakdown_section:
+            lines.extend(["", breakdown_section])
 
     # Claude's Read
     if claude_read:
@@ -1563,6 +1610,14 @@ async def _build_position_markdown(
         "",
         f"**App score:** {_fmt(score)}",
     ])
+
+    # Score breakdown table (OTA-643) — positions lack pipeline_components,
+    # so this will gracefully produce nothing for now.
+    pc = _safe_json(getattr(position, "pipeline_components", None)) or {}
+    if pc:
+        breakdown_section = _build_score_breakdown(pc)
+        if breakdown_section:
+            lines.extend(["", breakdown_section])
 
     # Claude's Read
     if claude_read:

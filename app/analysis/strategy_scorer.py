@@ -25,10 +25,36 @@ log = logging.getLogger(__name__)
 class StrategyScore:
     strategy_key: str
     label: str
-    score: int                    # 0-100
+    score: int                    # 0-100 (post-penalty)
     best_trade: Optional[dict]    # top-scoring candidate for this strategy
     signal_summary: str           # brief human-readable summary
     metric_scores: dict           # individual metric values for transparency
+    raw_score: Optional[int] = None  # 0-100 pre-penalty; None when no penalty
+    component_breakdown: Optional[list] = None  # [{key, score, weight, contribution}, ...]
+    penalty_reason: Optional[str] = None  # e.g. "cushion penalty" when raw != score
+
+
+# Display-name mapping: internal metric key -> v2 export label.
+# Order matches the QQQ v2 sample row order (OTA-643).
+COMPONENT_DISPLAY_NAMES = {
+    "expected_value":        "Expected value (EV)",
+    "probability_of_profit": "Expected value (EV)",   # folds into EV for display
+    "reward_risk":           "Structure fit (vs profile)",
+    "credit_width_pct":      "Structure fit (vs profile)",
+    "theta_margin_ratio":    "Structure fit (vs profile)",
+    "theta_gamma_ratio":     "Structure fit (vs profile)",
+    "delta_quality":         "Structure fit (vs profile)",
+    "cushion_strike":        "Cushion / strike placement",
+    "sma_alignment_score":   "Technical alignment (SMAs)",
+    "iv_rank":               "IV environment",
+    "iv_percentile_cost":    "IV environment",
+    "runway_score":          "DTE fit",
+    "payout_ratio":          "DTE fit",
+    "delta_otm_score":       "DTE fit",
+    "liquidity":             "Liquidity (bid-ask, volume)",
+    "bid_ask_tightness":     "Liquidity (bid-ask, volume)",
+    "open_interest":         "Liquidity (bid-ask, volume)",
+}
 
 
 # ─── Utilities ──────────────────────────────────────────────────────────────
@@ -228,12 +254,29 @@ def _score_credit_spread_strategy(
     best_idx = composite_scores.index(max(composite_scores))
     best = spreads[best_idx]
     best_score = composite_scores[best_idx]
-    score = min(100, max(0, round(best_score * 100)))
+    raw_score = min(100, max(0, round(best_score * 100)))
+
+    # Capture per-component breakdown for the best candidate (OTA-643 precursor).
+    # Each entry: {key, score (0-100 int), weight, contribution (one decimal)}.
+    breakdown = []
+    for k, w in weights.items():
+        if k == "iv_rank":
+            comp_norm = iv_rank_norm
+        elif k in norm:
+            comp_norm = norm[k][best_idx]
+        else:
+            comp_norm = 0.0
+        comp_score = min(100, max(0, round(comp_norm * 100)))
+        contribution = round(comp_norm * w * 100, 1)
+        breakdown.append({"key": k, "score": comp_score, "weight": w, "contribution": contribution})
 
     # Apply cushion penalty (post-scoring adjustment)
     _cushion_penalty, _cushion_pct = cushion_penalty(best, underlying_price)
+    score = raw_score
+    penalty_reason = None
     if _cushion_penalty != 0:
-        score = max(0, score + _cushion_penalty)
+        score = max(0, raw_score + _cushion_penalty)
+        penalty_reason = "cushion penalty"
 
     best_metrics = {k: round(float(metric_fns[k](best)), 4) for k in weights if k in metric_fns}
     if "iv_rank" in weights:
@@ -260,6 +303,9 @@ def _score_credit_spread_strategy(
         best_trade=best,
         signal_summary=signal_summary,
         metric_scores=best_metrics,
+        raw_score=raw_score if penalty_reason else None,
+        component_breakdown=breakdown,
+        penalty_reason=penalty_reason,
     )
 
 
@@ -394,6 +440,17 @@ def _score_long_option_strategy(
     best_score = composite_scores[best_idx]
     score = min(100, max(0, round(best_score * 100)))
 
+    # Capture per-component breakdown for the best candidate (OTA-643 precursor).
+    breakdown = []
+    for k, w in weights.items():
+        if k in norm:
+            comp_norm = norm[k][best_idx]
+        else:
+            comp_norm = 0.0
+        comp_score = min(100, max(0, round(comp_norm * 100)))
+        contribution = round(comp_norm * w * 100, 1)
+        breakdown.append({"key": k, "score": comp_score, "weight": w, "contribution": contribution})
+
     best_metrics = {k: round(float(metric_fns[k](best)), 4) for k in weights if k in metric_fns}
 
     signal_summary = (
@@ -411,6 +468,9 @@ def _score_long_option_strategy(
         best_trade=best,
         signal_summary=signal_summary,
         metric_scores=best_metrics,
+        raw_score=None,  # no penalty for long options
+        component_breakdown=breakdown,
+        penalty_reason=None,
     )
 
 

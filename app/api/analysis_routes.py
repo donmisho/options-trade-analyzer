@@ -318,12 +318,43 @@ def _build_vertical_candidate(
         "prob_of_profit": spread.get("prob_of_profit"),
     }
 
-    pipeline_components = {
+    # Per-component scores from the engine (raw 0-100 values)
+    engine_scores = {
         "ev_score": spread.get("ev_score"),
         "rr_score": spread.get("rr_score"),
         "prob_score": spread.get("prob_score"),
         "liquidity_score": spread.get("liquidity_score"),
         "theta_score": spread.get("theta_score"),
+    }
+
+    # OTA-643 precursor: structured component breakdown for score table rendering.
+    # Maps engine score keys to display labels and captures weight + contribution.
+    _VERTICAL_COMPONENT_MAP = [
+        ("ev_score",        "Expected value (EV)",            0.35),
+        ("rr_score",        "Structure fit (vs profile)",     0.25),
+        ("prob_score",      "Cushion / strike placement",     0.20),
+        ("liquidity_score", "Liquidity (bid-ask, volume)",    0.15),
+        ("theta_score",     "IV environment",                 0.05),
+    ]
+    component_breakdown = []
+    raw_total = 0.0
+    for key, label, default_weight in _VERTICAL_COMPONENT_MAP:
+        score_val = engine_scores.get(key) or 0
+        score_int = min(100, max(0, round(float(score_val))))
+        contribution = round(float(score_val) * default_weight, 1)
+        raw_total += contribution
+        component_breakdown.append({
+            "key": key, "label": label,
+            "score": score_int, "weight": default_weight,
+            "contribution": contribution,
+        })
+    raw_total = round(raw_total, 1)
+
+    pipeline_components = {
+        **engine_scores,
+        "component_breakdown": component_breakdown,
+        "raw_total": raw_total,
+        "adjusted_total": spread.get("composite_score"),
     }
 
     structure = spread.get("spread_type", "vertical")
@@ -376,12 +407,41 @@ def _build_long_option_candidate(
         "iv_rank": option.get("iv_rank"),
     }
 
-    pipeline_components = {
+    engine_scores = {
         "delta_score": option.get("delta_score"),
         "theta_score": option.get("theta_score"),
         "iv_score": option.get("iv_score"),
         "rr_score": option.get("rr_score"),
         "liquidity_score": option.get("liquidity_score"),
+    }
+
+    # OTA-643 precursor: structured component breakdown for long options.
+    _LONG_COMPONENT_MAP = [
+        ("delta_score",     "Technical alignment (SMAs)",     0.30),
+        ("rr_score",        "Expected value (EV)",            0.25),
+        ("iv_score",        "IV environment",                 0.20),
+        ("theta_score",     "DTE fit",                        0.15),
+        ("liquidity_score", "Liquidity (bid-ask, volume)",    0.10),
+    ]
+    component_breakdown = []
+    raw_total = 0.0
+    for key, label, default_weight in _LONG_COMPONENT_MAP:
+        score_val = engine_scores.get(key) or 0
+        score_int = min(100, max(0, round(float(score_val))))
+        contribution = round(float(score_val) * default_weight, 1)
+        raw_total += contribution
+        component_breakdown.append({
+            "key": key, "label": label,
+            "score": score_int, "weight": default_weight,
+            "contribution": contribution,
+        })
+    raw_total = round(raw_total, 1)
+
+    pipeline_components = {
+        **engine_scores,
+        "component_breakdown": component_breakdown,
+        "raw_total": raw_total,
+        "adjusted_total": option.get("composite_score"),
     }
 
     return TradeCandidate(
