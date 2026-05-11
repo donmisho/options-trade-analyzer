@@ -486,7 +486,7 @@ async def export_trade_md(
         select(TradeCandidate).where(
             and_(
                 TradeCandidate.trade_key == trade_key,
-                TradeCandidate.user_id == user["user_id"],
+                TradeCandidate.user_id == user["sub"],
             )
         )
     )
@@ -514,7 +514,7 @@ async def export_position_md(
         select(Position).where(
             and_(
                 Position.position_id == position_id,
-                Position.user_id == user["user_id"],
+                Position.user_id == user["sub"],
             )
         )
     )
