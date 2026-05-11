@@ -214,8 +214,11 @@ def _to_response(pos: Position) -> PositionResponse:
         entry_price=entry_price,
         entry_date=pos.entry_date.isoformat(),
         entry_underlying_price=float(pos.entry_underlying_price) if pos.entry_underlying_price is not None else 0.0,
+        entry_iv_rank=float(pos.entry_iv_rank) if pos.entry_iv_rank is not None else None,
+        entry_sma_alignment=_parse_json_field(pos.entry_sma_alignment),
         current_price=current_price,
         current_pnl=float(pos.current_pnl) if pos.current_pnl is not None else None,
+        last_monitored_at=pos.last_monitored_at.isoformat() if pos.last_monitored_at is not None else None,
         health_grade=grade,
         claude_score=pos.claude_score,
         claude_verdict=_parse_json_field(pos.claude_verdict),
@@ -281,7 +284,10 @@ async def _create_original_assessment(db: AsyncSession, pos: Position, req) -> N
     verdict_data = req.claude_verdict or {}
     verdict = verdict_data.get("verdict", "WAIT")
     if verdict not in ("EXECUTE", "WAIT", "PASS"):
-        verdict = "WAIT"
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown verdict '{verdict}' — must be EXECUTE, WAIT, or PASS",
+        )
     score = req.claude_score or verdict_data.get("score", 0) or 0
     claude_read = verdict_data.get("claude_read", "")
 
@@ -365,6 +371,35 @@ def _apply_filters(stmt, user_id: str, status: Optional[str], source: Optional[s
     return stmt
 
 
+def _validate_follow_gate(req) -> list[str]:
+    """
+    OTA-628: Validate follow/take payload. Returns list of failed check
+    descriptions (empty list = all checks passed).
+    """
+    failed = []
+
+    # 1. exit_levels must be present and non-empty
+    if not req.claude_exit_levels:
+        failed.append("claude_exit_levels is null or empty")
+
+    # 2. verdict must be a canonical value
+    verdict_data = req.claude_verdict or {}
+    verdict = verdict_data.get("verdict")
+    if verdict not in ("EXECUTE", "WAIT", "PASS"):
+        failed.append(f"invalid verdict '{verdict}' — must be EXECUTE, WAIT, or PASS")
+
+    # 3. entry_price must be positive
+    if req.entry_price is None or req.entry_price <= 0:
+        failed.append("entry_price is null or <= 0")
+
+    # 4. auto_pass_reason must not be present
+    auto_pass = verdict_data.get("auto_pass_reason")
+    if auto_pass:
+        failed.append(f"auto_pass_reason present: {auto_pass}")
+
+    return failed
+
+
 # ── Endpoints ──────────────────────────────────────────────────────────────────
 
 @router.post("/follow", response_model=PositionResponse, status_code=201)
@@ -377,6 +412,18 @@ async def follow_position(
     _user_id = user.get("sub", "")
     if not _user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
+
+    # OTA-628: Follow gate — reject disqualified payloads
+    failed_checks = _validate_follow_gate(req)
+    if failed_checks:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "detail": f"Follow rejected: {', '.join(failed_checks)}",
+                "code": "FOLLOW_GATE_FAIL",
+                "failed_checks": failed_checks,
+            },
+        )
 
     # OTA-557: ensure trade_structure always has expiration for auto-archive sweep
     _ts = req.trade_structure or {}
@@ -1057,6 +1104,12 @@ async def refresh_position(
         pos.current_pnl = current_premium - entry_price
     pos.last_monitored_at = datetime.now(timezone.utc)
     pos.updated_at = datetime.now(timezone.utc)
+
+    # OTA-630: Mirror assessment verdict/score/exit_levels to parent positions row
+    pos.claude_verdict = json.dumps({"verdict": verdict, "score": score, "synopsis": synopsis, "claude_read": claude_read})
+    pos.claude_score = score
+    if exit_levels_dict:
+        pos.claude_exit_levels = json.dumps(exit_levels_dict)
 
     # 9. Write agent_run_log (non-blocking — catch any failures)
     try:

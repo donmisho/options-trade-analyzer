@@ -25,6 +25,7 @@ async def run_migrations(engine: AsyncEngine) -> None:
         await _m002_positions_drop_user_fk(conn)
         await _m003_create_named_watchlists(conn)
         await _m004_create_user_sessions(conn)
+        await _m005_following_requires_exit_levels(conn)
 
 
 async def _m001_trade_recommendations_add_user_id(conn) -> None:
@@ -282,6 +283,51 @@ async def _m004_create_user_sessions(conn) -> None:
         "CREATE INDEX ix_user_sessions_expires_at ON user_sessions (expires_at)"
     ))
     logger.info("Migration 004: user_sessions table created")
+
+
+async def _m005_following_requires_exit_levels(conn) -> None:
+    """
+    Migration 005: Add CHECK constraint ensuring FOLLOWING positions have
+    non-null claude_exit_levels (OTA-628).
+
+    Pre-flight: fix any existing offending rows before adding the constraint.
+    Idempotent: skips if constraint already exists.
+    """
+    is_mssql = _is_mssql(conn)
+
+    if is_mssql:
+        # Pre-flight: patch any offending FOLLOWING rows with empty JSON
+        await conn.execute(text("""
+            UPDATE positions
+            SET claude_exit_levels = '{}'
+            WHERE status = 'FOLLOWING' AND claude_exit_levels IS NULL
+        """))
+
+        # Check if constraint already exists
+        ck_exists = await conn.execute(text("""
+            SELECT COUNT(*) FROM sys.check_constraints
+            WHERE parent_object_id = OBJECT_ID('positions')
+              AND name = 'ck_positions_following_has_exit_levels'
+        """))
+        if ck_exists.scalar() == 0:
+            logger.info("Migration 005: adding CHECK constraint ck_positions_following_has_exit_levels")
+            await conn.execute(text("""
+                ALTER TABLE positions ADD CONSTRAINT ck_positions_following_has_exit_levels
+                  CHECK ( NOT (status = 'FOLLOWING' AND claude_exit_levels IS NULL) )
+            """))
+            logger.info("Migration 005: CHECK constraint added")
+        else:
+            logger.debug("Migration 005: CHECK constraint already exists — skipping")
+    else:
+        # SQLite: pre-flight patch
+        await conn.execute(text("""
+            UPDATE positions
+            SET claude_exit_levels = '{}'
+            WHERE status = 'FOLLOWING' AND claude_exit_levels IS NULL
+        """))
+        # SQLite does not support ALTER TABLE ADD CONSTRAINT for CHECK constraints.
+        # The constraint is enforced at the application level only for SQLite.
+        logger.debug("Migration 005: SQLite — constraint enforced at application level only")
 
 
 def _is_mssql(conn) -> bool:

@@ -423,8 +423,11 @@ class PositionResponse(BaseModel):
     entry_price: float
     entry_date: str
     entry_underlying_price: float
+    entry_iv_rank: Optional[float] = None
+    entry_sma_alignment: Optional[dict] = None
     current_price: Optional[float] = None
     current_pnl: Optional[float] = None
+    last_monitored_at: Optional[str] = None
     health_grade: Optional[str] = None
     claude_score: Optional[int] = None
     # Phase 2.11 — Claude evaluation data attached at entry

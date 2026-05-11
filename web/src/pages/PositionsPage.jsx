@@ -19,6 +19,7 @@ import {
   getPositionCurrentPrices,
 } from '../api/client';
 import RefreshConfirmDialog from '../components/RefreshConfirmDialog';
+import PositionDetailPanel from '../components/PositionDetailPanel';
 import { useToast } from '../components/Toast';
 import './PageShared.css';
 import './PositionsPage.css';
@@ -77,6 +78,19 @@ function normalizePosition(apiPos) {
     status:         apiPos.status,
     health_grade:   apiPos.health_grade ?? null,
     score:          apiPos.claude_score ?? null,
+    // Full state for expanded row (OTA-631)
+    claude_score:              apiPos.claude_score ?? null,
+    claude_verdict:            apiPos.claude_verdict ?? null,
+    claude_exit_levels:        apiPos.claude_exit_levels ?? null,
+    claude_probability_matrix: apiPos.claude_probability_matrix ?? null,
+    trade_structure:           apiPos.trade_structure ?? null,
+    entry_underlying_price:    apiPos.entry_underlying_price ?? null,
+    entry_iv_rank:             apiPos.entry_iv_rank ?? null,
+    entry_sma_alignment:       apiPos.entry_sma_alignment ?? null,
+    entry_date:                apiPos.entry_date ?? null,
+    last_monitored_at:         apiPos.last_monitored_at ?? null,
+    current_price:             apiPos.current_price ?? null,
+    dte_at_entry:              apiPos.dte_at_entry ?? null,
   };
 }
 
@@ -376,6 +390,7 @@ function PositionsTable({
                       colSpan={colCount}
                       style={{ padding: 0, borderBottom: '1px solid var(--border)' }}
                     >
+                      <PositionDetailPanel pos={pos} />
                       <div className="av-expansion-panel">
                         <AssessmentVersionStack
                           positionId={pos.id}

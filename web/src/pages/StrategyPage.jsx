@@ -15,6 +15,7 @@ import { useApp } from '../context/AppContext';
 import { STRATEGY_CONFIGS } from '../strategy-configs/index';
 import { STRATEGY_COLORS } from '../utils/strategyColors';
 import { PositionHealthBadge } from '../components/PositionHealthBadge';
+import PositionDetailPanel from '../components/PositionDetailPanel';
 import { getPositions, refreshPosition } from '../api/client';
 import RefreshConfirmDialog from '../components/RefreshConfirmDialog';
 import { formatDate } from '../utils/formatDate';
@@ -100,6 +101,17 @@ function normalizePos(apiPos) {
     status:       apiPos.status,
     claude_score: apiPos.claude_score ?? null,
     health_grade: apiPos.health_grade ?? null,
+    // Full state for expanded row (OTA-631)
+    claude_verdict:            apiPos.claude_verdict ?? null,
+    claude_exit_levels:        apiPos.claude_exit_levels ?? null,
+    claude_probability_matrix: apiPos.claude_probability_matrix ?? null,
+    trade_structure:           apiPos.trade_structure ?? null,
+    entry_underlying_price:    apiPos.entry_underlying_price ?? null,
+    entry_iv_rank:             apiPos.entry_iv_rank ?? null,
+    entry_sma_alignment:       apiPos.entry_sma_alignment ?? null,
+    entry_date:                apiPos.entry_date ?? null,
+    last_monitored_at:         apiPos.last_monitored_at ?? null,
+    dte_at_entry:              apiPos.dte_at_entry ?? null,
   };
 }
 
@@ -728,21 +740,8 @@ export default function StrategyPage() {
 
                     {isExpanded && (
                       <tr>
-                        <td
-                          colSpan={11}
-                          style={{
-                            padding: '10px 16px 14px 40px',
-                            borderTop: '2px solid rgba(45,212,191,0.35)',
-                            borderBottom: '1px solid var(--border, #30363d)',
-                            background: 'transparent',
-                          }}
-                        >
-                          <div style={{ fontSize: 10, color: '#8b949e', fontStyle: 'italic' }}>
-                            Position ID: {pos.id}
-                            {' · '}
-                            Status: {pos.status}
-                            {pos.entry_price != null && ` · Entry: ${Number(pos.entry_price).toFixed(2)}`}
-                          </div>
+                        <td colSpan={11} style={{ padding: 0 }}>
+                          <PositionDetailPanel pos={pos} />
                         </td>
                       </tr>
                     )}

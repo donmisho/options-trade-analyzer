@@ -32,6 +32,33 @@ export function formatDate(dateInput, includeTime = false) {
  * @param {Date|string|number} dateInput
  * @returns {string}
  */
+/**
+ * Format a date as relative time ("12 minutes ago", "3 hours ago", etc.)
+ * Falls back to mm-dd-yyyy for dates older than 7 days.
+ */
+export function formatRelativeTime(dateInput) {
+  if (!dateInput) return '';
+  const date = new Date(dateInput);
+  if (isNaN(date.getTime())) return '';
+
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+  const diffHr = Math.floor(diffMs / 3600000);
+  const diffDay = Math.floor(diffMs / 86400000);
+
+  if (diffMin < 1) return 'just now';
+  if (diffMin < 60) return `${diffMin} minute${diffMin !== 1 ? 's' : ''} ago`;
+  if (diffHr < 24) return `${diffHr} hour${diffHr !== 1 ? 's' : ''} ago`;
+  if (diffDay <= 7) return `${diffDay} day${diffDay !== 1 ? 's' : ''} ago`;
+  return formatDate(dateInput);
+}
+
+/**
+ * Format expiration date with DTE: "04-06-2026 (21d)"
+ * @param {Date|string|number} dateInput
+ * @returns {string}
+ */
 export function formatExpiry(dateInput) {
   if (!dateInput) return '';
   const date = new Date(dateInput);

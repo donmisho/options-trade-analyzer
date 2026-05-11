@@ -332,13 +332,39 @@ export default function SectionE({
         alignItems: 'center',
         flexWrap: 'wrap',
       }}>
-        <button style={tealOutlined} onClick={() => onFollow?.()}>
-          Follow (Paper)
-        </button>
-
-        <button style={greenFilled} onClick={() => onTakePosition?.()}>
-          Take Position (Live)
-        </button>
+        {(() => {
+          // OTA-628: Disable Follow/Take for gate-disqualified cards
+          const disableReasons = [];
+          if (autoPassReason) disableReasons.push('Auto-pass: trade disqualified');
+          const upperVerdict = verdict ? verdict.toUpperCase() : '';
+          if (upperVerdict === 'WAIT_FOR_EARNINGS' || upperVerdict === 'PASS')
+            disableReasons.push(`Verdict: ${verdict}`);
+          const isDisabled = disableReasons.length > 0;
+          const tip = disableReasons.join('; ');
+          const disabledStyle = { opacity: 0.35, cursor: 'default', pointerEvents: 'none' };
+          return (
+            <>
+              <span title={isDisabled ? tip : undefined}>
+                <button
+                  style={{ ...tealOutlined, ...(isDisabled ? disabledStyle : {}) }}
+                  onClick={() => !isDisabled && onFollow?.()}
+                  disabled={isDisabled}
+                >
+                  Follow (Paper)
+                </button>
+              </span>
+              <span title={isDisabled ? tip : undefined}>
+                <button
+                  style={{ ...greenFilled, ...(isDisabled ? disabledStyle : {}) }}
+                  onClick={() => !isDisabled && onTakePosition?.()}
+                  disabled={isDisabled}
+                >
+                  Take Position (Live)
+                </button>
+              </span>
+            </>
+          );
+        })()}
 
         <input
           type="text"
