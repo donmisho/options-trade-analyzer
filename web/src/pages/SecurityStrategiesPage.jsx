@@ -30,6 +30,59 @@ import { C, mono } from '../styles/tokens';
 // Source ID for the "All Positions" built-in scan source (matches backend)
 const ALL_POSITIONS_SOURCE_ID = 'all-positions';
 
+// Cache version — bump when cache shape changes to invalidate stale entries
+const CACHE_VERSION = 1;
+
+/**
+ * Reads the per-watchlist scan cache from localStorage.
+ * Returns the map (possibly empty). Handles legacy single-object form by discarding it.
+ */
+function readScanCache() {
+  try {
+    const raw = localStorage.getItem('ota_scan_results');
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    // Legacy shape detection: old form has top-level `sourceId` + `results` + `timestamp`
+    if (parsed.sourceId !== undefined && parsed.results !== undefined && parsed.timestamp !== undefined) {
+      // Discard legacy — replace with empty map
+      localStorage.setItem('ota_scan_results', JSON.stringify({}));
+      return {};
+    }
+    return parsed || {};
+  } catch {
+    localStorage.setItem('ota_scan_results', JSON.stringify({}));
+    return {};
+  }
+}
+
+/**
+ * Writes a single watchlist entry into the per-watchlist scan cache.
+ * Preserves all other entries.
+ */
+function writeScanCacheEntry(sourceId, results) {
+  try {
+    const cache = readScanCache();
+    cache[sourceId] = {
+      results,
+      scanned_at: new Date().toISOString(),
+      version: CACHE_VERSION,
+    };
+    localStorage.setItem('ota_scan_results', JSON.stringify(cache));
+  } catch { /* storage full — skip */ }
+}
+
+/**
+ * Reads a single entry from the per-watchlist cache.
+ * Returns { results, scanned_at } or null if missing/version mismatch.
+ */
+function readScanCacheEntry(sourceId) {
+  const cache = readScanCache();
+  const entry = cache[sourceId];
+  if (!entry) return null;
+  if (entry.version !== CACHE_VERSION) return null;
+  return { results: entry.results || [], scanned_at: entry.scanned_at };
+}
+
 /**
  * Reads strategy overrides from localStorage at scan time (not mount time).
  * Returns the full strategyOverrides map { [strategyKey]: { dte_min, dte_max, ... } }
@@ -144,18 +197,24 @@ export default function SecurityStrategiesPage() {
   // ── Source selection (WatchlistPicker) ─────────────────────────────────
   const [selectedSource, setSelectedSource] = useState(null);
 
+  // ── Track scanned_at for "Last scanned X ago" indicator ────────────────
+  const [scannedAt, setScannedAt] = useState(null);
+
   function handleSourceChange(source) {
     setSelectedSource(source);
-    // Only clear results when switching to a different source.
-    // On initial auto-select the new source ID matches the cached source ID,
-    // so we skip the wipe and the restored cache stays visible.
-    try {
-      const cached = JSON.parse(localStorage.getItem('ota_scan_results') || '{}');
-      if (source?.id === cached.sourceId) return;
-    } catch { /* corrupt cache — fall through and clear */ }
-    setResults([]);
     setErrors([]);
-    setHasScanned(false);
+
+    // Read per-watchlist cache for this source
+    const entry = source?.id ? readScanCacheEntry(source.id) : null;
+    if (entry && entry.results.length > 0) {
+      setResults(entry.results);
+      setScannedAt(entry.scanned_at);
+      setHasScanned(true);
+    } else {
+      setResults([]);
+      setScannedAt(null);
+      setHasScanned(false);
+    }
   }
 
   // ── Add symbol ─────────────────────────────────────────────────────────
@@ -218,20 +277,18 @@ export default function SecurityStrategiesPage() {
   const [progress,       setProgress]       = useState({ completed: 0, total: 0 });
   const [hasScanned,     setHasScanned]     = useState(false);
 
-  // Load cached scan results on mount (show last scan instantly)
+  // On mount: migrate legacy cache if needed (readScanCache handles this).
+  // Actual cache hydration happens in handleSourceChange when WatchlistPicker
+  // fires its initial auto-select. No need to hydrate here.
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem('ota_scan_results');
-      if (raw) {
-        const { results: cached } = JSON.parse(raw);
-        if (cached?.length > 0) {
-          setResults(cached);
-          setHasScanned(true);
-        }
-      }
-    } catch {
-      // corrupt cache — ignore
-    }
+    readScanCache(); // triggers legacy migration if needed
+  }, []);
+
+  // 60s interval to re-render relative time on cards
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick(t => t + 1), 60_000);
+    return () => clearInterval(id);
   }, []);
 
   // ── Scan orchestration ──────────────────────────────────────────────────
@@ -294,10 +351,11 @@ export default function SecurityStrategiesPage() {
     setScanning(false);
     showToast({ type: 'info', message: `Scanned ${total} symbol${total !== 1 ? 's' : ''}` });
 
-    // Persist results for instant display on return
-    try {
-      localStorage.setItem('ota_scan_results', JSON.stringify({ results: finalResults, sourceId: selectedSource?.id, timestamp: Date.now() }));
-    } catch { /* storage full — skip */ }
+    // Persist results for this watchlist only — other entries preserved
+    if (selectedSource?.id) {
+      writeScanCacheEntry(selectedSource.id, finalResults);
+      setScannedAt(new Date().toISOString());
+    }
   };
 
   // ── Apply client-side filters + sort ──────────────────────────────────
@@ -527,6 +585,7 @@ export default function SecurityStrategiesPage() {
               <ScanCard
                 key={r.symbol}
                 {...r}
+                scannedAt={scannedAt}
                 onClick={() => navigate(`/trades?symbol=${r.symbol}`)}
                 onRemove={isWatchlistSource ? () => handleRemoveSymbol(r.symbol) : undefined}
               />

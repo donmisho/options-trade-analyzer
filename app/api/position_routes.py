@@ -32,7 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require_read, require_write
 from app.models.session import get_db
-from app.models.database import Position, PositionAssessment
+from app.models.database import Position, PositionAssessment, TradeCandidate
 from app.models.schemas import (
     FollowPositionRequest,
     TakePositionRequest,
@@ -371,6 +371,87 @@ def _apply_filters(stmt, user_id: str, status: Optional[str], source: Optional[s
     return stmt
 
 
+async def _resolve_trade_candidate(
+    db: AsyncSession, trade_key: str, user_id: str,
+) -> TradeCandidate:
+    """
+    OTA-624: Look up a trade_candidates row by trade_key AND user_id.
+    Returns 404 if not found (covers Data Isolation Invariant — cross-user
+    attempts return 404, not 403).
+    """
+    result = await db.execute(
+        select(TradeCandidate).where(
+            TradeCandidate.trade_key == trade_key,
+            TradeCandidate.user_id == user_id,
+        )
+    )
+    candidate = result.scalar_one_or_none()
+    if not candidate:
+        raise HTTPException(status_code=404, detail="Trade candidate not found")
+    return candidate
+
+
+def _candidate_to_follow_fields(candidate: TradeCandidate) -> dict:
+    """
+    OTA-624: Extract Follow-compatible fields from a persisted TradeCandidate.
+    Returns a dict that can populate the Position + assessment.
+    """
+    legs_data = json.loads(candidate.legs) if candidate.legs else []
+    net_metrics = json.loads(candidate.net_metrics) if candidate.net_metrics else {}
+    pipeline_comp = json.loads(candidate.pipeline_components) if candidate.pipeline_components else {}
+    claude_eval = json.loads(candidate.claude_evaluation) if candidate.claude_evaluation else {}
+
+    # Build trade_structure from legs
+    trade_structure = {
+        "legs": legs_data,
+        "structure": candidate.structure,
+    }
+    # Add expiration from first leg
+    if legs_data:
+        trade_structure["expiration"] = legs_data[0].get("expiration")
+
+    # Build entry_greeks from first leg
+    entry_greeks = {}
+    if legs_data:
+        first_leg = legs_data[0]
+        entry_greeks = {
+            "delta": first_leg.get("delta"),
+            "gamma": None,
+            "theta": None,
+            "vega": None,
+        }
+
+    # Build claude_verdict from evaluation
+    claude_verdict = None
+    if claude_eval:
+        claude_verdict = {
+            "verdict": claude_eval.get("verdict"),
+            "score": claude_eval.get("score"),
+            "claude_read": claude_eval.get("claude_read"),
+            "key_risks": claude_eval.get("key_risks", []),
+            "thesis_invalidators": claude_eval.get("thesis_invalidators", []),
+            "auto_pass_reason": claude_eval.get("auto_pass_reason"),
+        }
+
+    # Build claude_exit_levels from evaluation
+    claude_exit_levels = claude_eval.get("exit_levels") if claude_eval else None
+
+    return {
+        "symbol": candidate.symbol,
+        "strategy_key": candidate.scan_strategy_key or candidate.structure,
+        "trade_structure": trade_structure,
+        "entry_price": float(net_metrics.get("entry_price") or 0),
+        "entry_greeks": entry_greeks,
+        "entry_iv_rank": float(net_metrics.get("iv_rank") or 0),
+        "entry_sma_alignment": {},
+        "entry_underlying_price": float(candidate.underlying_spot) if candidate.underlying_spot else 0,
+        "claude_score": claude_eval.get("score") if claude_eval else None,
+        "claude_verdict": claude_verdict,
+        "claude_exit_levels": claude_exit_levels,
+        "claude_probability_matrix": None,
+    }
+
+
 def _validate_follow_gate(req) -> list[str]:
     """
     OTA-628: Validate follow/take payload. Returns list of failed check
@@ -408,10 +489,39 @@ async def follow_position(
     user: dict = Depends(require_read),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a paper-tracked position (source=PAPER, status=FOLLOWING)."""
+    """Create a paper-tracked position (source=PAPER, status=FOLLOWING).
+
+    OTA-624: When trade_key is provided, reads the persisted trade snapshot
+    from trade_candidates. Single transaction — no second UPDATE row.
+    """
     _user_id = user.get("sub", "")
     if not _user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
+
+    # OTA-624: Resolve trade_key to snapshot if provided
+    if req.trade_key:
+        candidate = await _resolve_trade_candidate(db, req.trade_key, _user_id)
+        fields = _candidate_to_follow_fields(candidate)
+        # Populate req fields from snapshot (user overrides win if provided)
+        req.symbol = req.symbol or fields["symbol"]
+        req.strategy_key = req.strategy_key or fields["strategy_key"]
+        req.trade_structure = req.trade_structure or fields["trade_structure"]
+        req.entry_price = req.entry_price if req.entry_price is not None else fields["entry_price"]
+        req.entry_greeks = req.entry_greeks or fields["entry_greeks"]
+        req.entry_iv_rank = req.entry_iv_rank if req.entry_iv_rank is not None else fields["entry_iv_rank"]
+        req.entry_sma_alignment = req.entry_sma_alignment or fields["entry_sma_alignment"]
+        req.entry_underlying_price = req.entry_underlying_price if req.entry_underlying_price is not None else fields["entry_underlying_price"]
+        req.claude_score = req.claude_score if req.claude_score is not None else fields["claude_score"]
+        req.claude_verdict = req.claude_verdict or fields["claude_verdict"]
+        req.claude_exit_levels = req.claude_exit_levels or fields["claude_exit_levels"]
+        req.claude_probability_matrix = req.claude_probability_matrix or fields["claude_probability_matrix"]
+    else:
+        # Legacy path: validate required fields are present
+        if not req.symbol or not req.strategy_key or not req.trade_structure or req.entry_price is None:
+            raise HTTPException(
+                status_code=422,
+                detail="trade_key or full trade payload (symbol, strategy_key, trade_structure, entry_price) required",
+            )
 
     # OTA-628: Follow gate — reject disqualified payloads
     failed_checks = _validate_follow_gate(req)
@@ -441,9 +551,9 @@ async def follow_position(
         status="FOLLOWING",
         entry_price=req.entry_price,
         entry_date=datetime.now(timezone.utc),
-        entry_greeks=json.dumps(req.entry_greeks),
+        entry_greeks=json.dumps(req.entry_greeks or {}),
         entry_iv_rank=req.entry_iv_rank,
-        entry_sma_alignment=json.dumps(req.entry_sma_alignment),
+        entry_sma_alignment=json.dumps(req.entry_sma_alignment or {}),
         entry_underlying_price=req.entry_underlying_price,
         claude_score=req.claude_score,
         claude_verdict=json.dumps(req.claude_verdict) if req.claude_verdict else None,
@@ -471,6 +581,29 @@ async def take_position(
     if not _user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
+    # OTA-624: Resolve trade_key to snapshot if provided
+    if req.trade_key:
+        candidate = await _resolve_trade_candidate(db, req.trade_key, _user_id)
+        fields = _candidate_to_follow_fields(candidate)
+        req.symbol = req.symbol or fields["symbol"]
+        req.strategy_key = req.strategy_key or fields["strategy_key"]
+        req.trade_structure = req.trade_structure or fields["trade_structure"]
+        req.entry_price = req.entry_price if req.entry_price is not None else fields["entry_price"]
+        req.entry_greeks = req.entry_greeks or fields["entry_greeks"]
+        req.entry_iv_rank = req.entry_iv_rank if req.entry_iv_rank is not None else fields["entry_iv_rank"]
+        req.entry_sma_alignment = req.entry_sma_alignment or fields["entry_sma_alignment"]
+        req.entry_underlying_price = req.entry_underlying_price if req.entry_underlying_price is not None else fields["entry_underlying_price"]
+        req.claude_score = req.claude_score if req.claude_score is not None else fields["claude_score"]
+        req.claude_verdict = req.claude_verdict or fields["claude_verdict"]
+        req.claude_exit_levels = req.claude_exit_levels or fields["claude_exit_levels"]
+        req.claude_probability_matrix = req.claude_probability_matrix or fields["claude_probability_matrix"]
+    else:
+        if not req.symbol or not req.strategy_key or not req.trade_structure or req.entry_price is None:
+            raise HTTPException(
+                status_code=422,
+                detail="trade_key or full trade payload required",
+            )
+
     # OTA-557: ensure trade_structure always has expiration for auto-archive sweep
     _ts = req.trade_structure or {}
     if not _ts.get("expiration"):
@@ -487,9 +620,9 @@ async def take_position(
         status="LIVE",
         entry_price=req.entry_price,
         entry_date=datetime.now(timezone.utc),
-        entry_greeks=json.dumps(req.entry_greeks),
+        entry_greeks=json.dumps(req.entry_greeks or {}),
         entry_iv_rank=req.entry_iv_rank,
-        entry_sma_alignment=json.dumps(req.entry_sma_alignment),
+        entry_sma_alignment=json.dumps(req.entry_sma_alignment or {}),
         entry_underlying_price=req.entry_underlying_price,
         claude_score=req.claude_score,
         claude_verdict=json.dumps(req.claude_verdict) if req.claude_verdict else None,

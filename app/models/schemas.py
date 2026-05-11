@@ -386,15 +386,21 @@ class PositionClose(BaseModel):
     close_reason: Optional[str] = "manual"
 
 class FollowPositionRequest(BaseModel):
-    """Follow an existing position (paper or live) for monitoring."""
-    symbol: str
-    strategy_key: str
-    trade_structure: dict           # legs, strikes, expiration
-    entry_price: float
-    entry_greeks: dict
-    entry_iv_rank: float
-    entry_sma_alignment: dict
-    entry_underlying_price: float
+    """Follow an existing position (paper or live) for monitoring.
+
+    OTA-624: When trade_key is provided, the server reads the trade snapshot
+    from trade_candidates. All other fields become optional — the server
+    populates them from the persisted snapshot.
+    """
+    trade_key: Optional[str] = None  # OTA-624: reference to trade_candidates row
+    symbol: Optional[str] = None
+    strategy_key: Optional[str] = None
+    trade_structure: Optional[dict] = None
+    entry_price: Optional[float] = None
+    entry_greeks: Optional[dict] = None
+    entry_iv_rank: Optional[float] = None
+    entry_sma_alignment: Optional[dict] = None
+    entry_underlying_price: Optional[float] = None
     claude_score: Optional[int] = None
     # Phase 2.11 — populated from TradeEvaluationCard at Follow/Take time
     claude_verdict: Optional[dict] = None       # full TradeEvaluationCard as JSON

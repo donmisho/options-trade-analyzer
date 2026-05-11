@@ -749,6 +749,7 @@ function TradeDetailExpansion({
         onTakePosition={onTakePosition}
         onFollowUp={onFollowUp}
         onDiscard={onDiscard}
+        tradeKey={rawTrade?.trade_key || null}
       />
     </div>
   );
@@ -1053,6 +1054,7 @@ export default function TradesPage() {
           sma_alignment: smaAlign || { sma_8: 'N/A', sma_21: 'N/A', sma_50: 'N/A', alignment: 'mixed' },
           strategy_keys: strategyKeys,
           trade,
+          trade_key: trade.trade_key || null,  // OTA-624: pass trade_key for persistence
         });
         const normalized = normalizeEvalResponse(result, strategyKeys[0]);
         if (normalized) setEvaluations(prev => ({ ...prev, [rowId]: normalized }));
@@ -1063,19 +1065,22 @@ export default function TradesPage() {
 
     async function handleFollow() {
       try {
-        const ev = evaluations[rowId];
-        await followTrade({
-          symbol,
-          strategy_key: strategyKeys[0],
-          trade_structure: trade,
-          entry_price: getEntryPrice(trade),
-          entry_underlying_price: underlying,
-          entry_greeks: { delta: trade.delta ?? null, gamma: trade.gamma ?? null, theta: trade.theta ?? null, vega: trade.vega ?? null },
-          entry_iv_rank: trade.iv_rank ?? trade.iv ?? 0,
-          entry_sma_alignment: smaAlign || {},
-          claude_score: ev?.score ?? null,
-          claude_verdict: ev?._raw ?? null,
-        });
+        // OTA-624: Send trade_key when available — server reads persisted snapshot
+        const payload = trade.trade_key
+          ? { trade_key: trade.trade_key }
+          : {
+              symbol,
+              strategy_key: strategyKeys[0],
+              trade_structure: trade,
+              entry_price: getEntryPrice(trade),
+              entry_underlying_price: underlying,
+              entry_greeks: { delta: trade.delta ?? null, gamma: trade.gamma ?? null, theta: trade.theta ?? null, vega: trade.vega ?? null },
+              entry_iv_rank: trade.iv_rank ?? trade.iv ?? 0,
+              entry_sma_alignment: smaAlign || {},
+              claude_score: evaluations[rowId]?.score ?? null,
+              claude_verdict: evaluations[rowId]?._raw ?? null,
+            };
+        await followTrade(payload);
         showToast({ type: 'success', message: `Position followed (Paper) — ${symbol} ${tradeLabel(trade)}`, link: { text: 'View Positions', to: '/positions' }, duration: 4000 });
       } catch (err) {
         showToast({ type: 'error', message: `Follow failed: ${err.message}` });
@@ -1084,19 +1089,22 @@ export default function TradesPage() {
 
     async function handleTakePosition() {
       try {
-        const ev = evaluations[rowId];
-        await takeTrade({
-          symbol,
-          strategy_key: strategyKeys[0],
-          trade_structure: trade,
-          entry_price: getEntryPrice(trade),
-          entry_underlying_price: underlying,
-          entry_greeks: { delta: trade.delta ?? null, gamma: trade.gamma ?? null, theta: trade.theta ?? null, vega: trade.vega ?? null },
-          entry_iv_rank: trade.iv_rank ?? trade.iv ?? 0,
-          entry_sma_alignment: smaAlign || {},
-          claude_score: ev?.score ?? null,
-          claude_verdict: ev?._raw ?? null,
-        });
+        // OTA-624: Send trade_key when available
+        const payload = trade.trade_key
+          ? { trade_key: trade.trade_key }
+          : {
+              symbol,
+              strategy_key: strategyKeys[0],
+              trade_structure: trade,
+              entry_price: getEntryPrice(trade),
+              entry_underlying_price: underlying,
+              entry_greeks: { delta: trade.delta ?? null, gamma: trade.gamma ?? null, theta: trade.theta ?? null, vega: trade.vega ?? null },
+              entry_iv_rank: trade.iv_rank ?? trade.iv ?? 0,
+              entry_sma_alignment: smaAlign || {},
+              claude_score: evaluations[rowId]?.score ?? null,
+              claude_verdict: evaluations[rowId]?._raw ?? null,
+            };
+        await takeTrade(payload);
         showToast({ type: 'success', message: `Position taken (Live) — ${symbol} ${tradeLabel(trade)}`, link: { text: 'View Positions', to: '/positions' }, duration: 4000 });
       } catch (err) {
         showToast({ type: 'error', message: `Take position failed: ${err.message}` });

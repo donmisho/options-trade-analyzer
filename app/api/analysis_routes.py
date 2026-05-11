@@ -19,7 +19,9 @@ this for me" requests, not simple resource retrievals.
 """
 
 import asyncio
+import json
 import logging
+import uuid
 from datetime import date, datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -30,7 +32,7 @@ from app.auth.dependencies import require_read
 from app.core.config import settings
 from app.providers.factory import ProviderRegistry
 from app.models.session import get_db
-from app.models.database import OptionChainSnapshot, AnalysisRun, AnalyzedTrade
+from app.models.database import OptionChainSnapshot, AnalysisRun, AnalyzedTrade, TradeCandidate
 from app.analysis.vertical_engine import (
     VerticalSpreadEngine, ScoringWeights, SpreadFilters
 )
@@ -266,6 +268,151 @@ def _spread_dte(spread: dict) -> int:
         return 0
 
 
+# ─── OTA-624: Trade candidate persistence helpers ────────────────
+
+def _build_vertical_candidate(
+    spread: dict, user_id: str, symbol: str, underlying_price: float,
+) -> TradeCandidate:
+    """Build a TradeCandidate from a vertical spread result dict."""
+    trade_key = str(uuid.uuid4())
+    spread["trade_key"] = trade_key
+
+    legs = []
+    # Build leg detail from spread fields
+    if spread.get("long_strike") is not None:
+        legs.append({
+            "side": "long",
+            "option_type": spread.get("option_type", "call"),
+            "strike": spread.get("long_strike"),
+            "expiration": spread.get("expiration"),
+            "qty": 1,
+            "bid": spread.get("long_bid"),
+            "ask": spread.get("long_ask"),
+            "delta": spread.get("long_delta"),
+            "iv": spread.get("long_iv"),
+            "symbol": spread.get("long_symbol"),
+        })
+    if spread.get("short_strike") is not None:
+        legs.append({
+            "side": "short",
+            "option_type": spread.get("option_type", "call"),
+            "strike": spread.get("short_strike"),
+            "expiration": spread.get("expiration"),
+            "qty": 1,
+            "bid": spread.get("short_bid"),
+            "ask": spread.get("short_ask"),
+            "delta": spread.get("short_delta"),
+            "iv": spread.get("short_iv"),
+            "symbol": spread.get("short_symbol"),
+        })
+
+    net_metrics = {
+        "entry_price": spread.get("net_debit"),
+        "max_profit": spread.get("max_profit"),
+        "max_loss": spread.get("net_debit"),
+        "breakeven": spread.get("breakeven"),
+        "net_bid_ask": spread.get("net_bid_ask"),
+        "dte": spread.get("dte"),
+        "iv_rank": spread.get("iv_rank"),
+        "scenario_weighted_ev": spread.get("ev_raw"),
+        "prob_of_profit": spread.get("prob_of_profit"),
+    }
+
+    pipeline_components = {
+        "ev_score": spread.get("ev_score"),
+        "rr_score": spread.get("rr_score"),
+        "prob_score": spread.get("prob_score"),
+        "liquidity_score": spread.get("liquidity_score"),
+        "theta_score": spread.get("theta_score"),
+    }
+
+    structure = spread.get("spread_type", "vertical")
+    strategies = spread.get("fitting_strategies", [])
+
+    return TradeCandidate(
+        trade_key=trade_key,
+        user_id=user_id,
+        symbol=symbol,
+        structure=structure,
+        leg_count=len(legs),
+        legs=json.dumps(legs),
+        net_metrics=json.dumps(net_metrics),
+        underlying_spot=underlying_price,
+        pipeline_score=spread.get("composite_score"),
+        pipeline_components=json.dumps(pipeline_components),
+        scan_source="/analyze/verticals",
+        scan_strategy_key=strategies[0] if strategies else None,
+        scanned_at=datetime.now(timezone.utc),
+    )
+
+
+def _build_long_option_candidate(
+    option: dict, user_id: str, symbol: str, underlying_price: float,
+) -> TradeCandidate:
+    """Build a TradeCandidate from a long option result dict."""
+    trade_key = str(uuid.uuid4())
+    option["trade_key"] = trade_key
+
+    opt_type = option.get("option_type", "call")
+    legs = [{
+        "side": "long",
+        "option_type": opt_type,
+        "strike": option.get("strike"),
+        "expiration": option.get("expiration"),
+        "qty": 1,
+        "bid": option.get("bid"),
+        "ask": option.get("ask"),
+        "delta": option.get("delta"),
+        "iv": option.get("iv"),
+        "symbol": option.get("occ_symbol"),
+    }]
+
+    net_metrics = {
+        "entry_price": option.get("mid_price") or option.get("premium_dollars"),
+        "max_profit": None,  # unlimited for long options
+        "max_loss": option.get("mid_price") or option.get("premium_dollars"),
+        "breakeven": option.get("breakeven"),
+        "dte": option.get("days_to_exp"),
+        "iv_rank": option.get("iv_rank"),
+    }
+
+    pipeline_components = {
+        "delta_score": option.get("delta_score"),
+        "theta_score": option.get("theta_score"),
+        "iv_score": option.get("iv_score"),
+        "rr_score": option.get("rr_score"),
+        "liquidity_score": option.get("liquidity_score"),
+    }
+
+    return TradeCandidate(
+        trade_key=trade_key,
+        user_id=user_id,
+        symbol=symbol,
+        structure=f"long_{opt_type}",
+        leg_count=1,
+        legs=json.dumps(legs),
+        net_metrics=json.dumps(net_metrics),
+        underlying_spot=underlying_price,
+        pipeline_score=option.get("composite_score"),
+        pipeline_components=json.dumps(pipeline_components),
+        scan_source="/analyze/long-calls",
+        scan_strategy_key=None,
+        scanned_at=datetime.now(timezone.utc),
+    )
+
+
+async def _persist_trade_candidates(
+    db: AsyncSession, candidates: list[TradeCandidate],
+) -> None:
+    """Bulk insert trade candidates. Fire-and-forget — never blocks the response."""
+    try:
+        for c in candidates:
+            db.add(c)
+        await db.flush()
+    except Exception as e:
+        log.warning(f"Failed to persist trade candidates: {e}")
+
+
 # ─── Endpoints ────────────────────────────────────────────────────
 
 @router.post("/verticals")
@@ -429,6 +576,13 @@ async def analyze_verticals(
                 captured_at=now,
             ))
 
+        # OTA-624: Persist trade candidates for atomic Follow
+        trade_candidates = [
+            _build_vertical_candidate(s, user_id, sym, price)
+            for s in spreads
+        ]
+        await _persist_trade_candidates(db, trade_candidates)
+
         await db.commit()
     except Exception as e:
         log.warning(f"Failed to persist vertical analysis run for {sym}: {e}")
@@ -549,6 +703,13 @@ async def analyze_long_calls(
                 scoring_weights=default_lc_weights,
                 captured_at=now,
             ))
+
+        # OTA-624: Persist trade candidates for atomic Follow
+        trade_candidates = [
+            _build_long_option_candidate(o, user_id, sym, price)
+            for o in options
+        ]
+        await _persist_trade_candidates(db, trade_candidates)
 
         await db.commit()
     except Exception as e:

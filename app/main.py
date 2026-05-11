@@ -56,6 +56,7 @@ from app.api.health_routes import router as health_router, init_health_routes
 from app.api.service_routes import router as service_router, init_service_routes
 from app.ai import AnthropicAdapter, FoundryEvalAdapter
 from app.api.changelog_routes import router as changelog_router, init_changelog_routes
+from app.api.export_routes import router as export_router
 from app.middleware.csrf import CSRFMiddleware
 from app.api.mcp_routes import get_mcp_app, init_mcp_routes, init_mcp_provider, start_mcp_session_manager
 
@@ -462,6 +463,7 @@ app.include_router(dashboard_router, prefix="/api/v1")
 app.include_router(service_router, prefix="/api/v1")
 app.include_router(health_router, prefix="/api/v1")
 app.include_router(changelog_router, prefix="/api/v1")
+app.include_router(export_router, prefix="/api/v1")
 if settings.app_env != "production":
     app.include_router(test_router, prefix="/api/v1/test")
 

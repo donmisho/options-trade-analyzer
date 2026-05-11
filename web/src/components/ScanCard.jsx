@@ -9,6 +9,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { C, mono } from '../styles/tokens';
 import { SCORECARD_STRATEGIES } from '../strategy-configs/index';
+import { formatRelativeTime } from '../lib/relativeTime';
 import './ScanCard.css';
 
 const STRATEGY_META = Object.fromEntries(
@@ -37,7 +38,7 @@ function formatVolume(v) {
 
 export default function ScanCard({
   symbol, description, price, change, changePercent, volume,
-  signal, isNew, strategies = [], signalSummary, ivRank, onClick, onRemove,
+  signal, isNew, strategies = [], signalSummary, ivRank, scannedAt, onClick, onRemove,
 }) {
   const [hovered, setHovered] = useState(false);
   const nameRef = useRef(null);
@@ -173,7 +174,7 @@ export default function ScanCard({
       </div>
 
       {/* ── Price line ── */}
-      <div style={{ fontSize: 11, fontFamily: mono, color: '#8b949e', marginBottom: 10 }}>
+      <div style={{ fontSize: 11, fontFamily: mono, color: '#8b949e', marginBottom: scannedAt ? 4 : 10 }}>
         {price != null ? price.toFixed(2) : '—'}
         {change != null && (
           <>
@@ -189,6 +190,13 @@ export default function ScanCard({
           <span style={{ marginLeft: 6 }}>{formatVolume(volume)}</span>
         )}
       </div>
+
+      {/* ── Last scanned indicator ── */}
+      {scannedAt && formatRelativeTime(scannedAt) && (
+        <div style={{ fontSize: 9, fontFamily: mono, color: '#8b949e', marginBottom: 10 }}>
+          Last scanned {formatRelativeTime(scannedAt)}
+        </div>
+      )}
 
       {/* ── Strategy score bars ── */}
       {strategies.map(s => {

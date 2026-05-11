@@ -166,7 +166,7 @@ export const positionsColumns = [
   {
     key: '_actions',
     label: '',
-    width: 56,
+    width: 78,
     align: 'center',
     sortable: false,
     render: (pos, ctx) => (
@@ -187,6 +187,15 @@ export const positionsColumns = [
         >
           ⊘
         </button>
+        <a
+          className="icon-btn"
+          title="Export as markdown"
+          href={`/api/v1/export/position/${pos.id}.md`}
+          onClick={e => e.stopPropagation()}
+          style={{ textDecoration: 'none' }}
+        >
+          ↓
+        </a>
       </span>
     ),
   },

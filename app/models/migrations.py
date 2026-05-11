@@ -26,6 +26,7 @@ async def run_migrations(engine: AsyncEngine) -> None:
         await _m003_create_named_watchlists(conn)
         await _m004_create_user_sessions(conn)
         await _m005_following_requires_exit_levels(conn)
+        await _m006_create_trade_candidates(conn)
 
 
 async def _m001_trade_recommendations_add_user_id(conn) -> None:
@@ -328,6 +329,73 @@ async def _m005_following_requires_exit_levels(conn) -> None:
         # SQLite does not support ALTER TABLE ADD CONSTRAINT for CHECK constraints.
         # The constraint is enforced at the application level only for SQLite.
         logger.debug("Migration 005: SQLite — constraint enforced at application level only")
+
+
+async def _m006_create_trade_candidates(conn) -> None:
+    """
+    Migration 006: Create trade_candidates table (OTA-624).
+
+    Persists trade candidate snapshots at scan time so Follow can read
+    from the DB instead of reconstructing from the client payload.
+    Enables atomic position creation and future backtest replay.
+
+    Idempotent: _table_exists checks before CREATE.
+    """
+    if await _table_exists(conn, "trade_candidates"):
+        logger.debug("Migration 006: trade_candidates already present — skipping")
+        return
+
+    logger.info("Migration 006: creating trade_candidates table")
+    is_mssql = _is_mssql(conn)
+
+    if is_mssql:
+        await conn.execute(text("""
+            CREATE TABLE trade_candidates (
+                trade_key           NVARCHAR(36)  NOT NULL PRIMARY KEY,
+                user_id             NVARCHAR(36)  NOT NULL,
+                symbol              NVARCHAR(20)  NOT NULL,
+                structure           NVARCHAR(100) NOT NULL,
+                leg_count           INT           NOT NULL,
+                legs                NVARCHAR(MAX),
+                net_metrics         NVARCHAR(MAX),
+                underlying_spot     DECIMAL(10,4) NOT NULL,
+                pipeline_score      DECIMAL(10,4),
+                pipeline_components NVARCHAR(MAX),
+                scan_source         NVARCHAR(200) NOT NULL,
+                scan_strategy_key   NVARCHAR(100),
+                scanned_at          DATETIME2     NOT NULL DEFAULT GETUTCDATE(),
+                claude_evaluation   NVARCHAR(MAX)
+            )
+        """))
+    else:
+        await conn.execute(text("""
+            CREATE TABLE trade_candidates (
+                trade_key           VARCHAR(36)  NOT NULL PRIMARY KEY,
+                user_id             VARCHAR(36)  NOT NULL,
+                symbol              VARCHAR(20)  NOT NULL,
+                structure           VARCHAR(100) NOT NULL,
+                leg_count           INTEGER      NOT NULL,
+                legs                TEXT,
+                net_metrics         TEXT,
+                underlying_spot     REAL         NOT NULL,
+                pipeline_score      REAL,
+                pipeline_components TEXT,
+                scan_source         VARCHAR(200) NOT NULL,
+                scan_strategy_key   VARCHAR(100),
+                scanned_at          TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                claude_evaluation   TEXT
+            )
+        """))
+
+    await conn.execute(text(
+        "CREATE INDEX ix_trade_candidates_user_scanned "
+        "ON trade_candidates (user_id, scanned_at DESC)"
+    ))
+    await conn.execute(text(
+        "CREATE INDEX ix_trade_candidates_symbol_user "
+        "ON trade_candidates (symbol, user_id)"
+    ))
+    logger.info("Migration 006: trade_candidates table created")
 
 
 def _is_mssql(conn) -> bool:

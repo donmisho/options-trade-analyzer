@@ -111,6 +111,7 @@ export default function SectionE({
   onTakePosition,  // async () => void
   onFollowUp,      // async (question, evaluation) => { answer }
   onDiscard,
+  tradeKey,        // string | null — from OTA-624 trade_candidates persistence
 }) {
   const [isEvalLoading, setIsEvalLoading] = useState(false);
   const [followUps, setFollowUps] = useState([]);
@@ -365,6 +366,19 @@ export default function SectionE({
             </>
           );
         })()}
+
+        {tradeKey && (
+          <a
+            href={`/api/v1/export/trade/${tradeKey}.md`}
+            style={{
+              ...neutralOutlined,
+              textDecoration: 'none',
+              display: 'inline-block',
+            }}
+          >
+            Export MD
+          </a>
+        )}
 
         <input
           type="text"

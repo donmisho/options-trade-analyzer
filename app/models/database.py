@@ -897,3 +897,44 @@ class DeployLog(Base):
     __table_args__ = (
         Index("ix_deploy_log_deployed_at", "deployed_at"),
     )
+
+
+# ─── Trade Candidates (OTA-624) ─────────────────────────────────────────────
+
+
+class TradeCandidate(Base):
+    """
+    Persisted trade candidate snapshot captured at scan time.
+
+    One row per candidate returned by /analyze/* endpoints. The trade_key
+    is a UUID generated at response-build time and included in the API
+    response so the frontend can reference it on Follow without
+    reconstructing the payload.
+
+    claude_evaluation is populated later by /evaluate/structured when the
+    user requests AI evaluation for this candidate.
+
+    structure is TEXT (not enum) so adding new structure types (iron condors,
+    calendars, diagonals, butterflies) requires no migration.
+    """
+    __tablename__ = "trade_candidates"
+
+    trade_key           = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id             = Column(String(36), nullable=False)
+    symbol              = Column(String(20), nullable=False)
+    structure           = Column(Text, nullable=False)
+    leg_count           = Column(Integer, nullable=False)
+    legs                = Column(Text)          # JSON per-leg detail
+    net_metrics         = Column(Text)          # JSON spread-level aggregates
+    underlying_spot     = Column(Numeric(10, 4), nullable=False)
+    pipeline_score      = Column(Numeric(10, 4))
+    pipeline_components = Column(Text)          # JSON subscores
+    scan_source         = Column(Text, nullable=False)
+    scan_strategy_key   = Column(Text)
+    scanned_at          = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    claude_evaluation   = Column(Text)          # JSON verdict/score/exit_levels/claude_read
+
+    __table_args__ = (
+        Index("ix_trade_candidates_user_scanned", "user_id", "scanned_at"),
+        Index("ix_trade_candidates_symbol_user", "symbol", "user_id"),
+    )

@@ -33,13 +33,14 @@ logger = logging.getLogger(__name__)
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require_read
 from app.core.config import settings
 from app.ai.base import AIAdapter
 from app.models.session import get_db
-from app.models.database import AgentRunLog
+from app.models.database import AgentRunLog, TradeCandidate
 from app.models.schemas import (
     TradeEvaluationCard,
     ExitScenarioRequest, ExitScenarioRow, ExitScenarioResponse,
@@ -59,6 +60,40 @@ from app.analysis.strategy_classifier import classify_best_strategy
 from app.analysis.strategy_scorer import StrategyScore
 
 router = APIRouter(prefix="/evaluate", tags=["Trade Evaluation"])
+
+
+async def _update_trade_candidate_evaluation(
+    db: AsyncSession, trade_key: str, user_id: str, cards: list,
+) -> None:
+    """OTA-624: Update trade_candidates row with claude_evaluation after AI eval."""
+    if not trade_key:
+        return
+    try:
+        result = await db.execute(
+            select(TradeCandidate).where(
+                TradeCandidate.trade_key == trade_key,
+                TradeCandidate.user_id == user_id,
+            )
+        )
+        candidate = result.scalar_one_or_none()
+        if candidate and cards:
+            card = cards[0]
+            evaluation = {
+                "verdict": card.verdict,
+                "score": card.score,
+                "exit_levels": {
+                    "take_profit": card.take_profit,
+                    "warning_level": card.warning_level,
+                    "hard_stop": card.hard_stop,
+                },
+                "claude_read": card.claude_read,
+                "key_risks": card.key_risks,
+                "thesis_invalidators": card.thesis_invalidators,
+                "auto_pass_reason": card.auto_pass_reason,
+            }
+            candidate.claude_evaluation = json.dumps(evaluation)
+    except Exception as e:
+        logger.warning(f"_update_trade_candidate_evaluation failed (non-fatal): {e}")
 
 # Initialized in main.py at startup — any AIAdapter implementation.
 _eval_adapter: Optional[AIAdapter] = None
@@ -347,6 +382,7 @@ class StructuredEvaluationRequest(BaseModel):
     strategy_keys: List[str] = Field(..., min_length=1, max_length=5)
     scores: Optional[dict] = None       # {strategy_key: int}
     trade: Optional[dict] = None        # pre-populated trade proposal
+    trade_key: Optional[str] = None    # OTA-624: reference to trade_candidates row
 
 
 class StructuredEvaluationResponse(BaseModel):
@@ -655,6 +691,8 @@ async def evaluate_structured(
             model_name="none",
             created_at=datetime.now(timezone.utc),
         ))
+        # OTA-624: Update trade candidate with auto-pass evaluation
+        await _update_trade_candidate_evaluation(db, request.trade_key, user_id or "", auto_pass_cards)
         await db.commit()
 
         return StructuredEvaluationResponse(
@@ -1004,6 +1042,8 @@ async def evaluate_structured(
         model_name=result["model"],
         created_at=datetime.now(timezone.utc),
     ))
+    # OTA-624: Update trade candidate with Claude evaluation
+    await _update_trade_candidate_evaluation(db, request.trade_key, user_id or "", evaluations)
     await db.commit()
 
     return StructuredEvaluationResponse(
