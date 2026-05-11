@@ -37,3 +37,11 @@ If this pointer is ever out of sync with `claude_context/CLAUDE.md`, the `claude
 ## Standing reminder
 
 Never make architectural, business-rule, or domain-specific decisions in this repo from session-start memory alone. The Prompt Writing Convention (documented in profile-level `prompt-style.md`) requires every Claude Code prompt to (A) explicitly cat the relevant SoT files and (B) embed the specific governing rules. If a prompt arrives without both, pause and request the missing context.
+
+---
+
+## Change Log
+
+| Date | Story | Change |
+|------|-------|--------|
+| 2026-05-10 | OTA-595 | Refresh root pointer to list all 12 SoT docs; add Change Log table |
