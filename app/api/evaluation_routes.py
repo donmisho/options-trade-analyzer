@@ -197,8 +197,14 @@ def _build_structured_user_message(
     scores: Optional[dict],
     trade: Optional[dict],
     current_date: str,
+    dte: int = 30,
+    strategy_specs: Optional[dict] = None,
 ) -> str:
-    """Build the user prompt for the structured evaluation call."""
+    """Build the user prompt for the structured evaluation call.
+
+    OTA-616: Adds COMPUTED METRICS section with reconciled field names.
+    OTA-618: Adds STRATEGY SPEC section per strategy when strategy_specs provided.
+    """
     sma_8 = sma_alignment.get("sma_8", "N/A")
     sma_21 = sma_alignment.get("sma_21", "N/A")
     sma_50 = sma_alignment.get("sma_50", "N/A")
@@ -216,8 +222,77 @@ def _build_structured_user_message(
         f"Trend alignment: {alignment}",
         f"IV (annualized): {iv:.1%}",
         "",
-        "=== STRATEGIES TO EVALUATE ===",
     ]
+
+    # ── OTA-616: Computed metrics section ──────────────────────────────────────
+    if trade:
+        lines.append("=== COMPUTED METRICS ===")
+        lines.append(f"dte: {dte}")
+
+        # total_ev / scenario_weighted_ev: prefer total_ev, fall back to ev_raw
+        _total_ev = trade.get("total_ev")
+        _ev_raw = trade.get("ev_raw")
+        _ev = _total_ev if _total_ev is not None else _ev_raw
+        if _ev is not None:
+            try:
+                _ev_f = float(_ev)
+                lines.append(f"total_ev: {_ev_f:.2f}")
+                lines.append(f"scenario_weighted_ev: {_ev_f:.2f}")
+            except (TypeError, ValueError):
+                pass
+
+        # net_bid_ask: debit spreads = long_ask - short_bid; credit = short_bid - long_ask
+        _long_ask = trade.get("long_ask")
+        _short_bid = trade.get("short_bid")
+        _net_debit = trade.get("net_debit")
+        if _long_ask is not None and _short_bid is not None:
+            try:
+                _la = float(_long_ask)
+                _sb = float(_short_bid)
+                _nd = float(_net_debit) if _net_debit is not None else 0
+                if _nd < 0:  # credit spread
+                    _nba = _sb - _la
+                else:  # debit spread
+                    _nba = _la - _sb
+                lines.append(f"net_bid_ask: {_nba:.4f}")
+            except (TypeError, ValueError):
+                pass
+
+        # debit_pct_of_width: debit spreads only (max-loss-as-fraction-of-width)
+        _spread_width = trade.get("spread_width")
+        if _net_debit is not None and _spread_width is not None:
+            try:
+                _nd_f = float(_net_debit)
+                _sw_f = float(_spread_width)
+                if _sw_f > 0 and _nd_f > 0:  # debit spread
+                    _dpow = _nd_f / _sw_f
+                    lines.append(f"debit_pct_of_width: {_dpow:.4f}")
+            except (TypeError, ValueError):
+                pass
+
+        # cushion_pct: credit spreads only (distance from short strike to price / price)
+        _short_strike = trade.get("short_strike")
+        if _short_strike is not None and _net_debit is not None:
+            try:
+                _ss = float(_short_strike)
+                _nd_f = float(_net_debit)
+                if _nd_f < 0 and current_price > 0:  # credit spread
+                    _cpct = abs(current_price - _ss) / current_price
+                    lines.append(f"cushion_pct: {_cpct:.4f}")
+            except (TypeError, ValueError):
+                pass
+
+        # Surface p_max_loss / p_max_profit explicitly
+        _pml = trade.get("p_max_loss")
+        _pmp = trade.get("p_max_profit")
+        if _pml is not None:
+            lines.append(f"p_max_loss: {_pml}")
+        if _pmp is not None:
+            lines.append(f"p_max_profit: {_pmp}")
+
+        lines.append("")
+
+    lines.append("=== STRATEGIES TO EVALUATE ===")
 
     for key in strategy_keys:
         label = key.replace("-", " ").title()
@@ -227,6 +302,12 @@ def _build_structured_user_message(
         lines.append(f"Strategy label: {label}")
         if score is not None:
             lines.append(f"Score: {score} / 100")
+
+        # OTA-618: Inject strategy_spec per strategy
+        if strategy_specs and key in strategy_specs:
+            spec = strategy_specs[key]
+            lines.append(f"strategy_spec: {json.dumps(spec)}")
+
         if trade:
             # OTA-558: Safely serialize trade dict (handles NaN/Infinity from scoring)
             try:
@@ -598,6 +679,25 @@ async def evaluate_structured(
         "matrix": pm.matrix,
     }
 
+    # ── OTA-618: Build strategy_spec per strategy ────────────────────────────
+    # TODO: remove after OTA-627 — compatible_structures moves to strategy-configs/*.config.js
+    _COMPATIBLE_STRUCTURES = {
+        "steady-paycheck": ["bull_put_credit", "bear_call_credit"],
+        "weekly-grind": ["bull_put_credit", "bear_call_credit"],
+        "trend-rider": ["long_call", "long_put", "bull_call_debit", "bear_put_debit"],
+        "lottery-ticket": ["long_call", "long_put"],
+    }
+    from app.analysis.strategy_definitions import STRATEGIES as _STRATEGIES
+    _strategy_specs = {}
+    for _sk in request.strategy_keys:
+        _sdef = _STRATEGIES.get(_sk)
+        if _sdef:
+            _strategy_specs[_sk] = {
+                "preferred_dte_window": [_sdef.dte_min, _sdef.dte_max],
+                "preferred_structure": "credit" if _sdef.trade_structure == "credit_spread" else "debit",
+                "compatible_structures": _COMPATIBLE_STRUCTURES.get(_sk, []),
+            }
+
     system_prompt = skill.get("DEEP_DIVE_SYSTEM")
     user_message = _build_structured_user_message(
         symbol=request.symbol,
@@ -608,6 +708,8 @@ async def evaluate_structured(
         scores=request.scores,
         trade=request.trade,
         current_date=current_date,
+        dte=dte,
+        strategy_specs=_strategy_specs,
     )
 
     market_snapshot = {
