@@ -19,7 +19,7 @@ class StrategyDefinition:
     key: str
     label: str
     description: str
-    trade_structure: str    # 'credit_spread' | 'debit_spread' | 'long_option'
+    compatible_structures: List[str]    # e.g. ['bull_put_credit', 'bear_call_credit']
     dte_min: int
     dte_max: int
     scoring_weights: dict   # metric_name → weight (must sum to 1.0)
@@ -40,7 +40,7 @@ STRATEGIES = {
         key='steady-paycheck',
         label='Steady Paycheck',
         description='14-45 DTE credit spreads, high IV rank, income focus',
-        trade_structure='credit_spread',
+        compatible_structures=['bull_put_credit', 'bear_call_credit'],
         dte_min=14,
         dte_max=45,
         scoring_weights={
@@ -63,7 +63,7 @@ STRATEGIES = {
         key='weekly-grind',
         label='Weekly Grind',
         description='14-21 DTE credit spreads, Theta/Gamma efficiency focus',
-        trade_structure='credit_spread',
+        compatible_structures=['bull_put_credit', 'bear_call_credit'],
         dte_min=14,
         dte_max=21,
         scoring_weights={
@@ -85,7 +85,7 @@ STRATEGIES = {
         key='trend-rider',
         label='Trend Rider',
         description='14-60 DTE long calls on strong SMA-aligned stocks',
-        trade_structure='long_option',
+        compatible_structures=['long_call', 'long_put', 'bull_call_debit', 'bear_put_debit'],
         dte_min=14,
         dte_max=60,
         scoring_weights={
@@ -108,7 +108,7 @@ STRATEGIES = {
         key='lottery-ticket',
         label='Lottery Ticket',
         description='7-60 DTE deep OTM, asymmetric payout, catalyst required',
-        trade_structure='long_option',
+        compatible_structures=['long_call', 'long_put'],
         dte_min=7,
         dte_max=60,
         scoring_weights={

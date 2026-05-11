@@ -340,8 +340,8 @@ export default function StrategyPage() {
               Structure
             </div>
             <div style={{ fontSize: 12, color: '#e6edf3', marginTop: 2 }}>
-              {config.trade_structure
-                ? config.trade_structure.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+              {(config.compatible_structures || []).length
+                ? config.compatible_structures.map(s => s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())).join(', ')
                 : '—'}
             </div>
           </div>

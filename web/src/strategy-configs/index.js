@@ -31,3 +31,21 @@ export const SCORECARD_STRATEGIES = [
   trendRiderConfig,
   lotteryTicketConfig,
 ];
+
+/**
+ * Reverse lookup: given a spread-type identifier (e.g. 'bull_put_credit'),
+ * return the strategy keys whose compatible_structures include it.
+ */
+export function getStrategiesForStructure(spreadType) {
+  return SCORECARD_STRATEGIES
+    .filter(cfg => (cfg.compatible_structures || []).includes(spreadType))
+    .map(cfg => cfg.key);
+}
+
+/**
+ * Forward lookup: given a strategy key, return its compatible_structures array.
+ */
+export function getCompatibleStructures(strategyKey) {
+  const cfg = STRATEGY_CONFIGS[strategyKey];
+  return cfg?.compatible_structures || [];
+}

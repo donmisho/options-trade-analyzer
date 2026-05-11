@@ -16,7 +16,7 @@ const config = {
   // ── Strategy classification ────────────────────────────────────────────
   scorecardStrategy: true,
   enabled: true,
-  trade_structure: 'long_option',
+  compatible_structures: ['long_call', 'long_put'],
   dte_min: 7,
   dte_max: 60,
 

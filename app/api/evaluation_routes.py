@@ -680,22 +680,17 @@ async def evaluate_structured(
     }
 
     # ── OTA-618: Build strategy_spec per strategy ────────────────────────────
-    # TODO: remove after OTA-627 — compatible_structures moves to strategy-configs/*.config.js
-    _COMPATIBLE_STRUCTURES = {
-        "steady-paycheck": ["bull_put_credit", "bear_call_credit"],
-        "weekly-grind": ["bull_put_credit", "bear_call_credit"],
-        "trend-rider": ["long_call", "long_put", "bull_call_debit", "bear_put_debit"],
-        "lottery-ticket": ["long_call", "long_put"],
-    }
     from app.analysis.strategy_definitions import STRATEGIES as _STRATEGIES
     _strategy_specs = {}
     for _sk in request.strategy_keys:
         _sdef = _STRATEGIES.get(_sk)
         if _sdef:
+            _credit_types = {"bull_put_credit", "bear_call_credit"}
+            _is_credit = bool(_credit_types & set(_sdef.compatible_structures))
             _strategy_specs[_sk] = {
                 "preferred_dte_window": [_sdef.dte_min, _sdef.dte_max],
-                "preferred_structure": "credit" if _sdef.trade_structure == "credit_spread" else "debit",
-                "compatible_structures": _COMPATIBLE_STRUCTURES.get(_sk, []),
+                "preferred_structure": "credit" if _is_credit else "debit",
+                "compatible_structures": _sdef.compatible_structures,
             }
 
     system_prompt = skill.get("DEEP_DIVE_SYSTEM")

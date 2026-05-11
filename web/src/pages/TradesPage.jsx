@@ -24,7 +24,7 @@ import { verticalsColumns } from '../config/verticals-columns';
 import { longOptionsColumns } from '../config/long-options-columns';
 import { analyzeVerticals, analyzeLongCalls, searchSymbolsStatic, searchInstruments, getQuote, getCandles, evaluateStructured, followTrade, takeTrade, evaluateFollowUp } from '../api/client';
 import { useToast } from '../components/Toast';
-import { STRATEGY_CONFIGS, SCORECARD_STRATEGIES } from '../strategy-configs/index';
+import { STRATEGY_CONFIGS, SCORECARD_STRATEGIES, getStrategiesForStructure } from '../strategy-configs/index';
 
 const MUTED  = '#8b949e';
 const TEXT   = '#e6edf3';
@@ -37,9 +37,11 @@ const ABBR_TO_KEY = {
   LT: 'lottery-ticket',
 };
 
-// Strategy keys shown in each section's Config drawer — derived from registry
-const VERT_STRATEGY_KEYS  = SCORECARD_STRATEGIES.filter(cfg => cfg.trade_structure === 'credit_spread').map(cfg => cfg.key);
-const CALLS_STRATEGY_KEYS = SCORECARD_STRATEGIES.filter(cfg => cfg.trade_structure === 'long_option').map(cfg => cfg.key);
+// Strategy keys shown in each section's Config drawer — derived from compatible_structures
+const CREDIT_SPREAD_TYPES = ['bull_put_credit', 'bear_call_credit'];
+const LONG_OPTION_TYPES   = ['long_call', 'long_put'];
+const VERT_STRATEGY_KEYS  = [...new Set(CREDIT_SPREAD_TYPES.flatMap(getStrategiesForStructure))];
+const CALLS_STRATEGY_KEYS = [...new Set(LONG_OPTION_TYPES.flatMap(getStrategiesForStructure))];
 
 // ─── Normal CDF (Abramowitz & Stegun approximation, max error 1.5×10⁻⁷) ──────
 function normCdf(z) {
@@ -86,11 +88,11 @@ function inferStrategies(spreadType, dte) {
   return ['TR'];
 }
 
-// Config-driven: returns strategy keys where trade_structure === 'long_option'
+// Config-driven: returns strategy keys whose compatible_structures include long_call/long_put
 // and DTE falls within the strategy's DTE window.
 function inferLongOptionStrategies(optionType, dte) {
   return SCORECARD_STRATEGIES
-    .filter(cfg => cfg.trade_structure === 'long_option')
+    .filter(cfg => (cfg.compatible_structures || []).some(s => LONG_OPTION_TYPES.includes(s)))
     .filter(cfg => dte != null ? (dte >= cfg.dte_min && dte <= cfg.dte_max) : true)
     .map(cfg => cfg.key);
 }
@@ -762,8 +764,9 @@ export default function TradesPage() {
 
   // Derive initial section expansion from ?strategy= param
   const _stratCfg         = STRATEGY_CONFIGS[strategyParam];
-  const _isLongOptStrat   = _stratCfg?.trade_structure === 'long_option';
-  const _isCreditSpread   = _stratCfg?.trade_structure === 'credit_spread';
+  const _stratStructures  = _stratCfg?.compatible_structures || [];
+  const _isLongOptStrat   = _stratStructures.some(s => LONG_OPTION_TYPES.includes(s));
+  const _isCreditSpread   = _stratStructures.some(s => CREDIT_SPREAD_TYPES.includes(s));
 
   // ── SMA chart state ──────────────────────────────────────────────────────
   const [smaPeriods, setSmaPeriods] = useState({ short: 8, mid: 21, long: 50 });

@@ -174,7 +174,7 @@ export default function StrategyProfilePage() {
     ? `${config.dte_min} – ${config.dte_max} DTE`
     : null;
 
-  const tradeStructure = formatTradeStructure(config.trade_structure);
+  const tradeStructure = (config.compatible_structures || []).map(formatTradeStructure).join(', ') || '—';
   const weights        = config.scoring_weights ?? {};
   const schema         = config.configSchema ?? [];
 
