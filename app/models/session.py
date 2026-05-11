@@ -182,12 +182,19 @@ async def init_db():
         # By obtaining the connection here (in the main event loop) and passing
         # it through config.attributes["connection"], env.py skips asyncio.run()
         # entirely and runs migrations on the existing connection.
-        async with engine.connect() as connection:
-            await connection.run_sync(
-                _run_alembic_upgrade, alembic_cfg
+        try:
+            async with engine.connect() as connection:
+                await connection.run_sync(
+                    _run_alembic_upgrade, alembic_cfg
+                )
+                await connection.commit()
+            logger.info("Database migrations applied (alembic upgrade head)")
+        except Exception as migration_err:
+            logger.error(
+                f"Alembic migration FAILED: {type(migration_err).__name__}: {migration_err}",
+                exc_info=True,
             )
-            await connection.commit()
-        logger.info("Database migrations applied (alembic upgrade head)")
+            raise
 
     except RuntimeError:
         raise
