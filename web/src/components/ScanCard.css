@@ -4,3 +4,8 @@
 .scan-remove-btn:hover {
   color: var(--text) !important;
 }
+
+/* Security name tooltip — styled per UI-GUIDANCE Part 8 */
+.scan-card-name:hover .scan-card-name-tooltip {
+  display: block !important;
+}

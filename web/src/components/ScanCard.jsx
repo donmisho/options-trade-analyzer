@@ -129,7 +129,7 @@ export default function ScanCard({
         {description && (
           <span
             ref={nameRef}
-            title={isTruncated ? description : undefined}
+            className="scan-card-name"
             style={{
               fontSize: 10,
               fontWeight: 400,
@@ -140,9 +140,36 @@ export default function ScanCard({
               textOverflow: 'ellipsis',
               flex: 1,
               minWidth: 0,
+              position: 'relative',
+              cursor: 'default',
             }}
           >
             {description}
+            {isTruncated && (
+              <span
+                className="scan-card-name-tooltip"
+                style={{
+                  display: 'none',
+                  position: 'absolute',
+                  bottom: '100%',
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  backgroundColor: 'var(--bg3, #21262d)',
+                  border: '1px solid var(--border, #30363d)',
+                  fontSize: 9,
+                  fontWeight: 400,
+                  padding: '3px 8px',
+                  borderRadius: 3,
+                  whiteSpace: 'nowrap',
+                  marginBottom: 4,
+                  zIndex: 10,
+                  color: 'var(--text, #e6edf3)',
+                  pointerEvents: 'none',
+                }}
+              >
+                {description}
+              </span>
+            )}
           </span>
         )}
       </div>

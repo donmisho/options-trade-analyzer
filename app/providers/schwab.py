@@ -77,21 +77,21 @@ class SchwabMarketData(MarketDataProvider):
 
     async def get_quote(self, symbol: str) -> dict:
         """
-        GET /marketdata/v1/{symbol}/quotes?fields=quote,reference
+        GET /marketdata/v1/{symbol}/quotes?fields=quote,fundamental,reference
 
         Returns normalized Quote dict matching the same shape as Tradier's.
 
-        WHY fields=quote,reference: Schwab's quote endpoint can return
-        different "root nodes" of data. We only need the quote data
-        (prices, volume) and reference data (description). Requesting
-        fewer fields = faster response.
+        WHY fields=quote,fundamental,reference: Schwab's quote endpoint can
+        return different "root nodes" of data. We need quote data (prices,
+        volume), fundamental data (avg volume for rel-volume), and reference
+        data (description). Requesting fewer fields = faster response.
         """
         headers = await self._get_headers()
 
         resp = await self._client.get(
             f"/{symbol}/quotes",
             headers=headers,
-            params={"fields": "quote,fundamental"},
+            params={"fields": "quote,fundamental,reference"},
         )
         resp.raise_for_status()
         data = resp.json()
@@ -108,7 +108,8 @@ class SchwabMarketData(MarketDataProvider):
 
         return {
             "symbol": symbol_data.get("symbol", symbol.upper()),
-            "description": symbol_data.get("description", ""),
+            "description": symbol_data.get("description", "")
+                           or (symbol_data.get("reference", {}) or {}).get("description", ""),
             "price": quote.get("lastPrice", 0),
             "change": quote.get("netChange", 0),
             "change_pct": quote.get("netPercentChange", 0),
