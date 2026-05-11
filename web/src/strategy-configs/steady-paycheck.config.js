@@ -8,9 +8,12 @@
 const config = {
   // ── Identity ──────────────────────────────────────────────────────────
   key: 'steady-paycheck',
+  short_code: 'SP',
   label: 'Steady Paycheck',
   tabLabel: 'Steady Paycheck',
   description: '30-45 DTE credit spreads, high IV rank, income focus',
+  color_bg: 'rgba(245,158,11,0.12)',
+  color_text: 'var(--strategy-sp)',
 
   // ── Strategy classification ────────────────────────────────────────────
   scorecardStrategy: true,        // Routed to SecurityDashboard, not OptionsTerminal

@@ -8,9 +8,12 @@
 const config = {
   // ── Identity ──────────────────────────────────────────────────────────
   key: 'trend-rider',
+  short_code: 'TR',
   label: 'Trend Rider',
   tabLabel: 'Trend Rider',
   description: '30-60 DTE long calls on strong SMA-aligned stocks',
+  color_bg: 'rgba(96,165,250,0.12)',
+  color_text: 'var(--strategy-tr)',
 
   // ── Strategy classification ────────────────────────────────────────────
   scorecardStrategy: true,

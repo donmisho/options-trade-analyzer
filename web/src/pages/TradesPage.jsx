@@ -24,20 +24,16 @@ import { verticalsColumns } from '../config/verticals-columns';
 import { longOptionsColumns } from '../config/long-options-columns';
 import { analyzeVerticals, analyzeLongCalls, searchSymbolsStatic, searchInstruments, getQuote, getCandles, evaluateStructured, followTrade, takeTrade, evaluateFollowUp } from '../api/client';
 import { useToast } from '../components/Toast';
-import { STRATEGY_CONFIGS, SCORECARD_STRATEGIES, getStrategiesForStructure } from '../strategy-configs/index';
+import { STRATEGY_CONFIGS, SCORECARD_STRATEGIES, STRATEGY_KEY_MAP, getStrategiesForStructure } from '../strategy-configs/index';
 
 const MUTED  = '#8b949e';
 const TEXT   = '#e6edf3';
 const BORDER = '#30363d';
 
-const ABBR_TO_KEY = {
-  SP: 'steady-paycheck',
-  WG: 'weekly-grind',
-  TR: 'trend-rider',
-  LT: 'lottery-ticket',
-};
+// All scorecard strategy keys — used by Config drawers (show all strategies regardless of section)
+const ALL_STRATEGY_KEYS = SCORECARD_STRATEGIES.map(s => s.key);
 
-// Strategy keys shown in each section's Config drawer — derived from compatible_structures
+// Structure-filtered keys — used for analysis API calls and default active tab
 const CREDIT_SPREAD_TYPES = ['bull_put_credit', 'bear_call_credit'];
 const LONG_OPTION_TYPES   = ['long_call', 'long_put'];
 const VERT_STRATEGY_KEYS  = [...new Set(CREDIT_SPREAD_TYPES.flatMap(getStrategiesForStructure))];
@@ -73,23 +69,20 @@ function generateCandles(price, count = 120) {
   }));
 }
 
-// ─── Strategy pill inference (stopgap until Phase 2.9 scoring is wired) ───────
+// ─── Strategy inference — registry-driven, returns full keys ─────────────────
 function inferStrategies(spreadType, dte) {
   if (!spreadType) return [];
   const type = spreadType.toLowerCase();
-  const isCredit = type === 'bull_put' || type === 'bear_call';
-  if (isCredit) {
-    if (dte == null) return ['SP'];
-    if (dte >= 5 && dte < 25) return ['WG'];
-    return ['SP'];
-  }
-  // Debit spreads — directional
-  if (dte != null && dte < 21) return ['LT'];
-  return ['TR'];
+  const creditTypes = ['bull_put', 'bear_call'];
+  const structureId = creditTypes.includes(type)
+    ? `${type}_credit`
+    : `${type}_debit`;
+  return SCORECARD_STRATEGIES
+    .filter(cfg => (cfg.compatible_structures || []).includes(structureId))
+    .filter(cfg => dte != null ? (dte >= cfg.dte_min && dte <= cfg.dte_max) : true)
+    .map(cfg => cfg.key);
 }
 
-// Config-driven: returns strategy keys whose compatible_structures include long_call/long_put
-// and DTE falls within the strategy's DTE window.
 function inferLongOptionStrategies(optionType, dte) {
   return SCORECARD_STRATEGIES
     .filter(cfg => (cfg.compatible_structures || []).some(s => LONG_OPTION_TYPES.includes(s)))
@@ -434,10 +427,18 @@ function SectionHeader({ title, count, expanded, onToggle, showConfig, onConfig,
 // ─── Section Config Drawer (OTA-387) ─────────────────────────────────────────
 // Slide-out config panel for a section. Shows strategy tabs when multiple
 // strategy keys are provided. Apply saves to localStorage per strategy.
-function SectionConfigDrawer({ open, onClose, strategyKeys = [], onApply }) {
-  const [activeKey, setActiveKey] = useState(strategyKeys[0] || null);
+function SectionConfigDrawer({ open, onClose, strategyKeys = [], defaultActiveKey, onApply }) {
+  const [activeKey, setActiveKey] = useState(defaultActiveKey || strategyKeys[0] || null);
 
   const keysStr = strategyKeys.join(',');
+  useEffect(() => {
+    if (open) {
+      const preferred = defaultActiveKey && strategyKeys.includes(defaultActiveKey)
+        ? defaultActiveKey
+        : strategyKeys[0] || null;
+      setActiveKey(preferred); // eslint-disable-line react-hooks/set-state-in-effect
+    }
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (strategyKeys.length && !strategyKeys.includes(activeKey)) {
       setActiveKey(strategyKeys[0]); // eslint-disable-line react-hooks/set-state-in-effect
@@ -1040,7 +1041,7 @@ export default function TradesPage() {
 
   // ── Shared handler factory (closes over symbol, showToast, setEvaluations) ─
   function makeTradeHandlers(trade, rowId, underlying, { defaultStrategy, getEntryPrice, tradeLabel, smaAlign }) {
-    const strategyKeys = (trade.strategies || []).map(a => ABBR_TO_KEY[a] || a);
+    const strategyKeys = (trade.strategies || []).map(a => STRATEGY_KEY_MAP[a] || a);
     if (!strategyKeys.length) strategyKeys.push(defaultStrategy);
 
     async function handleEvaluate() {
@@ -1123,7 +1124,7 @@ export default function TradesPage() {
     const outcome = buildOutcome(trade, vertUnderlying, totalEV);
     const { handleEvaluate, handleFollow, handleTakePosition, handleFollowUp } = makeTradeHandlers(
       trade, rowId, vertUnderlying, {
-        defaultStrategy: 'steady-paycheck',
+        defaultStrategy: VERT_STRATEGY_KEYS[0] || ALL_STRATEGY_KEYS[0],
         getEntryPrice: t => Math.abs(t.net_debit || 0),
         tradeLabel: t => `${t.long_strike}/${t.short_strike}`,
         smaAlign: smaAlignment,
@@ -1156,7 +1157,7 @@ export default function TradesPage() {
     const { scenarios, totalEV } = buildLongOptionExitScenarios(trade, callsUnderlying);
     const { handleEvaluate, handleFollow, handleTakePosition, handleFollowUp } = makeTradeHandlers(
       trade, rowId, callsUnderlying, {
-        defaultStrategy: 'trend-rider',
+        defaultStrategy: CALLS_STRATEGY_KEYS[0] || ALL_STRATEGY_KEYS[0],
         getEntryPrice: t => t.mid_price || 0,
         tradeLabel: t => `${t.option_type} ${t.strike}`,
         smaAlign: smaAlignment,
@@ -1430,13 +1431,15 @@ export default function TradesPage() {
         open={vertConfigOpen}
         onClose={() => setVertConfigOpen(false)}
         onApply={handleVertConfigApply}
-        strategyKeys={VERT_STRATEGY_KEYS}
+        strategyKeys={ALL_STRATEGY_KEYS}
+        defaultActiveKey={VERT_STRATEGY_KEYS[0]}
       />
       <SectionConfigDrawer
         open={callsConfigOpen}
         onClose={() => setCallsConfigOpen(false)}
         onApply={handleCallsConfigApply}
-        strategyKeys={CALLS_STRATEGY_KEYS}
+        strategyKeys={ALL_STRATEGY_KEYS}
+        defaultActiveKey={CALLS_STRATEGY_KEYS[0]}
       />
     </>
   );

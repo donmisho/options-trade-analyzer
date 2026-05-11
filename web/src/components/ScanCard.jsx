@@ -8,14 +8,12 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { C, mono } from '../styles/tokens';
+import { SCORECARD_STRATEGIES } from '../strategy-configs/index';
 import './ScanCard.css';
 
-const STRATEGY_META = {
-  'steady-paycheck': { color: 'var(--strategy-sp)' },
-  'weekly-grind':    { color: 'var(--strategy-wg)' },
-  'trend-rider':     { color: 'var(--strategy-tr)' },
-  'lottery-ticket':  { color: 'var(--strategy-lt)' },
-};
+const STRATEGY_META = Object.fromEntries(
+  SCORECARD_STRATEGIES.map(cfg => [cfg.key, { color: cfg.color_text }])
+);
 
 const SIGNAL_BADGE = {
   BULLISH: { bg: 'rgba(74,222,128,0.15)',  color: '#4ade80' },

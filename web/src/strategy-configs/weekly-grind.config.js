@@ -8,9 +8,12 @@
 const config = {
   // ── Identity ──────────────────────────────────────────────────────────
   key: 'weekly-grind',
+  short_code: 'WG',
   label: 'Weekly Grind',
   tabLabel: 'Weekly Grind',
   description: '7-14 DTE credit spreads, Theta/Gamma efficiency focus',
+  color_bg: 'rgba(74,222,128,0.12)',
+  color_text: 'var(--strategy-wg)',
 
   // ── Strategy classification ────────────────────────────────────────────
   scorecardStrategy: true,

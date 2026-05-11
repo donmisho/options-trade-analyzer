@@ -32,6 +32,23 @@ export const SCORECARD_STRATEGIES = [
   lotteryTicketConfig,
 ];
 
+// ── short_code uniqueness check (runs at module load) ──────────────────────
+const seenShortCodes = new Set();
+for (const strat of SCORECARD_STRATEGIES) {
+  if (seenShortCodes.has(strat.short_code)) {
+    throw new Error(`Duplicate strategy short_code: ${strat.short_code}`);
+  }
+  seenShortCodes.add(strat.short_code);
+}
+
+// ── Derived maps — single source of truth for key ↔ short_code ────────────
+export const STRATEGY_KEY_MAP = Object.fromEntries(
+  SCORECARD_STRATEGIES.map(s => [s.short_code, s.key])
+);
+export const SHORT_CODE_MAP = Object.fromEntries(
+  SCORECARD_STRATEGIES.map(s => [s.key, s.short_code])
+);
+
 /**
  * Reverse lookup: given a spread-type identifier (e.g. 'bull_put_credit'),
  * return the strategy keys whose compatible_structures include it.

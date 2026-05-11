@@ -9,9 +9,12 @@
 const config = {
   // ── Identity ──────────────────────────────────────────────────────────
   key: 'lottery-ticket',
+  short_code: 'LT',
   label: 'Lottery Ticket',
   tabLabel: 'Lottery Ticket',
   description: '1-7 DTE deep OTM, asymmetric payout, catalyst required',
+  color_bg: 'rgba(192,132,252,0.12)',
+  color_text: 'var(--strategy-lt)',
 
   // ── Strategy classification ────────────────────────────────────────────
   scorecardStrategy: true,

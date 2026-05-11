@@ -11,6 +11,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { positionsColumns, POSITIONS_DEFAULT_SORT } from '../config/positions-columns';
 import { formatDate } from '../utils/formatDate';
+import { SCORECARD_STRATEGIES, STRATEGY_CONFIGS } from '../strategy-configs/index';
 import {
   getPositions,
   getPositionAssessments,
@@ -96,18 +97,16 @@ function normalizePosition(apiPos) {
 
 // ─── Strategy/Group metadata ──────────────────────────────────────────────────
 
-const STRATEGY_LABELS = {
-  'steady-paycheck': 'Steady Paycheck',
-  'weekly-grind':    'Weekly Grind',
-  'trend-rider':     'Trend Rider',
-  'lottery-ticket':  'Lottery Ticket',
-  'verticals':       'Vertical Spreads',
-  'long-calls':      'Long Calls',
-};
+const STRATEGY_LABELS = Object.fromEntries([
+  ...SCORECARD_STRATEGIES.map(cfg => [cfg.key, cfg.label]),
+  ...Object.entries(STRATEGY_CONFIGS)
+    .filter(([, cfg]) => !cfg.scorecardStrategy)
+    .map(([key, cfg]) => [key, cfg.label]),
+]);
 
 const STRATEGY_ORDER = [
-  'lottery-ticket', 'steady-paycheck', 'weekly-grind', 'trend-rider',
-  'verticals', 'long-calls',
+  ...SCORECARD_STRATEGIES.map(cfg => cfg.key),
+  ...Object.keys(STRATEGY_CONFIGS).filter(k => !STRATEGY_CONFIGS[k].scorecardStrategy),
 ];
 
 // ─── Group-by helpers ─────────────────────────────────────────────────────────
@@ -435,12 +434,9 @@ function PositionGroup({ name, count, collapsed, onToggle, children }) {
 
 const GROUP_BY_OPTIONS = ['Strategy', 'Symbol', 'Health'];
 
-const STRATEGY_FILTER_OPTIONS = [
-  { value: 'steady-paycheck', label: 'Steady Paycheck' },
-  { value: 'weekly-grind',    label: 'Weekly Grind' },
-  { value: 'trend-rider',     label: 'Trend Rider' },
-  { value: 'lottery-ticket',  label: 'Lottery Ticket' },
-];
+const STRATEGY_FILTER_OPTIONS = SCORECARD_STRATEGIES.map(cfg => ({
+  value: cfg.key, label: cfg.label,
+}));
 
 function FilterBar({ filters, onChange, onRefreshAll, refreshingAll, filteredCount }) {
   return (
@@ -776,7 +772,7 @@ export default function PositionsPage() {
     }));
 
     if (filters.groupBy === 'Strategy') {
-      const emptyStrategies = ['weekly-grind', 'trend-rider'].filter(k => !map[k]);
+      const emptyStrategies = SCORECARD_STRATEGIES.map(cfg => cfg.key).filter(k => !map[k]);
       for (const k of emptyStrategies) {
         result.push({ key: k, name: STRATEGY_LABELS[k], positions: [] });
       }

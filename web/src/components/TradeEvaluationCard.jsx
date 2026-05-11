@@ -15,7 +15,7 @@
  *   smaData        — optional { smaShort, smaMid, smaLong }
  *   tradeData      — optional raw trade from analysis engine (for Follow/Take payload
  *                    and ProbabilityMatrix zone highlight)
- *   activeStrategy — string key (e.g. 'steady-paycheck')
+ *   activeStrategy — string key from SCORECARD_STRATEGIES
  */
 
 import { useState } from 'react';

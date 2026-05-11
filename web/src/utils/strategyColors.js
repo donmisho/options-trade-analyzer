@@ -1,21 +1,22 @@
 /**
  * strategyColors — Strategy abbreviation + color constants.
  *
+ * Derived from SCORECARD_STRATEGIES registry — no hardcoded strategy data.
  * Shared by StrategyPill, advice badges, and any other component
  * that renders strategy identity.
  */
 
-export const STRATEGY_COLORS = {
-  steady_paycheck: { abbr: 'SP', bg: 'rgba(245,158,11,0.12)', text: 'var(--strategy-sp)', fullName: 'Steady Paycheck' },
-  weekly_grind:    { abbr: 'WG', bg: 'rgba(74,222,128,0.12)',  text: 'var(--strategy-wg)', fullName: 'Weekly Grind' },
-  trend_rider:     { abbr: 'TR', bg: 'rgba(96,165,250,0.12)',  text: 'var(--strategy-tr)',  fullName: 'Trend Rider' },
-  lottery_ticket:  { abbr: 'LT', bg: 'rgba(192,132,252,0.12)', text: 'var(--strategy-lt)', fullName: 'Lottery Ticket' },
-};
+import { SCORECARD_STRATEGIES } from '../strategy-configs/index';
 
-// Reverse lookup: abbr → key
-export const ABBR_TO_STRATEGY_KEY = {
-  SP: 'steady_paycheck',
-  WG: 'weekly_grind',
-  TR: 'trend_rider',
-  LT: 'lottery_ticket',
-};
+// Keyed by underscore form (steady_paycheck) for consumer compatibility
+export const STRATEGY_COLORS = Object.fromEntries(
+  SCORECARD_STRATEGIES.map(cfg => [
+    cfg.key.replace(/-/g, '_'),
+    { abbr: cfg.short_code, bg: cfg.color_bg, text: cfg.color_text, fullName: cfg.label },
+  ])
+);
+
+// Reverse lookup: abbr → underscore key
+export const ABBR_TO_STRATEGY_KEY = Object.fromEntries(
+  SCORECARD_STRATEGIES.map(cfg => [cfg.short_code, cfg.key.replace(/-/g, '_')])
+);
