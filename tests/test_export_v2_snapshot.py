@@ -1,9 +1,9 @@
 """
-Snapshot tests for Export MD v2 envelope (OTA-638, OTA-641, OTA-642).
+Snapshot tests for Export MD v2 envelope (OTA-638, OTA-641, OTA-642, OTA-644).
 
 Tests the v2 header block (Schema version, Strategy profile, DTE, spread_type ENUM,
-Current P&L, Last monitored), Technicals, Earnings, Options chain, and footer
-against committed expected output.
+Current P&L, Last monitored), Technicals, Earnings, Options chain, Invalidation
+conditions, and footer against committed expected output.
 
 Uses lightweight stub objects instead of real DB models to keep the test
 independent of the database layer.
@@ -30,6 +30,7 @@ from app.api.export_routes import (
     distance_from_50d_narrative,
     _build_technicals_section,
     _build_earnings_section,
+    _build_market_context_section,
     _build_legs_table,
     _build_net_metrics_v2,
     _build_greeks_iv_section,
@@ -327,28 +328,32 @@ class TestTradeV2Envelope:
     @pytest.mark.asyncio
     async def test_header_contains_schema_version(self):
         with patch("app.api.export_routes._build_technicals_section", new_callable=AsyncMock, return_value=""), \
-             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""):
+             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""), \
+             patch("app.api.export_routes._build_market_context_section", new_callable=AsyncMock, return_value=""):
             body, _ = await _build_trade_markdown(_make_trade_candidate(), _mock_db())
         assert "**Schema version:** 2.0" in body
 
     @pytest.mark.asyncio
     async def test_header_contains_strategy_profile(self):
         with patch("app.api.export_routes._build_technicals_section", new_callable=AsyncMock, return_value=""), \
-             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""):
+             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""), \
+             patch("app.api.export_routes._build_market_context_section", new_callable=AsyncMock, return_value=""):
             body, _ = await _build_trade_markdown(_make_trade_candidate(), _mock_db())
         assert "**Strategy profile:** Trend Rider" in body
 
     @pytest.mark.asyncio
     async def test_header_contains_current_pnl_na(self):
         with patch("app.api.export_routes._build_technicals_section", new_callable=AsyncMock, return_value=""), \
-             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""):
+             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""), \
+             patch("app.api.export_routes._build_market_context_section", new_callable=AsyncMock, return_value=""):
             body, _ = await _build_trade_markdown(_make_trade_candidate(), _mock_db())
         assert "**Current P&L:** N/A" in body
 
     @pytest.mark.asyncio
     async def test_spread_type_is_enum(self):
         with patch("app.api.export_routes._build_technicals_section", new_callable=AsyncMock, return_value=""), \
-             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""):
+             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""), \
+             patch("app.api.export_routes._build_market_context_section", new_callable=AsyncMock, return_value=""):
             body, _ = await _build_trade_markdown(_make_trade_candidate(), _mock_db())
         assert "**Spread type:** BEAR_PUT_DEBIT" in body
         assert "Bear Put Debit" not in body
@@ -356,7 +361,8 @@ class TestTradeV2Envelope:
     @pytest.mark.asyncio
     async def test_dte_is_integer(self):
         with patch("app.api.export_routes._build_technicals_section", new_callable=AsyncMock, return_value=""), \
-             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""):
+             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""), \
+             patch("app.api.export_routes._build_market_context_section", new_callable=AsyncMock, return_value=""):
             body, _ = await _build_trade_markdown(_make_trade_candidate(), _mock_db())
         match = re.search(r"\*\*DTE:\*\* (\d+)", body)
         assert match is not None
@@ -365,14 +371,16 @@ class TestTradeV2Envelope:
     @pytest.mark.asyncio
     async def test_no_last_monitored_on_trade(self):
         with patch("app.api.export_routes._build_technicals_section", new_callable=AsyncMock, return_value=""), \
-             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""):
+             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""), \
+             patch("app.api.export_routes._build_market_context_section", new_callable=AsyncMock, return_value=""):
             body, _ = await _build_trade_markdown(_make_trade_candidate(), _mock_db())
         assert "**Last monitored:**" not in body
 
     @pytest.mark.asyncio
     async def test_footer_v2(self):
         with patch("app.api.export_routes._build_technicals_section", new_callable=AsyncMock, return_value=""), \
-             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""):
+             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""), \
+             patch("app.api.export_routes._build_market_context_section", new_callable=AsyncMock, return_value=""):
             body, _ = await _build_trade_markdown(_make_trade_candidate(), _mock_db())
         assert _V2_FOOTER in body
         assert "Step 0 parse contract" not in body
@@ -383,7 +391,8 @@ class TestTradeV2Envelope:
         c = _make_trade_candidate()
         c.scan_strategy_key = None
         with patch("app.api.export_routes._build_technicals_section", new_callable=AsyncMock, return_value=""), \
-             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""):
+             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""), \
+             patch("app.api.export_routes._build_market_context_section", new_callable=AsyncMock, return_value=""):
             body, _ = await _build_trade_markdown(c, _mock_db())
         assert "**Strategy profile:** unassigned" in body
 
@@ -394,28 +403,32 @@ class TestPositionV2Envelope:
     @pytest.mark.asyncio
     async def test_header_contains_schema_version(self):
         with patch("app.api.export_routes._build_technicals_section", new_callable=AsyncMock, return_value=""), \
-             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""):
+             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""), \
+             patch("app.api.export_routes._build_market_context_section", new_callable=AsyncMock, return_value=""):
             body, _ = await _build_position_markdown(_make_position(), None, _mock_db())
         assert "**Schema version:** 2.0" in body
 
     @pytest.mark.asyncio
     async def test_header_contains_strategy_profile(self):
         with patch("app.api.export_routes._build_technicals_section", new_callable=AsyncMock, return_value=""), \
-             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""):
+             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""), \
+             patch("app.api.export_routes._build_market_context_section", new_callable=AsyncMock, return_value=""):
             body, _ = await _build_position_markdown(_make_position(), None, _mock_db())
         assert "**Strategy profile:** Steady Paycheck" in body
 
     @pytest.mark.asyncio
     async def test_header_contains_last_monitored(self):
         with patch("app.api.export_routes._build_technicals_section", new_callable=AsyncMock, return_value=""), \
-             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""):
+             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""), \
+             patch("app.api.export_routes._build_market_context_section", new_callable=AsyncMock, return_value=""):
             body, _ = await _build_position_markdown(_make_position(), None, _mock_db())
         assert "**Last monitored:** 05-11-2026 18:22 UTC" in body
 
     @pytest.mark.asyncio
     async def test_spread_type_is_enum(self):
         with patch("app.api.export_routes._build_technicals_section", new_callable=AsyncMock, return_value=""), \
-             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""):
+             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""), \
+             patch("app.api.export_routes._build_market_context_section", new_callable=AsyncMock, return_value=""):
             body, _ = await _build_position_markdown(_make_position(), None, _mock_db())
         assert "**Spread type:** BULL_PUT_CREDIT" in body
         assert "Bull Put Credit" not in body
@@ -423,7 +436,8 @@ class TestPositionV2Envelope:
     @pytest.mark.asyncio
     async def test_dte_is_integer(self):
         with patch("app.api.export_routes._build_technicals_section", new_callable=AsyncMock, return_value=""), \
-             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""):
+             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""), \
+             patch("app.api.export_routes._build_market_context_section", new_callable=AsyncMock, return_value=""):
             body, _ = await _build_position_markdown(_make_position(), None, _mock_db())
         match = re.search(r"\*\*DTE:\*\* (\d+)", body)
         assert match is not None
@@ -432,28 +446,32 @@ class TestPositionV2Envelope:
     @pytest.mark.asyncio
     async def test_current_pnl_zero(self):
         with patch("app.api.export_routes._build_technicals_section", new_callable=AsyncMock, return_value=""), \
-             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""):
+             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""), \
+             patch("app.api.export_routes._build_market_context_section", new_callable=AsyncMock, return_value=""):
             body, _ = await _build_position_markdown(_make_position(current_pnl=0.0), None, _mock_db())
         assert "**Current P&L:** +0.00" in body
 
     @pytest.mark.asyncio
     async def test_current_pnl_positive(self):
         with patch("app.api.export_routes._build_technicals_section", new_callable=AsyncMock, return_value=""), \
-             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""):
+             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""), \
+             patch("app.api.export_routes._build_market_context_section", new_callable=AsyncMock, return_value=""):
             body, _ = await _build_position_markdown(_make_position(current_pnl=2.50), None, _mock_db())
         assert "**Current P&L:** +2.50" in body
 
     @pytest.mark.asyncio
     async def test_current_pnl_negative(self):
         with patch("app.api.export_routes._build_technicals_section", new_callable=AsyncMock, return_value=""), \
-             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""):
+             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""), \
+             patch("app.api.export_routes._build_market_context_section", new_callable=AsyncMock, return_value=""):
             body, _ = await _build_position_markdown(_make_position(current_pnl=-1.30), None, _mock_db())
         assert "**Current P&L:** -1.30" in body
 
     @pytest.mark.asyncio
     async def test_footer_v2(self):
         with patch("app.api.export_routes._build_technicals_section", new_callable=AsyncMock, return_value=""), \
-             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""):
+             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""), \
+             patch("app.api.export_routes._build_market_context_section", new_callable=AsyncMock, return_value=""):
             body, _ = await _build_position_markdown(_make_position(), None, _mock_db())
         assert _V2_FOOTER in body
         assert "Step 0 parse contract" not in body
@@ -462,7 +480,8 @@ class TestPositionV2Envelope:
     async def test_full_envelope_shape(self):
         """Assert the header block lines appear in the correct order."""
         with patch("app.api.export_routes._build_technicals_section", new_callable=AsyncMock, return_value=""), \
-             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""):
+             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""), \
+             patch("app.api.export_routes._build_market_context_section", new_callable=AsyncMock, return_value=""):
             body, _ = await _build_position_markdown(_make_position(), None, _mock_db())
         lines = body.split("\n")
         header_labels = []
@@ -499,6 +518,15 @@ def _make_mock_candles():
             "close": base + 0.5,
         })
     return bars
+
+
+def _make_market_candles():
+    """Generate 60 daily candles for market context (SPY/QQQ/VIX price history).
+
+    Returns list of {"close": float, "datetime": int} dicts.
+    Close values: 686.00 .. 686.00+59*0.1 — a gentle uptrend.
+    """
+    return [{"close": 686.0 + i * 0.1, "datetime": 1700000000 + i * 86400} for i in range(60)]
 
 
 def _mock_db_with_asset_type(asset_type: str):
@@ -633,22 +661,25 @@ class TestEarningsSectionActiveProvider:
 class TestTradeWithTechnicalsAndEarnings:
     @pytest.mark.asyncio
     async def test_section_ordering(self):
-        """Technicals sits after Net metrics, Earnings after Technicals, both before App verdict."""
+        """Greeks & IV → Market context → Technicals → Earnings → App verdict."""
         mock_provider = AsyncMock()
         mock_provider.get_candles.return_value = _make_mock_candles()
+        mock_provider.get_quote.return_value = {"price": 18.4}
+        mock_provider.get_price_history.return_value = _make_market_candles()
         db = _mock_db_with_asset_type("ETF")
 
         with patch("app.api.export_routes._get_provider", return_value=mock_provider):
             body, _ = await _build_trade_markdown(_make_trade_candidate(), db)
 
-        # Verify section ordering (Greeks & IV is between Net metrics and Technicals)
+        # Verify section ordering
         net_idx = body.index("## Net metrics")
         greeks_idx = body.index("## Greeks & IV (position-level)")
+        mkt_idx = body.index("## Market context")
         tech_idx = body.index("## Technicals (underlying)")
         earn_idx = body.index("## Earnings")
         verdict_idx = body.index("## App verdict")
 
-        assert net_idx < greeks_idx < tech_idx < earn_idx < verdict_idx
+        assert net_idx < greeks_idx < mkt_idx < tech_idx < earn_idx < verdict_idx
 
 
 # ─── OTA-639 Snapshot tests: legs columns, net metrics, Greeks ─────────────
@@ -730,7 +761,8 @@ class TestDebitSpreadSnapshot:
     async def test_legs_table_columns(self):
         """Legs table has all 12 v2 columns: Side, Type, Strike, Exp, Qty, Bid, Ask, Mid, Delta, IV, Volume, OI."""
         with patch("app.api.export_routes._build_technicals_section", new_callable=AsyncMock, return_value=""), \
-             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""):
+             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""), \
+             patch("app.api.export_routes._build_market_context_section", new_callable=AsyncMock, return_value=""):
             body, _ = await _build_trade_markdown(
                 _make_trade_candidate(), _mock_db(), chain_contracts=_DEBIT_CHAIN_CONTRACTS,
             )
@@ -748,7 +780,8 @@ class TestDebitSpreadSnapshot:
     async def test_net_metrics_debit_format(self):
         """Net metrics block uses debit-specific labels and $ prefix."""
         with patch("app.api.export_routes._build_technicals_section", new_callable=AsyncMock, return_value=""), \
-             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""):
+             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""), \
+             patch("app.api.export_routes._build_market_context_section", new_callable=AsyncMock, return_value=""):
             body, _ = await _build_trade_markdown(
                 _make_trade_candidate(), _mock_db(), chain_contracts=_DEBIT_CHAIN_CONTRACTS,
             )
@@ -765,7 +798,8 @@ class TestDebitSpreadSnapshot:
     async def test_cushion_to_breakeven_negative(self):
         """Bear put debit with spot above breakeven → negative cushion with narrative."""
         with patch("app.api.export_routes._build_technicals_section", new_callable=AsyncMock, return_value=""), \
-             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""):
+             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""), \
+             patch("app.api.export_routes._build_market_context_section", new_callable=AsyncMock, return_value=""):
             body, _ = await _build_trade_markdown(
                 _make_trade_candidate(), _mock_db(), chain_contracts=_DEBIT_CHAIN_CONTRACTS,
             )
@@ -779,7 +813,8 @@ class TestDebitSpreadSnapshot:
     async def test_greeks_iv_section(self):
         """Greeks & IV section present with correct net Greeks for BEAR_PUT_DEBIT."""
         with patch("app.api.export_routes._build_technicals_section", new_callable=AsyncMock, return_value=""), \
-             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""):
+             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""), \
+             patch("app.api.export_routes._build_market_context_section", new_callable=AsyncMock, return_value=""):
             body, _ = await _build_trade_markdown(
                 _make_trade_candidate(), _mock_db(), chain_contracts=_DEBIT_CHAIN_CONTRACTS,
             )
@@ -804,7 +839,8 @@ class TestDebitSpreadSnapshot:
     async def test_net_delta_sign_matches_direction(self):
         """Bear put debit must have negative net delta (profits from downward move)."""
         with patch("app.api.export_routes._build_technicals_section", new_callable=AsyncMock, return_value=""), \
-             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""):
+             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""), \
+             patch("app.api.export_routes._build_market_context_section", new_callable=AsyncMock, return_value=""):
             body, _ = await _build_trade_markdown(
                 _make_trade_candidate(), _mock_db(), chain_contracts=_DEBIT_CHAIN_CONTRACTS,
             )
@@ -815,7 +851,8 @@ class TestDebitSpreadSnapshot:
     async def test_no_dollar_outside_net_metrics(self):
         """$ prefix appears only in Net metrics block, not in legs, Greeks, or other sections."""
         with patch("app.api.export_routes._build_technicals_section", new_callable=AsyncMock, return_value=""), \
-             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""):
+             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""), \
+             patch("app.api.export_routes._build_market_context_section", new_callable=AsyncMock, return_value=""):
             body, _ = await _build_trade_markdown(
                 _make_trade_candidate(), _mock_db(), chain_contracts=_DEBIT_CHAIN_CONTRACTS,
             )
@@ -835,7 +872,8 @@ class TestCreditSpreadSnapshot:
     async def test_legs_table_columns(self):
         """Legs table has all 12 v2 columns with volume/OI from chain."""
         with patch("app.api.export_routes._build_technicals_section", new_callable=AsyncMock, return_value=""), \
-             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""):
+             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""), \
+             patch("app.api.export_routes._build_market_context_section", new_callable=AsyncMock, return_value=""):
             body, _ = await _build_position_markdown(
                 _make_position(), None, _mock_db(), chain_contracts=_CREDIT_CHAIN_CONTRACTS,
             )
@@ -852,7 +890,8 @@ class TestCreditSpreadSnapshot:
     async def test_net_metrics_credit_format(self):
         """Net metrics block uses credit-specific labels and $ prefix."""
         with patch("app.api.export_routes._build_technicals_section", new_callable=AsyncMock, return_value=""), \
-             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""):
+             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""), \
+             patch("app.api.export_routes._build_market_context_section", new_callable=AsyncMock, return_value=""):
             body, _ = await _build_position_markdown(
                 _make_position(), None, _mock_db(), chain_contracts=_CREDIT_CHAIN_CONTRACTS,
             )
@@ -869,7 +908,8 @@ class TestCreditSpreadSnapshot:
     async def test_cushion_to_short_strike_positive(self):
         """Bull put credit with spot above short strike → positive cushion."""
         with patch("app.api.export_routes._build_technicals_section", new_callable=AsyncMock, return_value=""), \
-             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""):
+             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""), \
+             patch("app.api.export_routes._build_market_context_section", new_callable=AsyncMock, return_value=""):
             body, _ = await _build_position_markdown(
                 _make_position(), None, _mock_db(), chain_contracts=_CREDIT_CHAIN_CONTRACTS,
             )
@@ -881,7 +921,8 @@ class TestCreditSpreadSnapshot:
     async def test_greeks_iv_section(self):
         """Greeks & IV section with correct net Greeks for BULL_PUT_CREDIT."""
         with patch("app.api.export_routes._build_technicals_section", new_callable=AsyncMock, return_value=""), \
-             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""):
+             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""), \
+             patch("app.api.export_routes._build_market_context_section", new_callable=AsyncMock, return_value=""):
             body, _ = await _build_position_markdown(
                 _make_position(), None, _mock_db(), chain_contracts=_CREDIT_CHAIN_CONTRACTS,
             )
@@ -903,7 +944,8 @@ class TestCreditSpreadSnapshot:
     async def test_net_delta_sign_matches_direction(self):
         """Bull put credit must have positive net delta (mildly bullish)."""
         with patch("app.api.export_routes._build_technicals_section", new_callable=AsyncMock, return_value=""), \
-             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""):
+             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""), \
+             patch("app.api.export_routes._build_market_context_section", new_callable=AsyncMock, return_value=""):
             body, _ = await _build_position_markdown(
                 _make_position(), None, _mock_db(), chain_contracts=_CREDIT_CHAIN_CONTRACTS,
             )
@@ -913,7 +955,8 @@ class TestCreditSpreadSnapshot:
     async def test_no_dollar_outside_net_metrics(self):
         """$ prefix appears only in Net metrics block."""
         with patch("app.api.export_routes._build_technicals_section", new_callable=AsyncMock, return_value=""), \
-             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""):
+             patch("app.api.export_routes._build_earnings_section", new_callable=AsyncMock, return_value=""), \
+             patch("app.api.export_routes._build_market_context_section", new_callable=AsyncMock, return_value=""):
             body, _ = await _build_position_markdown(
                 _make_position(), None, _mock_db(), chain_contracts=_CREDIT_CHAIN_CONTRACTS,
             )
@@ -1196,6 +1239,8 @@ class TestFullExportWithChainSection:
     async def test_section_ordering_trade(self):
         mock_provider = AsyncMock()
         mock_provider.get_candles.return_value = _make_mock_candles()
+        mock_provider.get_quote.return_value = {"price": 18.40}
+        mock_provider.get_price_history.return_value = _make_market_candles()
         db = _mock_db_with_asset_type("ETF")
         chain = _make_chain_snapshot_contracts()
 
@@ -1211,6 +1256,8 @@ class TestFullExportWithChainSection:
     async def test_no_dollar_in_chain_section(self):
         mock_provider = AsyncMock()
         mock_provider.get_candles.return_value = _make_mock_candles()
+        mock_provider.get_quote.return_value = {"price": 18.40}
+        mock_provider.get_price_history.return_value = _make_market_candles()
         db = _mock_db_with_asset_type("ETF")
         chain = _make_chain_snapshot_contracts()
 
@@ -1222,3 +1269,334 @@ class TestFullExportWithChainSection:
         for section in sections:
             if section.startswith("Options chain"):
                 assert "$" not in section, f"Found $ in chain section: {section[:120]}"
+
+
+# ─── OTA-640 Market context snapshot tests ──────────────────────────────────
+
+
+def _make_vix_series():
+    """252 daily VIX closes for percentile computation. Range ~14..26."""
+    import random
+    rng = random.Random(42)
+    return [14.0 + rng.random() * 12.0 for _ in range(252)]
+
+
+class TestMarketContextSection:
+    """Snapshot tests for the ## Market context section (OTA-640)."""
+
+    @pytest.mark.asyncio
+    async def test_market_context_has_all_four_bullets(self):
+        """Market context includes VIX, SPY, QQQ, and Regime note bullets."""
+        mock_provider = AsyncMock()
+        mock_provider.get_quote.return_value = {"price": 18.40}
+        mock_provider.get_price_history.return_value = _make_market_candles()
+
+        with patch("app.api.export_routes._get_provider", return_value=mock_provider):
+            section = await _build_market_context_section(22.7)
+
+        assert "## Market context" in section
+        assert "**VIX:**" in section
+        assert "**SPY:**" in section
+        assert "**QQQ:**" in section
+        assert "**Regime note:**" in section
+
+    @pytest.mark.asyncio
+    async def test_vix_line_format(self):
+        """VIX line includes value and 52w percentile."""
+        mock_provider = AsyncMock()
+        mock_provider.get_quote.return_value = {"price": 18.40}
+        # 60 candles < 252 → windowed percentile fallback
+        mock_provider.get_price_history.return_value = _make_market_candles()
+
+        with patch("app.api.export_routes._get_provider", return_value=mock_provider):
+            section = await _build_market_context_section(22.7)
+
+        # Should show windowed percentile note since only 60 days
+        assert "18.40" in section
+        assert "52w percentile:" in section
+        assert "based on 60 days" in section
+
+    @pytest.mark.asyncio
+    async def test_vix_full_252_days(self):
+        """VIX with 252-day series shows plain percentile (no windowed note)."""
+        mock_provider = AsyncMock()
+        mock_provider.get_quote.return_value = {"price": 18.40}
+        vix_series = _make_vix_series()
+        # Return VIX series for $VIX calls, market candles for SPY/QQQ
+        async def price_history_side_effect(symbol, num_periods=3):
+            if symbol == "$VIX":
+                return [{"close": v, "datetime": 0} for v in vix_series]
+            return _make_market_candles()
+        mock_provider.get_price_history.side_effect = price_history_side_effect
+
+        with patch("app.api.export_routes._get_provider", return_value=mock_provider):
+            section = await _build_market_context_section(22.7)
+
+        assert "18.40" in section
+        assert "52w percentile:" in section
+        # Should NOT contain the windowed fallback note
+        assert "based on" not in section
+
+    @pytest.mark.asyncio
+    async def test_spy_qqq_dollar_prefix(self):
+        """SPY and QQQ spot values have $ prefix in Market context."""
+        mock_provider = AsyncMock()
+        mock_provider.get_quote.return_value = {"price": 18.40}
+        mock_provider.get_price_history.return_value = _make_market_candles()
+
+        with patch("app.api.export_routes._get_provider", return_value=mock_provider):
+            section = await _build_market_context_section(22.7)
+
+        # SPY and QQQ should have $ on spot price
+        assert "**SPY:** $" in section
+        assert "**QQQ:** $" in section
+
+    @pytest.mark.asyncio
+    async def test_trend_labels(self):
+        """5d trend labels appear for SPY and QQQ."""
+        mock_provider = AsyncMock()
+        mock_provider.get_quote.return_value = {"price": 18.40}
+        mock_provider.get_price_history.return_value = _make_market_candles()
+
+        with patch("app.api.export_routes._get_provider", return_value=mock_provider):
+            section = await _build_market_context_section(22.7)
+
+        # The gentle uptrend fixture produces +0.1*5/686.5 ~ +0.07% = flat
+        assert "5d trend:" in section
+        # Should have direction labels
+        for label in ["flat", "up", "down"]:
+            if label in section:
+                break
+        else:
+            pytest.fail("No trend label (flat/up/down) found in Market context")
+
+    @pytest.mark.asyncio
+    async def test_distance_from_50d(self):
+        """vs 50d SMA line appears with above/below label."""
+        mock_provider = AsyncMock()
+        mock_provider.get_quote.return_value = {"price": 18.40}
+        mock_provider.get_price_history.return_value = _make_market_candles()
+
+        with patch("app.api.export_routes._get_provider", return_value=mock_provider):
+            section = await _build_market_context_section(22.7)
+
+        assert "vs 50d SMA:" in section
+        assert any(d in section for d in ["(above)", "(below)"]), "Missing above/below label"
+
+    @pytest.mark.asyncio
+    async def test_regime_note_deterministic(self):
+        """Same inputs always produce the same regime note."""
+        mock_provider = AsyncMock()
+        mock_provider.get_quote.return_value = {"price": 18.40}
+        mock_provider.get_price_history.return_value = _make_market_candles()
+
+        with patch("app.api.export_routes._get_provider", return_value=mock_provider):
+            s1 = await _build_market_context_section(22.7)
+            s2 = await _build_market_context_section(22.7)
+
+        # Extract regime note lines
+        r1 = [l for l in s1.split("\n") if "Regime note" in l][0]
+        r2 = [l for l in s2.split("\n") if "Regime note" in l][0]
+        assert r1 == r2
+
+    @pytest.mark.asyncio
+    async def test_regime_matches_grid(self):
+        """VIX 18.40, IVR 22.7 → mid-VIX / low-IVR cell."""
+        mock_provider = AsyncMock()
+        mock_provider.get_quote.return_value = {"price": 18.40}
+        mock_provider.get_price_history.return_value = _make_market_candles()
+
+        with patch("app.api.export_routes._get_provider", return_value=mock_provider):
+            section = await _build_market_context_section(22.7)
+
+        # VIX 15-20, IVR <30 → "mildly choppy"
+        assert "mildly choppy" in section
+
+    @pytest.mark.asyncio
+    async def test_no_dollar_outside_market_context(self):
+        """$ in Market context must NOT leak into Greeks or Technicals blocks."""
+        mock_provider = AsyncMock()
+        mock_provider.get_candles.return_value = _make_mock_candles()
+        mock_provider.get_quote.return_value = {"price": 18.40}
+        mock_provider.get_price_history.return_value = _make_market_candles()
+        db = _mock_db_with_asset_type("ETF")
+
+        with patch("app.api.export_routes._get_provider", return_value=mock_provider):
+            body, _ = await _build_trade_markdown(_make_trade_candidate(), db)
+
+        # Extract Greeks section — no $ allowed there
+        sections = body.split("## ")
+        for section in sections:
+            if section.startswith("Greeks & IV"):
+                assert "$" not in section, f"Found $ in Greeks section: {section[:200]}"
+
+    @pytest.mark.asyncio
+    async def test_provider_failure_returns_empty(self):
+        """If provider calls fail, market context returns empty (graceful degrade)."""
+        mock_provider = AsyncMock()
+        mock_provider.get_quote.side_effect = Exception("provider down")
+
+        with patch("app.api.export_routes._get_provider", return_value=mock_provider):
+            section = await _build_market_context_section(22.7)
+
+        assert section == ""
+
+
+# ─── OTA-644: Invalidation conditions ────────────────────────────────────────
+
+_INVALIDATION_HEADING = '### Invalidation conditions ("This Trade Is Wrong If")'
+_INVALIDATION_FALLBACK = "_No invalidation conditions recorded for this evaluation._"
+
+
+class TestInvalidationConditionsTrade:
+    """OTA-644: Invalidation section in trade exports."""
+
+    @pytest.mark.asyncio
+    async def test_heading_always_present(self):
+        """Section heading is emitted even when the candidate has invalidation data."""
+        mock_provider = AsyncMock()
+        mock_provider.get_quote.return_value = {"price": 18.40}
+        mock_provider.get_price_history.return_value = _make_market_candles()
+        db = _mock_db_with_asset_type("ETF")
+
+        with patch("app.api.export_routes._get_provider", return_value=mock_provider):
+            body, _ = await _build_trade_markdown(_make_trade_candidate(), db)
+
+        assert _INVALIDATION_HEADING in body
+
+    @pytest.mark.asyncio
+    async def test_bullets_render(self):
+        """Existing thesis_invalidators render as bullets under the heading."""
+        mock_provider = AsyncMock()
+        mock_provider.get_quote.return_value = {"price": 18.40}
+        mock_provider.get_price_history.return_value = _make_market_candles()
+        db = _mock_db_with_asset_type("ETF")
+
+        with patch("app.api.export_routes._get_provider", return_value=mock_provider):
+            body, _ = await _build_trade_markdown(_make_trade_candidate(), db)
+
+        # The default fixture has one invalidator
+        assert "- QQQ closes above 490 for two consecutive days" in body
+
+    @pytest.mark.asyncio
+    async def test_multiple_bullets(self):
+        """Multiple invalidation conditions each get their own bullet."""
+        candidate = _make_trade_candidate()
+        eval_data = json.loads(candidate.claude_evaluation)
+        eval_data["thesis_invalidators"] = [
+            "QQQ closes above 490 for two consecutive sessions.",
+            "VIX drops below 16 with QQQ flat or rising.",
+            "7 DTE reached without QQQ touching 471.",
+        ]
+        candidate.claude_evaluation = json.dumps(eval_data)
+
+        mock_provider = AsyncMock()
+        mock_provider.get_quote.return_value = {"price": 18.40}
+        mock_provider.get_price_history.return_value = _make_market_candles()
+        db = _mock_db_with_asset_type("ETF")
+
+        with patch("app.api.export_routes._get_provider", return_value=mock_provider):
+            body, _ = await _build_trade_markdown(candidate, db)
+
+        # All three bullets present
+        assert "- QQQ closes above 490 for two consecutive sessions." in body
+        assert "- VIX drops below 16 with QQQ flat or rising." in body
+        assert "- 7 DTE reached without QQQ touching 471." in body
+
+    @pytest.mark.asyncio
+    async def test_empty_list_shows_fallback(self):
+        """Empty thesis_invalidators list renders the italicized fallback."""
+        candidate = _make_trade_candidate()
+        eval_data = json.loads(candidate.claude_evaluation)
+        eval_data["thesis_invalidators"] = []
+        candidate.claude_evaluation = json.dumps(eval_data)
+
+        mock_provider = AsyncMock()
+        mock_provider.get_quote.return_value = {"price": 18.40}
+        mock_provider.get_price_history.return_value = _make_market_candles()
+        db = _mock_db_with_asset_type("ETF")
+
+        with patch("app.api.export_routes._get_provider", return_value=mock_provider):
+            body, _ = await _build_trade_markdown(candidate, db)
+
+        assert _INVALIDATION_HEADING in body
+        assert _INVALIDATION_FALLBACK in body
+
+    @pytest.mark.asyncio
+    async def test_missing_key_shows_fallback(self):
+        """Missing thesis_invalidators key renders the fallback."""
+        candidate = _make_trade_candidate()
+        eval_data = json.loads(candidate.claude_evaluation)
+        del eval_data["thesis_invalidators"]
+        candidate.claude_evaluation = json.dumps(eval_data)
+
+        mock_provider = AsyncMock()
+        mock_provider.get_quote.return_value = {"price": 18.40}
+        mock_provider.get_price_history.return_value = _make_market_candles()
+        db = _mock_db_with_asset_type("ETF")
+
+        with patch("app.api.export_routes._get_provider", return_value=mock_provider):
+            body, _ = await _build_trade_markdown(candidate, db)
+
+        assert _INVALIDATION_HEADING in body
+        assert _INVALIDATION_FALLBACK in body
+
+
+class TestInvalidationConditionsPosition:
+    """OTA-644: Invalidation section in position exports."""
+
+    @pytest.mark.asyncio
+    async def test_heading_present_with_fallback(self):
+        """Position without thesis_invalidators in claude_verdict shows fallback."""
+        pos = _make_position()
+        mock_provider = AsyncMock()
+        mock_provider.get_quote.return_value = {"price": 18.40}
+        mock_provider.get_price_history.return_value = _make_market_candles()
+        mock_provider.get_options_chain.return_value = []
+        db = _mock_db_with_asset_type("ETF")
+
+        with patch("app.api.export_routes._get_provider", return_value=mock_provider):
+            body, _ = await _build_position_markdown(pos, None, db)
+
+        assert _INVALIDATION_HEADING in body
+        assert _INVALIDATION_FALLBACK in body
+
+    @pytest.mark.asyncio
+    async def test_bullets_from_verdict_json(self):
+        """Position with thesis_invalidators in claude_verdict renders bullets."""
+        pos = _make_position()
+        verdict = json.loads(pos.claude_verdict)
+        verdict["thesis_invalidators"] = [
+            "QQQ reclaims 8-day SMA at 717.32 for two sessions.",
+            "VIX drops below 16 with QQQ rising.",
+        ]
+        pos.claude_verdict = json.dumps(verdict)
+
+        mock_provider = AsyncMock()
+        mock_provider.get_quote.return_value = {"price": 18.40}
+        mock_provider.get_price_history.return_value = _make_market_candles()
+        mock_provider.get_options_chain.return_value = []
+        db = _mock_db_with_asset_type("ETF")
+
+        with patch("app.api.export_routes._get_provider", return_value=mock_provider):
+            body, _ = await _build_position_markdown(pos, None, db)
+
+        assert _INVALIDATION_HEADING in body
+        assert "- QQQ reclaims 8-day SMA at 717.32 for two sessions." in body
+        assert "- VIX drops below 16 with QQQ rising." in body
+        assert _INVALIDATION_FALLBACK not in body
+
+
+class TestInvalidationNoAdapterImport:
+    """OTA-644: Verify the invalidation rendering imports no AI adapter."""
+
+    def test_no_ai_adapter_in_export_routes(self):
+        """export_routes.py does not import any AI adapter module."""
+        import inspect
+        import app.api.export_routes as mod
+
+        source = inspect.getsource(mod)
+        # Must not import from AI adapters
+        assert "from app.providers.ai" not in source
+        assert "AnthropicAdapter" not in source
+        assert "FoundryAdapter" not in source

@@ -255,6 +255,86 @@ def distance_from_50d_narrative(spot: float, sma_50: float) -> str:
     return f"{formatted} ({tail})"
 
 
+async def _build_market_context_section(
+    underlying_ivr_pct: float | None,
+) -> str:
+    """Build ## Market context section (VIX, SPY, QQQ, regime note).
+
+    All quote/history reads go through _get_provider() — never hardcoded.
+    # NOTE: $ prefix is retained on SPY and QQQ spot values in this block
+    # per the v2 QA handoff sample convention.  This is an intentional override
+    # of the house style "no $ in UI" rule — the export MD is consumed by a QA
+    # skill, not displayed in the app UI.  (OTA-640)
+    """
+    from app.services.market_context import (
+        get_vix_series, vix_percentile_52w, five_day_trend,
+        distance_from_50d, regime_note, VIX_API_SYMBOL,
+    )
+    try:
+        provider = _get_provider()
+
+        # Fetch VIX quote + history in parallel-ish (sequential for simplicity)
+        vix_quote = await provider.get_quote(VIX_API_SYMBOL)
+        vix_price = float(vix_quote.get("price", 0)) if vix_quote else 0.0
+        vix_series = await get_vix_series(provider, months=12)
+        n_days = len(vix_series)
+
+        if n_days > 0:
+            vix_pctl = vix_percentile_52w(vix_price, vix_series)
+            if n_days >= 252:
+                vix_pctl_str = f"{vix_pctl}%"
+            else:
+                # Windowed-percentile fallback per OTA-640 Phase 1 rule 3
+                vix_pctl_str = f"{vix_pctl}% based on {n_days} days"
+        else:
+            vix_pctl_str = "N/A"
+
+        # SPY and QQQ: spot + candles for trend and SMA
+        spy_candles = await provider.get_price_history("SPY", num_periods=3)
+        qqq_candles = await provider.get_price_history("QQQ", num_periods=3)
+
+        spy_spot = spy_candles[-1]["close"] if spy_candles else 0.0
+        qqq_spot = qqq_candles[-1]["close"] if qqq_candles else 0.0
+
+        spy_trend_label, spy_trend_pct = five_day_trend(spy_candles)
+        qqq_trend_label, qqq_trend_pct = five_day_trend(qqq_candles)
+
+        spy_dist, spy_dir = distance_from_50d(spy_spot, spy_candles)
+        qqq_dist, qqq_dir = distance_from_50d(qqq_spot, qqq_candles)
+
+        # Format signed trend pcts with Unicode minus
+        def _trend_fmt(pct: float) -> str:
+            if pct < 0:
+                return f"\u2212{abs(pct):.1f}%"
+            elif pct > 0:
+                return f"+{pct:.1f}%"
+            return f"{pct:.1f}%"
+
+        def _dist_fmt(pct: float) -> str:
+            if pct < 0:
+                return f"\u2212{abs(pct):.1f}%"
+            elif pct > 0:
+                return f"+{pct:.1f}%"
+            return f"{pct:.1f}%"
+
+        # Regime note — deterministic, no Claude call (cost guardrail)
+        ivr = float(underlying_ivr_pct) if underlying_ivr_pct is not None else 50.0
+        regime = regime_note(vix_price, ivr)
+
+        lines = [
+            "## Market context",
+            "",
+            f"- **VIX:** {vix_price:.2f} (52w percentile: {vix_pctl_str})",
+            f"- **SPY:** ${spy_spot:.2f} \u2014 5d trend: {spy_trend_label} ({_trend_fmt(spy_trend_pct)}) \u2014 vs 50d SMA: {_dist_fmt(spy_dist)} ({spy_dir})",
+            f"- **QQQ:** ${qqq_spot:.2f} \u2014 5d trend: {qqq_trend_label} ({_trend_fmt(qqq_trend_pct)}) \u2014 vs 50d SMA: {_dist_fmt(qqq_dist)} ({qqq_dir})",
+            f"- **Regime note:** {regime}",
+        ]
+        return "\n".join(lines)
+    except Exception as e:
+        logger.warning(f"Market context section failed: {e}")
+        return ""
+
+
 async def _build_technicals_section(symbol: str) -> str:
     """Build ## Technicals (underlying) section from live daily bars.
 
@@ -1228,11 +1308,16 @@ async def _build_trade_markdown(
             f"- **IV Rank:** {_fmt_pct(net.get('iv_rank'))}",
         ])
 
-    # Greeks & IV (position-level) — between Net metrics and Technicals
+    # Greeks & IV (position-level) — between Net metrics and Market context
     greeks_section = _build_greeks_iv_section(legs, net.get("iv_rank"))
     lines.extend(["", greeks_section])
 
-    # Technicals (underlying) — between Greeks & IV and Earnings
+    # Market context — between Greeks & IV and Technicals (OTA-640)
+    market_ctx = await _build_market_context_section(net.get("iv_rank"))
+    if market_ctx:
+        lines.extend(["", market_ctx])
+
+    # Technicals (underlying) — between Market context and Earnings
     technicals = await _build_technicals_section(symbol)
     if technicals:
         lines.extend(["", technicals])
@@ -1273,11 +1358,13 @@ async def _build_trade_markdown(
             claude_read,
         ])
 
-    # Thesis invalidators
+    # Invalidation conditions — heading always present (QA skill greps for it)
+    lines.extend(["", "### Invalidation conditions (\"This Trade Is Wrong If\")", ""])
     if thesis_invalidators:
-        lines.extend(["", "### This Trade Is Wrong If", ""])
         for inv in thesis_invalidators:
             lines.append(f"- {inv}")
+    else:
+        lines.append("_No invalidation conditions recorded for this evaluation._")
 
     # Key risks
     if key_risks:
@@ -1422,11 +1509,16 @@ async def _build_position_markdown(
             f"- **IV Rank:** {_fmt_pct(position.entry_iv_rank)}",
         ])
 
-    # Greeks & IV (position-level) — between Net metrics and Technicals
+    # Greeks & IV (position-level) — between Net metrics and Market context
     greeks_section = _build_greeks_iv_section(legs, position.entry_iv_rank)
     lines.extend(["", greeks_section])
 
-    # Technicals (underlying) — between Greeks & IV and Earnings
+    # Market context — between Greeks & IV and Technicals (OTA-640)
+    market_ctx = await _build_market_context_section(position.entry_iv_rank)
+    if market_ctx:
+        lines.extend(["", market_ctx])
+
+    # Technicals (underlying) — between Market context and Earnings
     technicals = await _build_technicals_section(symbol)
     if technicals:
         lines.extend(["", technicals])
@@ -1481,11 +1573,13 @@ async def _build_position_markdown(
             claude_read,
         ])
 
-    # Thesis invalidators
+    # Invalidation conditions — heading always present (QA skill greps for it)
+    lines.extend(["", "### Invalidation conditions (\"This Trade Is Wrong If\")", ""])
     if thesis_invalidators:
-        lines.extend(["", "### This Trade Is Wrong If", ""])
         for inv in thesis_invalidators:
             lines.append(f"- {inv}")
+    else:
+        lines.append("_No invalidation conditions recorded for this evaluation._")
 
     # Key risks
     if key_risks:

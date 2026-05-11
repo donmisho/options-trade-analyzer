@@ -1,6 +1,6 @@
 # business-rules.md
 
-**Last Updated:** 2026-05-11 22:00 UTC
+**Last Updated:** 2026-05-12 UTC
 **Instigating Ticket:** OTA-495 (v1 Create — Extract business rules from architecture-plan.md and CLAUDE.md)
 **Status:** Cost Guardrails section populated. Strategy Scoring → Strategy-Structure Compatibility subsection populated (canonical compatibility map established). Remaining subsections (Strategy Scoring formula and weights, Hard Gates, PoP Computation, Health Grade Computation, Position Lifecycle, Signal Freshness / TTL Windows, Display Formatting Rules, Validation Baseline) are placeholders. Full extraction of remaining content is the body of OTA-495 implementation work.
 
@@ -23,6 +23,7 @@ For auth flows, sessions, and security, read `auth-process.md`.
 
 - [Strategy Scoring](#strategy-scoring)
 - [Technicals Classification](#technicals-classification)
+- [Regime Classification](#regime-classification)
 - [Hard Gates (P0 Pipeline)](#hard-gates-p0-pipeline)
 - [Probability of Profit (PoP) Computation](#probability-of-profit-pop-computation)
 - [Health Grade Computation](#health-grade-computation)
@@ -100,6 +101,52 @@ Rendered as `<signed_pct>% (<label>)`. Negative distances use the Unicode minus 
 - **SMA(n):** Simple average of the last `n` daily closing prices from the market data provider via `_get_provider()`.
 - **ATR(14):** Wilder-smoothed Average True Range from 14-period OHLC daily bars.
 - **Source:** Schwab daily bars, fetched at export time. No cached or stale values.
+
+---
+
+## Regime Classification
+
+Deterministic one-liner for the Market context section of export MD v2. No Claude API call (cost guardrail). Computed by `regime_note(vix_value, underlying_ivr_pct)` in `app/services/market_context.py`.
+
+### VIX x IVR Grid
+
+| VIX | Underlying IVR | Regime note |
+|---|---|---|
+| VIX < 15 | IVR < 30 | "Low-vol, range-bound. Premium selling favorable; long premium expensive." |
+| VIX < 15 | IVR 30–60 | "Low-vol broad market with elevated single-name IV. Mixed signal." |
+| VIX < 15 | IVR > 60 | "Low-vol broad market, single-name IV elevated. Skew favors premium sellers on this name." |
+| VIX 15–20 | IVR < 30 | "Low-vol, mildly choppy. VIX below 20 makes long premium expensive relative to expected move." |
+| VIX 15–20 | IVR 30–60 | "Moderate-vol. Standard premium pricing." |
+| VIX 15–20 | IVR > 60 | "Moderate-vol broad market with elevated single-name IV." |
+| VIX 20–25 | any | "Elevated vol regime. Watch for IV crush on event-driven positions." |
+| VIX 25–30 | any | "High-vol regime. Premium selling rich; debit spreads compressed." |
+| VIX > 30 | any | "Crisis vol regime. Sizing and stops both warrant tightening." |
+
+**Boundaries:** Half-open intervals `[lo, hi)`. VIX exactly 15 → 15–20 bucket. IVR exactly 30 → 30–60 bucket. IVR exactly 60 → >60 bucket.
+
+### 5-Day Trend Classification
+
+```
+five_day_pct = (spot_today − spot_5d_ago) / spot_5d_ago × 100
+if abs(five_day_pct) <= 0.5: label = "flat"
+elif five_day_pct > 0:       label = "up"
+else:                        label = "down"
+```
+
+Rendered as `<label> (<signed_pct>%)` with one decimal.
+
+### VIX 52-Week Percentile
+
+Percentile = (# of observations < current VIX close) / series length × 100, clamped to integer 0–100. Computed over the rolling 252-trading-day VIX series fetched on-demand from the market data provider. If series < 252 days, rendered with a windowed note: `(52w percentile: <pct>% based on <n> days)`.
+
+### Distance from 50-Day SMA (SPY/QQQ)
+
+```
+dist_pct = (spot − sma_50) / sma_50 × 100
+direction = "above" if dist_pct >= 0 else "below"
+```
+
+Rendered as `<signed_pct>% (<direction>)` with one decimal.
 
 ---
 
@@ -206,6 +253,7 @@ The UI implementation pattern that enforces the confirmation requirement (`Refre
 
 | Date | Ticket | Change |
 |---|---|---|
+| 2026-05-12 UTC | OTA-640 | Regime Classification subsection added: VIX x IVR 9-cell grid, 5-day trend classification rule, VIX 52w percentile computation, distance-from-50d SMA for SPY/QQQ. All rules deterministic (no Claude call). |
 | 2026-05-11 UTC | OTA-641 | Technicals Classification subsection added under Strategy Scoring: SMA alignment narrative rules (bullish/bearish/clustered/mixed), distance-from-50d label thresholds, computation inputs (SMA, ATR, source). |
 | 2026-05-11 UTC | OTA-635 | Strategy Scoring section: Strategy-Structure Compatibility subsection populated. Canonical compatibility map established: SP/WG → credit structures only (BULL_PUT_CREDIT, BEAR_CALL_CREDIT); TR → debit structures only (BULL_CALL_DEBIT, BEAR_PUT_DEBIT); LT → single-leg long options (SINGLE_LONG_CALL, SINGLE_LONG_PUT). Rationale documented: strategy is a mechanism (premium collection vs directional payoff), not a metrics bucket. Resolves the production contradiction where bear_put debit spreads were scored against SP and produced verdicts contradicting their own narrative. `best_fit` semantics under compatibility documented. Scoring formula and weights subsection remains a placeholder under OTA-495. |
 | 2026-04-30 22:05 UTC | OTA-495 | Cost Guardrails section populated as the first extraction. Rule moved from CLAUDE.md House Style section to here. CLAUDE.md now references this file for the canonical rule. |
