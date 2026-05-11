@@ -1,6 +1,6 @@
 # architecture-plan.md
 
-**Last Updated:** 2026-05-06 UTC
+**Last Updated:** 2026-05-11 UTC
 **Instigating Ticket:** OTA-535 (Architecture Optimization Framework v1 Epic; absorbs cancelled OTA-244, OTA-246, OTA-247, OTA-474, OTA-475, OTA-521; merges and supersedes project-hierarchy.md; incorporates findings from the 2026-04-30 GPT-5.4 and Opus-4.7 architectural reviews; adds OTAR roadmap reference per OTA-495; links to OTAR-24 and OTAR-27)
 
 ---
@@ -172,7 +172,7 @@ The active entities by functional area:
 
 **Positions.** `positions` (the unified PAPER/LIVE table per Pattern 4 — symbol, structure type, legs, entry price, exit levels stored at entry, status, source, health_grade, last_monitored_at), `position_history` (state transitions for audit).
 
-**Strategies and scoring.** Strategy config persistence uses Option B (OTA-546): frontend `.config.js` files are static defaults, per-user overrides in localStorage. The `strategy_configs` table was dropped.
+**Strategies and scoring.** `strategy_configs` (server-side per-user strategy parameter overrides — table exists, currently has no API routes wired and zero rows; persistence model decision is OTA-514 work).
 
 **Symbol reference and provider state.** `symbol_reference` (8,568 rows of symbol metadata including `apiSymbol` mappings for index symbols; lives in SQL because loading into browser memory was rejected as an architectural decision — too much data, slow page loads), `provider_state` (lifecycle state per provider per environment; populated under OTA-525).
 
@@ -188,7 +188,7 @@ Primary key types are inconsistent across tables (`User.id` is `String(36)`, `Tr
 
 Every CRUD endpoint that takes a resource ID **must** filter by `user_id`. This is non-negotiable, even in the current single-user development phase, because the system is designed for multi-user from day one and a missing filter is a data isolation bug regardless of how many users exist today.
 
-The Opus-4.7 review caught one violation: `DELETE /recommendations/{trade_key}` in `trade_evaluation_routes.py` (formerly `agent_routes.py`) does not filter by `user_id`, meaning any authenticated user who knows another user's trade_key format could delete that recommendation. This is fixed under the Cleanup Roadmap and added to the contract test suite to prevent regression.
+The Opus-4.7 review caught one violation: `DELETE /recommendations/{trade_key}` in `agent_routes.py` does not filter by `user_id`, meaning any authenticated user who knows another user's trade_key format could delete that recommendation. This is fixed under the Cleanup Roadmap and added to the contract test suite to prevent regression.
 
 The invariant is enforced by:
 
@@ -245,7 +245,7 @@ class ContextSource(ABC):
     def ttl_seconds(self) -> int
 ```
 
-The dispatch happens through `ProviderRegistry` (`app/providers/factory.py`), a singleton container with caching that enforces lifecycle state routing rules. Only `MarketDataProvider` and `ContextSource` ABCs remain in `base.py`; speculative ABCs were removed via OTA-539. When Phase 5 (live trading) begins, a `BrokerageProvider` ABC will be added with a shape informed by actual requirements.
+The dispatch happens through `ProviderFactory` (`app/providers/factory.py`), which is currently misnamed — it's a singleton container with caching, not a factory. It is scheduled for rename to `ProviderRegistry` in the Cleanup Roadmap. The existing `AccountProvider` and `TradingProvider` ABCs in `base.py` have zero implementations; they were placeholders for Phase 5 (live trading) work and are scheduled for deletion. When Phase 5 begins, a `BrokerageProvider` ABC will be added at that time with a clean shape informed by the actual brokerage requirements, not the current speculative shape.
 
 Adding a new provider requires:
 
@@ -258,28 +258,21 @@ Engines, routes, and the frontend require zero changes. The `_get_provider()` he
 
 ## Provider Lifecycle State Machine
 
-Every provider has one of four lifecycle states. Implemented via OTA-539 (absorbing OTA-525).
-
-The `PROVIDER_REGISTRY` dict in `app/providers/factory.py` encodes each provider's state. The `ProviderRegistry` class (renamed from `ProviderFactory` via OTA-539) enforces routing rules based on state:
-
-- `active` → routable, normal selection
-- `inactive` → routable only when explicitly requested via `settings.default_market_data_provider`
-- `deprecated` → routable with warning logged on each invocation; entry includes `end_date` and `migration_target`
-- `removed` → not routable; raises `ValueError` pointing at migration_target. Entry dropped from registry.
+Every provider has one of four lifecycle states. The state machine is formalized under OTA-525.
 
 | State | Meaning | Encoding |
 |---|---|---|
-| **Active** | Registered in registry, live credentials in Key Vault, selectable at runtime, used by at least one code path | `PROVIDER_REGISTRY` entry with `state: "active"` |
-| **Inactive** | Registered in registry, credentials may or may not exist in Key Vault, no live code path routes through it. Reactivation is a config flag flip, not a code change. | `PROVIDER_REGISTRY` entry with `state: "inactive"` |
+| **Active** | Registered in factory, live credentials in Key Vault, selectable at runtime, used by at least one code path | `PROVIDER_REGISTRY` entry with `state: "active"` |
+| **Inactive** | Registered in factory, credentials may or may not exist in Key Vault, no live code path routes through it. Reactivation is a config flag flip, not a code change. | `PROVIDER_REGISTRY` entry with `state: "inactive"` |
 | **Deprecated** | In codebase but flagged not for new use, with a documented end-date and migration plan for any callers | `PROVIDER_REGISTRY` entry with `state: "deprecated"` plus `end_date` and `migration_target` |
-| **Removed** | Gone from codebase entirely, Key Vault credentials cleaned up | Not in `PROVIDER_REGISTRY` at all; no adapter file, no registry entry |
+| **Removed** | Gone from codebase entirely, Key Vault credentials cleaned up | Not in `PROVIDER_REGISTRY` at all; no adapter file, no factory entry |
 
 **Legal transitions:**
 
-- *Active → Inactive* (deactivation): keep code, mark registry entry `inactive`, optionally retain credentials. Single Story per deactivation.
+- *Active → Inactive* (deactivation): keep code, mark factory entry `inactive`, optionally retain credentials. Single Story per deactivation.
 - *Inactive → Active* (reactivation): flip flag, verify credentials, smoke test. Single Story per reactivation.
 - *Active or Inactive → Deprecated*: add end_date, document migration_target, communicate to users. Story.
-- *Deprecated → Removed*: full code cleanup (adapter file, registry entry, config schema, env example, Key Vault credentials). Story (this is what OTA-524 did to Tradier).
+- *Deprecated → Removed*: full code cleanup (adapter file, factory entry, config schema, env example, Key Vault credentials). Story (this is what OTA-524 did to Tradier).
 - *Removed → anything*: not a transition. Returning a removed provider requires a fresh adapter implementation as a new Story.
 
 **Current state (as of this document's last update):**
@@ -290,9 +283,7 @@ The `PROVIDER_REGISTRY` dict in `app/providers/factory.py` encodes each provider
 - **Anthropic Direct** — Active for local dev fallback only. Production traffic routes through Foundry.
 - **Azure AI Foundry (Claude Sonnet 4.6)** — Active. Production AI provider.
 
-The lifecycle state field is enforced at runtime by `ProviderRegistry._check_provider_state()`. No frontend data-source picker exists today; when one is built, it should read `state` from the `/api/v1/config/providers` endpoint (which calls `registry.list_providers()`).
-
-**Speculative ABCs removed (OTA-539):** `AccountProvider` and `TradingProvider` abstract classes were deleted from `app/providers/base.py`. They had zero implementations. When Phase 5 (live trading) begins, the appropriate ABCs will be designed from actual requirements.
+The lifecycle state field is read from code at runtime. The frontend's data-source-picker conceptually already knows about state (the previous Tradier entry was labeled `active: False, "Market Data (Deprecated)"`); the formalized state field replaces that ad-hoc encoding.
 
 ## External Credential Management
 
@@ -308,7 +299,7 @@ Each provider adapter owns its credential lifecycle. The calling code calls `pro
 
 `SecretsManager` (`app/core/secrets.py`) wraps Azure Key Vault with a `.env` fallback for local development. In Azure environments the App Service uses managed identity to read from Key Vault; the `.env` fallback is never used in production.
 
-The JWT signing key (used by the legacy local-password flow (removed in OTA-538)) is auto-generated on first run and written back to Key Vault if absent. This pattern has a known failure mode: if Key Vault is unreachable on first startup, a new key is generated in memory but not persisted, invalidating all sessions on next restart. Cleanup item: enforce that the key must exist in Key Vault before app startup proceeds.
+The JWT signing key (used by the legacy `auth_routes.py` local-password flow that is scheduled for removal) is auto-generated on first run and written back to Key Vault if absent. This pattern has a known failure mode: if Key Vault is unreachable on first startup, a new key is generated in memory but not persisted, invalidating all sessions on next restart. Cleanup item: enforce that the key must exist in Key Vault before app startup proceeds.
 
 ## Schwab Integration
 
@@ -336,22 +327,22 @@ Routes live under `app/api/`. Current route file inventory:
 | `market_routes.py` | `/market` | Quotes, option chains, symbol search, symbol reference lookup. | Active |
 | `analysis_routes.py` | `/analyze` | Vertical, long-call, directional analysis endpoints. | Active |
 | `evaluation_routes.py` | `/evaluate` | Structured Claude trade evaluation (`/evaluate/structured`, `/evaluate/follow-up`). The primary AI evaluation path. | Active |
-| `trade_evaluation_routes.py` | `/agent` | Trade agent triage / deep-dive / followup pipeline + recommendations CRUD. Renamed from `agent_routes.py` (OTA-541). | Active |
-| `position_monitor_routes.py` | `/agents` | Position monitor scheduled-job status and on-demand runs. Renamed from `agents_routes.py` (OTA-541). | Active |
+| `agent_routes.py` | `/agent` | Trade agent triage / deep-dive / followup pipeline. Uses the SDK-based AI stack (legacy). Scheduled for rename to `trade_evaluation_routes.py` and migration to the unified AI adapter. | Active but drift |
+| `agents_routes.py` | `/agents` | Position monitor scheduled-job status and on-demand runs. Scheduled for rename to `position_monitor_routes.py` to eliminate the singular/plural confusion. | Active |
 | `position_routes.py` | `/positions` | Position CRUD, follow, take, close. | Active |
 | `insight_routes.py` | `/insights` | Insight Engine output for the dashboard. | Active |
 | `dashboard_routes.py` | `/dashboard` | Dashboard layout, widget config, media SAS URL generation. | Active |
-| `named_watchlist_routes.py` | `/watchlists` | Multi-list watchlist with scan sources. Sole watchlist route file after OTA-541 consolidation. | Active |
+| `watchlist_routes.py` | `/watchlist` | Flat watchlist CRUD. | Active — overlaps with named_watchlist_routes; consolidation pending |
+| `named_watchlist_routes.py` | `/watchlists` | Multi-list watchlist with scan sources. | Active — overlaps with watchlist_routes; consolidation pending |
 | `config_routes.py` | `/config` | User config GET/PUT. | Active |
 | `service_routes.py` | `/services` | Service registry endpoints (data source picker). | Active |
 | `health_routes.py` | `/health` | Liveness, readiness, dependency checks. | Active |
 | `user_routes.py` | `/users` | User profile endpoints. | Active |
 | `admin_routes.py` | `/admin` | Admin operations. | Active |
-| `test_routes.py` | `/test` | Dev-only MSFT anchor regression. Gated: `app_env != "production"`. | Active (dev-only) |
+| `validation_routes.py` | `/validation` | Validation endpoints (purpose needs verification). | Active — needs review |
+| `test_routes.py` | `/test` | Test endpoints. Should not exist in production. | Cleanup item |
 
-### Route File Naming Convention (OTA-541)
-
-Route files are named by **domain function**, not by mechanism or agent name. One router per file, single responsibility. Dev-only routes are gated on `app_env != "production"`. Legacy files are deleted outright when no callers remain; no deprecated stubs.
+The route layer is fragmented relative to its size. Consolidating overlapping route files (the two watchlist files, the two agent files) is in the Cleanup Roadmap.
 
 ---
 
@@ -412,7 +403,7 @@ The contract is enforced by:
 - The ABC itself (Python's `abc.abstractmethod`).
 - A planned contract test that asserts `chat()` returns the documented dict shape for each adapter, run before any adapter swap.
 
-Why the contract matters: today, swapping `trade_evaluation_routes.py` from the SDK adapter to the httpx adapter (the cleanup goal) requires reading both adapters carefully because the convention is informal. With a real ABC, the swap is a one-line import change with confidence.
+Why the contract matters: today, swapping `agent_routes.py` from the SDK adapter to the httpx adapter (the cleanup goal) requires reading both adapters carefully because the convention is informal. With a real ABC, the swap is a one-line import change with confidence.
 
 ## Claude Structured Evaluation
 
@@ -428,7 +419,7 @@ The primary AI evaluation flow is:
 
 The `TradeVerdict` schema (`app/ai/schemas.py`) defines the structured output shape. This is the contract between Claude and the frontend; changes to the verdict shape require coordinated changes to the prompt schema and the frontend renderer.
 
-For agent-style multi-turn flows (triage, deep-dive, follow-up), the flow uses `trade_evaluation_routes.py` and the `claude-trade-agent` SKILL.md sections. After the AI stack merge, both flows use the same `FoundryEvalAdapter`; the difference is the SKILL.md section loaded.
+For agent-style multi-turn flows (triage, deep-dive, follow-up), the flow uses `agent_routes.py` and the `claude-trade-agent` SKILL.md sections. After the AI stack merge, both flows use the same `FoundryEvalAdapter`; the difference is the SKILL.md section loaded.
 
 ## Agent Inventory and Agent CLAUDE.md Convention
 
@@ -471,29 +462,20 @@ This is not active work. It informs design decisions today (don't break the Entr
 
 ## The Strategy System
 
-A "strategy" in OTA is a named approach to options trading with a configuration schema, a scoring profile, and a set of typical trade structures. Today there are four strategies, currently named with the cute taxonomy (Steady Paycheck / Weekly Grind / Trend Rider / Lottery Ticket; abbreviated SP/WG/TR/LT). A redesign to mechanics-based names (e.g., "Income — Credit", "High Risk — Debit") is on the future epic backlog; until that ships the cute names remain the canonical names.
+A "strategy" in OTA is a named approach to options trading with a configuration schema, a scoring profile, and an explicit set of compatible trade structures. Today there are four strategies, currently named with the cute taxonomy (Steady Paycheck / Weekly Grind / Trend Rider / Lottery Ticket; abbreviated SP/WG/TR/LT). A redesign to mechanics-based names (e.g., "Income — Credit", "Directional — Debit") is on the future epic backlog; until that ships the cute names remain the canonical names.
 
-**Strategy identity is not tied to credit vs debit structure.** A trade can fit multiple strategies simultaneously. The UI renders strategy fit as pills (abbreviated 2-letter pills with tooltips), not exclusive badges.
+**Strategy and structure are technically orthogonal axes, but each strategy declares an explicit `compatible_structures` map enumerating which trade structures it accepts.** A trade is scored against a strategy only if its structure is in that strategy's compatibility map. The scorer gates at pipeline entry: incompatible pairs return null and never reach Foundry. Multi-strategy fit is preserved within a structural family (e.g., a bull_put_credit at 30 DTE can fit both Steady Paycheck and Weekly Grind) but never across families. This reflects the trading reality that strategy is a mechanism — premium collection vs directional payoff vs long premium — not a metrics bucket. The canonical compatibility map lives in `business-rules.md` → Strategy Scoring.
 
 **Architectural shape (rules in business-rules.md):**
 
-- Each strategy has a config schema declaring its tunable parameters (DTE range, delta range, credit threshold, etc.).
-- The scorer (`app/analysis/strategy_scorer.py`) reads the active strategy's config and the trade candidate, returns a 0–100 score plus per-metric breakdown.
+- Each strategy has a config schema declaring its tunable parameters (DTE range, delta range, credit threshold, etc.) and a `compatible_structures` list.
+- The scorer (`app/analysis/strategy_scorer.py`) reads the active strategy's config and the trade candidate. If the candidate's structure is not in `compatible_structures`, the scorer returns null and no further evaluation occurs for that strategy. Otherwise the scorer returns a 0–100 score plus per-metric breakdown.
 - ConfigDrawer renders whatever schema the active strategy declares — fields, types, min/max/default/step. This replaces the old static 14-field systemVars approach.
-- Strategy filtering uses the `trade_structure` field, never hardcoded strategy names.
+- Strategy filtering uses the `trade_structure` field and the `compatible_structures` map, never hardcoded strategy names.
 
 Frontend strategy config files live in `web/src/strategy-configs/` (`steady-paycheck.config.js`, `weekly-grind.config.js`, etc.) and are registered in `index.js`.
 
-**Strategy config persistence (Option B — OTA-546):** Frontend `.config.js` files are the static defaults. Per-user overrides persist to `localStorage` only. There is no backend `strategy_configs` table (dropped via OTA-546). No API routes exist for strategy config CRUD. This is the simplest model appropriate for a solo-user/small-team app; if multi-device sync becomes a requirement, revisit with Option C (hybrid).
-
-**Canonical strategy definitions dict:** `STRATEGIES` in `app/analysis/strategy_definitions.py` is the single source of truth for backend scoring parameters (DTE ranges, scoring weights, config schema). The former `STRATEGY_DEFINITIONS` dict was deleted (OTA-513 absorbed into OTA-546). DTE ranges align to canonical values in `business-rules.md`:
-
-| Strategy | DTE min | DTE max |
-|---|---|---|
-| Steady Paycheck (SP) | 14 | 45 |
-| Weekly Grind (WG) | 14 | 21 |
-| Trend Rider (TR) | 14 | 60 |
-| Lottery Ticket (LT) | 7 | 60 |
+The DTE-range source-of-truth issue (two dicts in `strategy_definitions.py` that disagree) is tracked under OTA-513 and is a Cleanup Roadmap item.
 
 ## The Positions System
 
@@ -610,18 +592,17 @@ Today only AI calls are instrumented. Auth flows, market-data fetches, and DB op
 
 The lifespan teardown must close every async resource cleanly. Failure to close a resource causes connection leaks, abandoned DB sessions, or worse — partial writes mid-shutdown.
 
-Teardown order (implemented in `app/main.py` lifespan, OTA-543):
+Resources that must close:
 
-1. **APScheduler** — `scheduler.shutdown(wait=True)` so in-progress jobs (e.g. Position Monitor) complete before the process exits.
-2. **Token refresh background task** — `task.cancel()` + `await asyncio.wait_for(task, timeout=5.0)` for graceful exit with a 5-second cap to prevent hangs.
-3. **AI adapter** — `await ai_adapter.close()` closes the persistent `httpx.AsyncClient` in `FoundryEvalAdapter` (or the SDK client in `AnthropicAdapter`).
-4. **Provider cache** — `await provider_factory.clear_cache()`.
-5. **Async DB engine** — `await engine.dispose()` closes all pooled connections.
+- **httpx clients** — the `FoundryEvalAdapter` creates a persistent `httpx.AsyncClient` in `__init__`. Its `close()` must be called during lifespan teardown. (Current state: not called. Cleanup Roadmap item.)
+- **APScheduler** — `scheduler.shutdown(wait=True)` (not `wait=False`) so in-progress jobs complete before the process exits. Currently uses `wait=False`, which can leave a Position Monitor run with an abandoned DB session mid-write. Cleanup item.
+- **Async DB engine** — `engine.dispose()` in the lifespan teardown.
+- **Token refresh background task** — `task.cancel()` plus an `await task` to allow graceful exit.
 
 This is enforced by:
 
 - A documented checklist in this section.
-- `tests/lifespan/test_shutdown.py` — exercises lifespan startup-then-immediate-shutdown and asserts no unclosed-resource warnings.
+- A test (planned) that exercises lifespan startup-then-immediate-shutdown and asserts no resource leaks.
 - Code review on every PR that adds a new long-lived async resource.
 
 When adding a new async resource that needs cleanup, add it to the list above and to the lifespan teardown in `app/main.py`.
@@ -651,7 +632,7 @@ app/
 │   └── migrations.py             # Alembic configuration entry
 ├── providers/
 │   ├── base.py                   # MarketDataProvider, ContextSource ABCs
-│   ├── factory.py                # ProviderRegistry class + PROVIDER_REGISTRY dict
+│   ├── factory.py                # ProviderRegistry (currently misnamed ProviderFactory; rename pending)
 │   ├── schwab.py                 # SchwabMarketData adapter
 │   ├── schwab_token_manager.py   # Schwab OAuth token lifecycle
 │   ├── schwab_context_source.py  # Schwab context source for the Symbol Context Store
@@ -667,7 +648,7 @@ app/
 │   ├── long_call_engine.py       # Long-call scorer
 │   ├── directional_engine.py     # Strategy comparator
 │   ├── strategy_scorer.py        # Multi-strategy scoring engine
-│   ├── strategy_definitions.py   # STRATEGIES dict — single canonical source for strategy parameters
+│   ├── strategy_definitions.py   # Strategy parameter dictionaries (consolidation pending under OTA-513)
 │   ├── black_scholes.py          # Probability matrix math
 │   ├── health_grade.py           # Position health grade computation
 │   ├── hard_gates/               # Registered hard gates sub-package (EarningsInWindowGate, NegativeEVGate)
@@ -862,25 +843,28 @@ The Architecture Optimization Epic (OTA-535) tracks the active drift items ident
 | Item | Why | Source |
 |---|---|---|
 | Add `user_id` filter to `DELETE /recommendations/{trade_key}` | Data isolation bug — any authenticated user could delete another user's recommendation | Opus-4.7 review |
-| ~~Close `FoundryEvalAdapter` httpx client on lifespan shutdown~~ | ~~Resource leak~~ | ~~Opus-4.7 review~~ — **Done OTA-543** |
-| ~~Change scheduler shutdown from `wait=False` to `wait=True`~~ | ~~Abandoned mid-write~~ | ~~Opus-4.7 review~~ — **Done OTA-543** |
-| ~~Audit `skip_auth` default and env guards~~ | ~~Production safety~~ | ~~Opus-4.7 review~~ — **Done OTA-538** |
+| Close `FoundryEvalAdapter` httpx client on lifespan shutdown | Resource leak; not called today | Opus-4.7 review |
+| Change scheduler shutdown from `wait=False` to `wait=True` | In-progress monitor runs can be abandoned mid-write on process exit | Opus-4.7 review |
+| Audit `skip_auth` default and env guards | Production safety — accidental enable would bypass all auth | Opus-4.7 review |
 | Initialize Alembic with baseline migration matching production schema | OTA-522. No production schema change can ship safely without it | OTA-522, both reviews |
 
 ## Should Fix — Drift, Duplication, Cognitive Load
 
 | Item | Why | Source |
 |---|---|---|
-| Merge AI stacks: delete `app/providers/ai/` directory after migrating `trade_evaluation_routes.py` to use `FoundryEvalAdapter` | Two complete AI invocation stacks doing overlapping jobs | Both reviews |
+| Merge AI stacks: delete `app/providers/ai/` directory after migrating `agent_routes.py` to use `FoundryEvalAdapter` | Two complete AI invocation stacks doing overlapping jobs | Both reviews |
 | Migrate `TRADE_EVALUATION_SYSTEM_PROMPT` and `FOLLOW_UP_SYSTEM_PROMPT` to `app/skills/trade-evaluation/SKILL.md` | Closes the Pattern 2 violation in the primary evaluation path | Both reviews |
-| ~~Retire `entra_auth_routes.py` (MSAL bridge)~~ | ~~Returns JWT to browser, violating Pattern 6~~ | ~~Both reviews~~ — **Done OTA-538** |
-| ~~Retire `auth_routes.py` (legacy local-password flow)~~ | ~~Three auth flows registered simultaneously~~ | ~~Opus-4.7 review~~ — **Done OTA-538** |
-| ~~Rename `agent_routes.py` → `trade_evaluation_routes.py`, `agents_routes.py` → `position_monitor_routes.py`~~ | ~~Daily cognitive trap from singular/plural file naming~~ | ~~Both reviews~~ — **Done OTA-541** |
+| Retire `entra_auth_routes.py` (MSAL bridge) | Returns JWT to browser, violating Pattern 6 | Both reviews |
+| Retire `auth_routes.py` (legacy local-password flow) or restrict to `/register` only | Three auth flows registered simultaneously | Opus-4.7 review |
+| Rename `agent_routes.py` → `trade_evaluation_routes.py`, `agents_routes.py` → `position_monitor_routes.py` | Daily cognitive trap from singular/plural file naming | Both reviews |
+| Rename `ProviderFactory` → `ProviderRegistry` | Misnomer; actual behavior is a singleton container with caching | Opus-4.7 review |
+| Wire OTA-525 lifecycle states into `PROVIDER_REGISTRY` and `_SERVICE_REGISTRY` schemas | Lifecycle states defined but not encoded in code today | OTA-525 |
 | Formalize `AIAdapter` ABC in `app/ai/base.py` | Adapter contract is convention-only today | Opus-4.7 review |
-| ~~Resolve `watchlist_routes.py` vs `named_watchlist_routes.py` overlap~~ | ~~Two routes with overlapping semantics for the same user~~ | ~~Opus-4.7 review~~ — **Done OTA-541** |
-| ~~Consolidate `STRATEGIES` and `STRATEGY_DEFINITIONS` dicts in `strategy_definitions.py`~~ | ~~Two dicts encoding the same DTE ranges with disagreeing values~~ | ~~OTA-513~~ — **Done OTA-546** |
-| ~~Decide and implement strategy config persistence model (localStorage vs `strategy_configs` table)~~ | ~~Table exists with no API routes, zero rows~~ | ~~OTA-514~~ — **Done OTA-546** |
-| ~~Wire `cors_origins` config setting to `main.py` (currently hardcoded)~~ | ~~Configuration drift~~ | ~~GPT-5.4 review~~ — **Done OTA-541** |
+| Delete `AccountProvider` and `TradingProvider` ABCs from `providers/base.py` | Speculative; zero implementations | Both reviews |
+| Resolve `watchlist_routes.py` vs `named_watchlist_routes.py` overlap | Two routes with overlapping semantics for the same user | Opus-4.7 review |
+| Consolidate `STRATEGIES` and `STRATEGY_DEFINITIONS` dicts in `strategy_definitions.py` | Two dicts encoding the same DTE ranges with disagreeing values | OTA-513 |
+| Decide and implement strategy config persistence model (localStorage vs `strategy_configs` table) | Table exists with no API routes, zero rows | OTA-514 |
+| Wire `cors_origins` config setting to `main.py` (currently hardcoded) | Configuration drift | GPT-5.4 review |
 | Replace `datetime.utcnow()` with `datetime.now(timezone.utc)` repo-wide | Deprecated in Python 3.12+ | GPT-5.4 review |
 | Remove ODBC installer from `main.py` startup | OS-level package install in app code; should be a startup script or custom image | GPT-5.4 review |
 | Delete dead frontend files: `_archive/`, `Header.jsx`, `Header.css`, `msalConfig.js`, orphaned CSS files, `_old.png`, `react.svg` | Dead weight, surfaces in greps | Both reviews |
@@ -909,10 +893,7 @@ The Architecture Optimization Epic (OTA-535) tracks the active drift items ident
 
 | Date | Ticket | Change |
 |---|---|---|
-| 2026-05-06 UTC | OTA-546 | § The Strategy System: consolidated `STRATEGIES` and `STRATEGY_DEFINITIONS` dicts (OTA-513 absorbed); deleted `STRATEGY_DEFINITIONS`. Documented Option B persistence model (frontend `.config.js` + localStorage; no backend table). Aligned all DTE ranges to canonical `business-rules.md` values (SP 14-45, WG 14-21, TR 14-60, LT 7-60). Dropped `strategy_configs` table via Alembic migration. OTA-513 and OTA-514 absorbed. |
-| 2026-05-06 UTC | OTA-539 | § Provider Lifecycle State Machine: documented implemented routing enforcement (`ProviderRegistry._check_provider_state()`). Renamed `ProviderFactory` → `ProviderRegistry` throughout codebase. Removed `AccountProvider` and `TradingProvider` speculative ABCs from `app/providers/base.py`. Removed completed items from Should Fix table. OTA-525 absorbed. |
-| 2026-05-06 UTC | OTA-541 | Route File Consolidation: renamed `agent_routes.py` → `trade_evaluation_routes.py`, `agents_routes.py` → `position_monitor_routes.py`. Deleted `watchlist_routes.py` (frontend migrated to named watchlists API) and `validation_routes.py` (vestigial, no auth, no callers). Consolidated CORS from hardcoded list in `main.py` to `settings.cors_origins` in `config.py`. Added Route File Naming Convention subsection to § 3. Marked 3 Cleanup Roadmap items as Done. |
-| 2026-05-06 UTC | OTA-543 | Updated § Resource Shutdown Discipline: documented implemented teardown order (scheduler wait=True, token task cancel with 5s timeout, AI adapter close, provider cache clear, DB engine dispose). Marked FoundryEvalAdapter close, scheduler wait=True, and skip_auth audit as Done in Cleanup Roadmap. Marked auth route retirements as Done (OTA-538). Added `tests/lifespan/test_shutdown.py` reference. |
+| 2026-05-11 UTC | OTA-635 | Strategy System section amended. Removed the "Strategy identity is not tied to credit vs debit structure" framing, which proved trading-incorrect in production: bear_put debit spreads were scored against Steady Paycheck (a credit-focused strategy) producing scores like 57.00 while the narrative simultaneously rejected them as structurally incompatible — generating contradictory verdicts (WAIT pill with PASS narrative). New framing: strategy and structure remain technically orthogonal axes, but each strategy declares an explicit `compatible_structures` map. The scorer gates at pipeline entry; incompatible pairs return null and never reach Foundry. Canonical compatibility map lives in `business-rules.md` → Strategy Scoring. This decision is also a prerequisite for the future strategy-taxonomy redesign (mechanics-based names cannot replace cute names while pretending strategies are structure-agnostic). |
 | 2026-05-06 UTC | OTA-601 | Added § Deployment Architecture subsection "Cold-start and runtime OS dependencies" recording the OTA-553 Option B decision: ODBC Driver 18 install in `app/main.py` lifespan is the intentional pattern. Documents the ~90s cold-start cost mitigated by Always On, the deferred Option A alternative (custom container image), and the explicit prohibition against retrying the user-supplied `startup.sh` approach (OTA-545 Phase 2, reverted 2026-05-02). |
 | 2026-05-06 03:00 UTC | OTA-554 | Corrected Pattern 7 and Deployment Architecture to reflect actual request routing: Cloudflare proxies custom domains (`oa-dev.tmtctech.ai`, `oa.tmtctech.ai`) directly to the App Service — the SWA is not in the request path. Added "Request Routing — Cloudflare to App Service Direct" subsection with verification commands and health endpoint inventory. Fixed SWA SKU (was "Standard", actually "Free") and URL in Azure Resources Summary. Marked SWA as orphan candidate for cleanup. Removed incorrect claims that the `static/` directory is absent from the deployment artifact and that the SPA fallback in `main.py` is dead code — the build workflow bundles the SPA into `static/` and the App Service actively serves it. |
 | 2026-05-01 21:30 UTC | OTA-540 | Schema Migration Strategy section updated: Alembic is now operational (baseline `f9e59a180957` ships with OTA-540). `init_db()` now runs `alembic upgrade head` in dev/staging; production migrations are manual (stamping procedure in `docs/runbooks/alembic-stamp-prod.md`). Updated § 2 to remove the "OTA-522 remains open" note and document the prod migration deploy procedure. |

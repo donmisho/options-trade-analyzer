@@ -1,10 +1,10 @@
-# Options Analyzer — UI-GUIDANCE.md (Updated 2026-04-11 22:00)
+# Options Analyzer — UI-GUIDANCE.md (Updated 2026-05-11)
 # Epic: OTA-477 | Feature: OTA-486
 
 ## Options Trade Analyzer — Experience & Visual Contract
 
-_Version 3.3 — 04-11-2026_
-_Reference mockups: `ota-experience-mockups-v3.html` in project root_
+_Version 3.4 — 05-11-2026_
+_Historical reference: `ota-experience-mockups-v3.html` — superseded by the deployed app as of 2026-05-11. Mockups are retained for archaeological context only._
 
 This document is the single source of truth for how the Options Trade Analyzer
 looks, feels, and behaves. When this document conflicts with any other source —
@@ -216,48 +216,9 @@ Background: var(--bg2). Border: 1px solid var(--border). Border-radius: 4px.
 - Every page that needs it imports `<QuoteBar />` — zero inline reimplementations
 
 ### SMA Chart
-File: `web/src/components/SmaPanel.jsx`
-
-Candlestick chart with configurable moving averages and date range. Two
-independent controls in the chart header (right side):
-
-1. **Range dropdown** — selects the chart date window. Options: 7d, 14d, 30d,
-   60d, 90d (default), 180d, 365d. On change, refetches candles from backend
-   with the appropriate Schwab interval.
-2. **Periods button** — toggles the SMA period editor (fast/medium/slow inputs).
-   Default: 8/21/50 day SMAs.
-
-Changing Range does not change SMA periods, and vice versa.
-
-**Range → Schwab interval mapping:**
-
-| Range | Schwab interval | Approx bars |
-|-------|-----------------|-------------|
-| 7d    | 30-minute       | ~65         |
-| 14d   | 30-minute       | ~130        |
-| 30d   | daily           | ~21         |
-| 60d   | daily           | ~42         |
-| 90d   | daily           | ~63         |
-| 180d  | daily           | ~126        |
-| 365d  | weekly          | ~52         |
-
-**X-axis date label density:**
-- 7d/14d (intraday): one label per trading day (at session-open bar)
-- 30d: every 2nd bar
-- 60d: every 5th bar
-- 90d: every 7th bar (weekly cadence)
-- 180d: every 14th bar (bi-weekly)
-- 365d: every 4th bar (monthly)
-
-Labels are `mm-dd-yyyy` via `formatDate()`, 10px monospace, `var(--muted)`.
-Adjacent labels that would overlap are skipped (72px minimum gap).
-
-**SMA truncation rule:** Each SMA line renders only for bars where full lookback
-data exists. The first `(period - 1)` bars are gaps — no line drawn. For a 7d
-window, only the 8-period SMA has any visible line; 21 and 50 are all-gaps.
-
-**Range capping:** If the backend returns fewer days than requested, a muted
-note appears in the chart header: "Showing Nd (max available)" — 9px monospace.
+Candlestick chart with configurable moving averages. Moving average periods and
+date range are user-selectable via the SMA Configuration and Chart Range controls.
+Defaults: 8/21/50 day SMAs, 90-day range — but these are configurable, not fixed.
 
 ### ResultsTable
 File: `web/src/components/ResultsTable.jsx`
@@ -473,7 +434,15 @@ strikes, expiry, DTE, entry, max P/L, breakeven, R:R, triggers, time exit
 13. Trade tables: no row numbers. Order: chevron → score → spread → type → data → pills.
 14. Claude summary advice: white outlined badge. Strategy name in strategy color.
 15. Claude API: confirmation when refreshing >1 position. One daily auto-refresh. No timers.
-16. Mockups in `ota-experience-mockups-v3.html` are visual ground truth.
+16. The deployed app is the visual ground truth. Mockups in `ota-experience-mockups-v3.html` are historical reference only; refer to deployed components and live styling for current state.
 17. Type badges: clean display names (title case, spaces, no underscores). Bull = green, Bear = red. Frontend transforms enum at render time.
 18. Health grades: single letter (A/B/C/D/F) with color token per grade.
 19. Position source labels: "Paper" / "Live" — never uppercase.
+
+---
+
+## Change Log
+
+| Date | Ticket | Change |
+|---|---|---|
+| 2026-05-11 UTC | OTA-635 | Rule 16 demoted: mockups in `ota-experience-mockups-v3.html` are no longer visual ground truth — the deployed app is. Mockups remain in the repo as historical reference. Header reference line updated correspondingly. This change accompanies the strategy-structure compatibility decision (architecture-plan.md and business-rules.md updates) — the v3 mockups depict SP/WG pills on bear_put trades, which is no longer correct under the new compatibility rule, so retaining them as "ground truth" would create contradictions with the new canon. |

@@ -56,7 +56,7 @@ from app.api.health_routes import router as health_router, init_health_routes
 from app.api.service_routes import router as service_router, init_service_routes
 from app.ai import AnthropicAdapter, FoundryEvalAdapter
 from app.api.changelog_routes import router as changelog_router, init_changelog_routes
-from app.api.export_routes import router as export_router
+from app.api.export_routes import router as export_router, init_export_routes
 from app.middleware.csrf import CSRFMiddleware
 from app.api.mcp_routes import get_mcp_app, init_mcp_routes, init_mcp_provider, start_mcp_session_manager
 
@@ -246,6 +246,7 @@ async def lifespan(app: FastAPI):
     init_analysis_routes(provider_factory)
     init_position_routes(provider_factory)
     init_named_watchlist_routes(provider_factory)
+    init_export_routes(provider_factory)
     init_mcp_provider(provider_factory)
     if settings.app_env != "production":
         _init_test_routes(provider_factory)
