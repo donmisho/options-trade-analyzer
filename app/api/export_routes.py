@@ -3,7 +3,7 @@
 # Cross-user attempts return 404 (not 403) to avoid leaking existence.
 
 """
-Structured Markdown Export API (OTA-621, OTA-641)
+Structured Markdown Export API (OTA-621, OTA-641, OTA-642)
 
 Endpoints:
   GET  /api/v1/export/trade/{trade_key}.md     — Download trade candidate as markdown
@@ -407,6 +407,346 @@ async def _build_earnings_section(
             "- **Earnings in expiration window:** unknown",
         ]
         return "\n".join(lines)
+
+
+# ─── Options chain helpers (OTA-642) ─────────────────────────────────────────
+
+
+def select_strikes_around_legs(
+    all_strikes: list[float], leg_strikes: list[float], n: int = 3,
+) -> list[float]:
+    """Return sorted deduplicated strikes within ±n positions of each leg strike.
+
+    For each leg strike, takes the strike itself plus up to n strikes above and
+    n strikes below from the sorted unique strike list. Unions across legs.
+    """
+    sorted_strikes = sorted(set(all_strikes))
+    if not sorted_strikes or not leg_strikes:
+        return sorted_strikes
+
+    selected = set()
+    for ls in leg_strikes:
+        # Find position of leg strike in sorted list (or closest)
+        try:
+            idx = sorted_strikes.index(ls)
+        except ValueError:
+            # Leg strike not in snapshot — find closest
+            idx = min(range(len(sorted_strikes)), key=lambda i: abs(sorted_strikes[i] - ls))
+        lo = max(0, idx - n)
+        hi = min(len(sorted_strikes), idx + n + 1)
+        for i in range(lo, hi):
+            selected.add(sorted_strikes[i])
+        # Always include the leg strike itself
+        selected.add(ls)
+
+    return sorted(selected)
+
+
+def select_calls_near_spot(
+    call_strikes: list[float], spot: float, n: int = 3,
+) -> list[float]:
+    """Return n strikes straddling spot from a sorted unique list of call strikes.
+
+    Picks the strike closest to spot (lower strike wins ties), then extends to
+    fill n total (one below, one above, or as many as available).
+    """
+    sorted_strikes = sorted(set(call_strikes))
+    if not sorted_strikes:
+        return []
+
+    # Find closest-to-spot index (lower wins ties)
+    closest_idx = 0
+    min_dist = abs(sorted_strikes[0] - spot)
+    for i, s in enumerate(sorted_strikes):
+        d = abs(s - spot)
+        if d < min_dist or (d == min_dist and s < sorted_strikes[closest_idx]):
+            min_dist = d
+            closest_idx = i
+
+    # Take n strikes centred around closest_idx
+    half = (n - 1) // 2
+    lo = max(0, closest_idx - half)
+    hi = lo + n
+    if hi > len(sorted_strikes):
+        hi = len(sorted_strikes)
+        lo = max(0, hi - n)
+
+    return sorted_strikes[lo:hi]
+
+
+def _build_chain_puts_table(
+    contracts: list[dict],
+    selected_strikes: list[float],
+    leg_strikes: set[float],
+) -> str:
+    """Build the puts table for the ±3 strikes chain section.
+
+    Leg rows are bolded. No $ prefix on any value.
+    """
+    # Filter to puts at selected strikes
+    puts = {}
+    for c in contracts:
+        opt_type = str(c.get("option_type", c.get("type", ""))).lower()
+        if opt_type != "put":
+            continue
+        strike = float(c.get("strike", 0))
+        if strike in selected_strikes or any(abs(strike - s) < 0.001 for s in selected_strikes):
+            puts[strike] = c
+
+    if not puts:
+        return ""
+
+    lines = [
+        "### Puts",
+        "",
+        "| Strike | Bid | Ask | Mid | Delta | IV | Volume | OI |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
+
+    for strike in sorted(selected_strikes):
+        c = puts.get(strike)
+        if c is None:
+            # Try fuzzy match
+            for k, v in puts.items():
+                if abs(k - strike) < 0.001:
+                    c = v
+                    break
+        if c is None:
+            continue
+
+        bid = c.get("bid")
+        ask = c.get("ask")
+        mid = ((float(bid) + float(ask)) / 2) if bid is not None and ask is not None else None
+        delta = c.get("delta")
+        iv = c.get("implied_volatility", c.get("iv"))
+        volume = c.get("volume")
+        oi = c.get("open_interest")
+
+        # Format delta with sign and Unicode minus
+        delta_str = "N/A"
+        if delta is not None:
+            delta_str = _signed(float(delta))
+
+        iv_str = _fmt_iv_1d(iv)
+        vol_str = _fmt_thousands(volume)
+        oi_str = _fmt_thousands(oi)
+
+        is_leg = any(abs(strike - ls) < 0.001 for ls in leg_strikes)
+        if is_leg:
+            row = (
+                f"| **{_fmt(strike)}** "
+                f"| **{_fmt(bid)}** "
+                f"| **{_fmt(ask)}** "
+                f"| **{_fmt(mid)}** "
+                f"| **{delta_str}** "
+                f"| **{iv_str}** "
+                f"| **{vol_str}** "
+                f"| **{oi_str}** |"
+            )
+        else:
+            row = (
+                f"| {_fmt(strike)} "
+                f"| {_fmt(bid)} "
+                f"| {_fmt(ask)} "
+                f"| {_fmt(mid)} "
+                f"| {delta_str} "
+                f"| {iv_str} "
+                f"| {vol_str} "
+                f"| {oi_str} |"
+            )
+        lines.append(row)
+
+    lines.extend(["", "Trade legs **bolded**."])
+    return "\n".join(lines)
+
+
+def _build_chain_calls_table(
+    contracts: list[dict],
+    spot: float,
+) -> str:
+    """Build the Calls (for context only) table — 3 strikes near spot.
+
+    No Volume or OI. No $ prefix.
+    """
+    # Collect unique call strikes
+    call_strikes = []
+    calls_by_strike = {}
+    for c in contracts:
+        opt_type = str(c.get("option_type", c.get("type", ""))).lower()
+        if opt_type != "call":
+            continue
+        strike = float(c.get("strike", 0))
+        call_strikes.append(strike)
+        calls_by_strike[strike] = c
+
+    if not call_strikes:
+        return ""
+
+    selected = select_calls_near_spot(call_strikes, spot)
+    if not selected:
+        return ""
+
+    lines = [
+        "### Calls (for context only)",
+        "",
+        "| Strike | Bid | Ask | Mid | Delta | IV |",
+        "|---|---|---|---|---|---|",
+    ]
+
+    for strike in selected:
+        c = calls_by_strike.get(strike)
+        if c is None:
+            continue
+
+        bid = c.get("bid")
+        ask = c.get("ask")
+        mid = ((float(bid) + float(ask)) / 2) if bid is not None and ask is not None else None
+        delta = c.get("delta")
+        iv = c.get("implied_volatility", c.get("iv"))
+
+        delta_str = "N/A"
+        if delta is not None:
+            delta_str = _signed(float(delta))
+
+        lines.append(
+            f"| {_fmt(strike)} "
+            f"| {_fmt(bid)} "
+            f"| {_fmt(ask)} "
+            f"| {_fmt(mid)} "
+            f"| {delta_str} "
+            f"| {_fmt_iv_1d(iv)} |"
+        )
+
+    return "\n".join(lines)
+
+
+def _build_options_chain_section(
+    contracts: list[dict],
+    legs: list[dict],
+    symbol: str,
+    expiration_str: str | None,
+    underlying_spot: float | None,
+) -> str:
+    """Build the Options chain section for trade exports (single render).
+
+    Renders puts ±3 strikes around legs + calls near spot.
+    """
+    if not contracts:
+        return ""
+
+    leg_strikes = set()
+    for leg in legs:
+        s = leg.get("strike")
+        if s is not None:
+            leg_strikes.add(float(s))
+
+    # Get all put strikes from snapshot
+    put_strikes = sorted(set(
+        float(c.get("strike", 0))
+        for c in contracts
+        if str(c.get("option_type", c.get("type", ""))).lower() == "put"
+    ))
+
+    selected = select_strikes_around_legs(put_strikes, list(leg_strikes))
+
+    exp_display = _fmt_date(expiration_str) if expiration_str else "N/A"
+    spot = float(underlying_spot) if underlying_spot else 0.0
+
+    lines = [
+        "## Options chain \u2014 \u00b13 strikes around trade legs",
+        "",
+        f"{symbol} options expiring **{exp_display}** (same as trade).",
+    ]
+
+    puts_table = _build_chain_puts_table(contracts, selected, leg_strikes)
+    if puts_table:
+        lines.extend(["", puts_table])
+
+    calls_table = _build_chain_calls_table(contracts, spot)
+    if calls_table:
+        lines.extend(["", calls_table])
+
+    return "\n".join(lines)
+
+
+async def _build_options_chain_section_position(
+    original_contracts: list[dict] | None,
+    legs: list[dict],
+    symbol: str,
+    expiration_str: str | None,
+    underlying_spot: float | None,
+) -> str:
+    """Build the Options chain section for position exports (dual render).
+
+    Renders original snapshot + fresh chain pull. On fresh pull failure,
+    renders 'unavailable (provider error)' instead of failing the export.
+    """
+    leg_strikes = set()
+    for leg in legs:
+        s = leg.get("strike")
+        if s is not None:
+            leg_strikes.add(float(s))
+
+    exp_display = _fmt_date(expiration_str) if expiration_str else "N/A"
+    spot = float(underlying_spot) if underlying_spot else 0.0
+
+    lines = [
+        "## Options chain \u2014 \u00b13 strikes around trade legs",
+        "",
+        f"{symbol} options expiring **{exp_display}** (same as trade).",
+    ]
+
+    # Original snapshot
+    lines.extend(["", "### Original snapshot (at evaluation)"])
+    if original_contracts:
+        put_strikes = sorted(set(
+            float(c.get("strike", 0))
+            for c in original_contracts
+            if str(c.get("option_type", c.get("type", ""))).lower() == "put"
+        ))
+        selected = select_strikes_around_legs(put_strikes, list(leg_strikes))
+        puts_table = _build_chain_puts_table(original_contracts, selected, leg_strikes)
+        if puts_table:
+            lines.extend(["", puts_table])
+        calls_table = _build_chain_calls_table(original_contracts, spot)
+        if calls_table:
+            lines.extend(["", calls_table])
+    else:
+        lines.extend(["", "Original snapshot: unavailable (no snapshot persisted with this position)."])
+
+    # Current chain at export (fresh pull)
+    lines.extend(["", "### Current chain at export"])
+    try:
+        provider = _get_provider()
+        chain_data = await provider.get_chain(
+            symbol=symbol.upper(),
+            min_dte=0,
+            max_dte=70,
+            strike_range_pct=20.0,
+        )
+        current_contracts = chain_data.get("contracts", [])
+        current_spot = chain_data.get("underlying_price", spot)
+
+        if current_contracts:
+            put_strikes = sorted(set(
+                float(c.get("strike", 0))
+                for c in current_contracts
+                if str(c.get("option_type", c.get("type", ""))).lower() == "put"
+            ))
+            selected = select_strikes_around_legs(put_strikes, list(leg_strikes))
+            puts_table = _build_chain_puts_table(current_contracts, selected, leg_strikes)
+            if puts_table:
+                lines.extend(["", puts_table])
+            calls_table = _build_chain_calls_table(current_contracts, current_spot)
+            if calls_table:
+                lines.extend(["", calls_table])
+        else:
+            lines.extend(["", "Current chain at export: unavailable (empty chain returned)."])
+    except Exception as e:
+        logger.warning(f"Fresh chain pull failed for {symbol}: {e}")
+        lines.extend(["", "Current chain at export: unavailable (provider error)."])
+
+    return "\n".join(lines)
 
 
 _V2_FOOTER = (
@@ -897,10 +1237,18 @@ async def _build_trade_markdown(
     if technicals:
         lines.extend(["", technicals])
 
-    # Earnings — between Technicals and App verdict
+    # Earnings — between Technicals and Options chain
     earnings = await _build_earnings_section(symbol, expiration, db)
     if earnings:
         lines.extend(["", earnings])
+
+    # Options chain — ±3 strikes around trade legs (between Earnings and App verdict)
+    if chain_contracts:
+        chain_section = _build_options_chain_section(
+            chain_contracts, legs, symbol, expiration, candidate.underlying_spot,
+        )
+        if chain_section:
+            lines.extend(["", chain_section])
 
     # Verdict
     lines.extend([
@@ -1083,10 +1431,17 @@ async def _build_position_markdown(
     if technicals:
         lines.extend(["", technicals])
 
-    # Earnings — between Technicals and App verdict
+    # Earnings — between Technicals and Options chain
     earnings = await _build_earnings_section(symbol, expiration, db)
     if earnings:
         lines.extend(["", earnings])
+
+    # Options chain — ±3 strikes (dual render: original snapshot + fresh pull)
+    chain_section = await _build_options_chain_section_position(
+        chain_contracts, legs, symbol, expiration, position.entry_underlying_price,
+    )
+    if chain_section:
+        lines.extend(["", chain_section])
 
     # Use latest assessment values if available, otherwise fall back to position-level
     verdict = "N/A"

@@ -1,9 +1,9 @@
 """
-Snapshot tests for Export MD v2 envelope (OTA-638, OTA-641).
+Snapshot tests for Export MD v2 envelope (OTA-638, OTA-641, OTA-642).
 
 Tests the v2 header block (Schema version, Strategy profile, DTE, spread_type ENUM,
-Current P&L, Last monitored), Technicals, Earnings, and footer against committed
-expected output.
+Current P&L, Last monitored), Technicals, Earnings, Options chain, and footer
+against committed expected output.
 
 Uses lightweight stub objects instead of real DB models to keep the test
 independent of the database layer.
@@ -36,6 +36,12 @@ from app.api.export_routes import (
     _enrich_legs_from_chain,
     _fmt_iv_1d,
     _fmt_thousands,
+    select_strikes_around_legs,
+    select_calls_near_spot,
+    _build_chain_puts_table,
+    _build_chain_calls_table,
+    _build_options_chain_section,
+    _build_options_chain_section_position,
 )
 
 
@@ -932,3 +938,287 @@ class TestChainEnrichmentFailFast:
             _enrich_legs_from_chain(legs, chain)
         assert exc_info.value.status_code == 422
         assert "strike=999.0" in exc_info.value.detail
+
+
+# ─── OTA-642: Options chain ±3 strikes tests ────────────────────────────────
+
+def _make_chain_snapshot_contracts():
+    """Generate a realistic chain snapshot with puts and calls at 5-point increments.
+
+    Strikes from 455 to 505 (11 strikes), puts and calls.
+    Leg strikes for the test: 470 (short) and 480 (long) BEAR_PUT_DEBIT.
+    """
+    contracts = []
+    for strike in range(455, 510, 5):
+        s = float(strike)
+        # Put contract
+        contracts.append({
+            "symbol": f"QQQ260601P00{strike}000",
+            "option_type": "put",
+            "strike": s,
+            "expiration": "2026-06-01",
+            "bid": round(max(0.50, (490 - s) * 0.15 + 1.0), 2),
+            "ask": round(max(0.60, (490 - s) * 0.15 + 1.10), 2),
+            "delta": round(-0.10 - (490 - s) * 0.005, 4),
+            "gamma": 0.012,
+            "theta": -0.08,
+            "vega": 0.25,
+            "implied_volatility": round(0.25 + abs(s - 485) * 0.001, 4),
+            "volume": 1000 + (strike - 455) * 100,
+            "open_interest": 3000 + (strike - 455) * 200,
+        })
+        # Call contract
+        contracts.append({
+            "symbol": f"QQQ260601C00{strike}000",
+            "option_type": "call",
+            "strike": s,
+            "expiration": "2026-06-01",
+            "bid": round(max(0.30, (s - 475) * 0.12 + 0.8), 2),
+            "ask": round(max(0.40, (s - 475) * 0.12 + 0.90), 2),
+            "delta": round(0.10 + (s - 455) * 0.008, 4),
+            "gamma": 0.011,
+            "theta": -0.07,
+            "vega": 0.22,
+            "implied_volatility": round(0.24 + abs(s - 485) * 0.001, 4),
+            "volume": 800 + (strike - 455) * 80,
+            "open_interest": 2500 + (strike - 455) * 150,
+        })
+    return contracts
+
+
+class TestSelectStrikesAroundLegs:
+    def test_basic_two_leg(self):
+        all_strikes = [455, 460, 465, 470, 475, 480, 485, 490, 495, 500, 505]
+        leg_strikes = [470, 480]
+        selected = select_strikes_around_legs([float(s) for s in all_strikes], [float(s) for s in leg_strikes])
+        # 470 ± 3: [455, 460, 465, 470, 475, 480, 485]
+        # 480 ± 3: [465, 470, 475, 480, 485, 490, 495]
+        # Union: [455, 460, 465, 470, 475, 480, 485, 490, 495]
+        assert 455.0 in selected
+        assert 470.0 in selected
+        assert 480.0 in selected
+        assert 495.0 in selected
+        assert 500.0 not in selected
+        assert 505.0 not in selected
+
+    def test_edge_bottom(self):
+        """Leg at the lowest strike — fewer than 3 below."""
+        all_strikes = [float(s) for s in [455, 460, 465, 470, 475]]
+        selected = select_strikes_around_legs(all_strikes, [455.0])
+        assert 455.0 in selected
+        assert len(selected) == 4  # 455 + 3 above
+
+    def test_single_leg(self):
+        all_strikes = [float(s) for s in [460, 465, 470, 475, 480, 485, 490]]
+        selected = select_strikes_around_legs(all_strikes, [475.0])
+        # 475 at index 3 → ±3 covers all 7 strikes
+        assert selected == [460.0, 465.0, 470.0, 475.0, 480.0, 485.0, 490.0]
+
+
+class TestSelectCallsNearSpot:
+    def test_basic(self):
+        strikes = [460.0, 465.0, 470.0, 475.0, 480.0, 485.0, 490.0]
+        result = select_calls_near_spot(strikes, 476.0)
+        # Closest is 475, then pick 3 total: [470, 475, 480]
+        assert len(result) == 3
+        assert 475.0 in result
+
+    def test_tie_picks_lower(self):
+        strikes = [470.0, 475.0, 480.0, 485.0]
+        # Spot at 477.5 — equidistant from 475 and 480, pick lower
+        result = select_calls_near_spot(strikes, 477.5)
+        assert 475.0 in result
+
+
+class TestChainPutsTable:
+    def test_leg_rows_bolded(self):
+        contracts = _make_chain_snapshot_contracts()
+        leg_strikes = {470.0, 480.0}
+        all_put_strikes = sorted(set(
+            c["strike"] for c in contracts if c["option_type"] == "put"
+        ))
+        selected = select_strikes_around_legs(all_put_strikes, list(leg_strikes))
+        table = _build_chain_puts_table(contracts, selected, leg_strikes)
+
+        assert "### Puts" in table
+        assert 'Trade legs **bolded**.' in table
+
+        # Leg rows should be bolded
+        lines = table.split("\n")
+        for line in lines:
+            if "| **470.00**" in line:
+                assert line.count("**") >= 16  # 8 cells × 2 bold markers
+            if "| **480.00**" in line:
+                assert line.count("**") >= 16
+
+    def test_no_dollar_prefix(self):
+        contracts = _make_chain_snapshot_contracts()
+        leg_strikes = {470.0, 480.0}
+        all_put_strikes = sorted(set(
+            c["strike"] for c in contracts if c["option_type"] == "put"
+        ))
+        selected = select_strikes_around_legs(all_put_strikes, list(leg_strikes))
+        table = _build_chain_puts_table(contracts, selected, leg_strikes)
+        assert "$" not in table
+
+    def test_correct_column_headers(self):
+        contracts = _make_chain_snapshot_contracts()
+        table = _build_chain_puts_table(contracts, [470.0], {470.0})
+        assert "| Strike | Bid | Ask | Mid | Delta | IV | Volume | OI |" in table
+
+
+class TestChainCallsTable:
+    def test_no_volume_oi_columns(self):
+        contracts = _make_chain_snapshot_contracts()
+        table = _build_chain_calls_table(contracts, 485.0)
+        assert "| Strike | Bid | Ask | Mid | Delta | IV |" in table
+        # No Volume/OI columns
+        assert "Volume" not in table
+        assert "OI" not in table
+
+    def test_three_strikes_rendered(self):
+        contracts = _make_chain_snapshot_contracts()
+        table = _build_chain_calls_table(contracts, 485.0)
+        # Count data rows (exclude header, separator, empty lines)
+        data_rows = [l for l in table.split("\n") if l.startswith("|") and "Strike" not in l and "---" not in l]
+        assert len(data_rows) == 3
+
+    def test_no_dollar_prefix(self):
+        contracts = _make_chain_snapshot_contracts()
+        table = _build_chain_calls_table(contracts, 485.0)
+        assert "$" not in table
+
+
+class TestOptionsChainSectionTrade:
+    """Fixture A: trade export with two-leg credit spread — single chain render."""
+
+    def test_section_heading(self):
+        contracts = _make_chain_snapshot_contracts()
+        legs = [
+            {"side": "SELL", "option_type": "PUT", "strike": 470.0, "expiration": "2026-06-01", "qty": 1},
+            {"side": "BUY", "option_type": "PUT", "strike": 460.0, "expiration": "2026-06-01", "qty": 1},
+        ]
+        section = _build_options_chain_section(contracts, legs, "QQQ", "2026-06-01", 485.50)
+        assert "## Options chain \u2014 \u00b13 strikes around trade legs" in section
+        assert "QQQ options expiring **06-01-2026** (same as trade)." in section
+
+    def test_puts_and_calls_present(self):
+        contracts = _make_chain_snapshot_contracts()
+        legs = [
+            {"side": "SELL", "option_type": "PUT", "strike": 470.0, "expiration": "2026-06-01", "qty": 1},
+            {"side": "BUY", "option_type": "PUT", "strike": 460.0, "expiration": "2026-06-01", "qty": 1},
+        ]
+        section = _build_options_chain_section(contracts, legs, "QQQ", "2026-06-01", 485.50)
+        assert "### Puts" in section
+        assert "### Calls (for context only)" in section
+        assert 'Trade legs **bolded**.' in section
+
+    def test_no_dual_render(self):
+        """Trade exports render the section once — no 'Original snapshot' or 'Current chain'."""
+        contracts = _make_chain_snapshot_contracts()
+        legs = [
+            {"side": "SELL", "option_type": "PUT", "strike": 470.0, "expiration": "2026-06-01", "qty": 1},
+            {"side": "BUY", "option_type": "PUT", "strike": 460.0, "expiration": "2026-06-01", "qty": 1},
+        ]
+        section = _build_options_chain_section(contracts, legs, "QQQ", "2026-06-01", 485.50)
+        assert "Original snapshot" not in section
+        assert "Current chain at export" not in section
+
+
+class TestOptionsChainSectionPosition:
+    """Fixture B: position export with original + current snapshots."""
+
+    @pytest.mark.asyncio
+    async def test_dual_render(self):
+        contracts = _make_chain_snapshot_contracts()
+        legs = [
+            {"side": "SELL", "option_type": "PUT", "strike": 470.0, "expiration": "2026-06-01", "qty": 1},
+            {"side": "BUY", "option_type": "PUT", "strike": 460.0, "expiration": "2026-06-01", "qty": 1},
+        ]
+        mock_provider = AsyncMock()
+        mock_provider.get_chain.return_value = {
+            "contracts": contracts,
+            "underlying_price": 486.0,
+        }
+        with patch("app.api.export_routes._get_provider", return_value=mock_provider):
+            section = await _build_options_chain_section_position(
+                contracts, legs, "QQQ", "2026-06-01", 485.50,
+            )
+        assert "### Original snapshot (at evaluation)" in section
+        assert "### Current chain at export" in section
+        # Both should have puts tables
+        assert section.count("### Puts") == 2
+
+    @pytest.mark.asyncio
+    async def test_fresh_pull_failure(self):
+        """Fixture C: fresh pull fails — original renders, current shows unavailable."""
+        contracts = _make_chain_snapshot_contracts()
+        legs = [
+            {"side": "SELL", "option_type": "PUT", "strike": 470.0, "expiration": "2026-06-01", "qty": 1},
+            {"side": "BUY", "option_type": "PUT", "strike": 460.0, "expiration": "2026-06-01", "qty": 1},
+        ]
+        mock_provider = AsyncMock()
+        mock_provider.get_chain.side_effect = Exception("provider down")
+        with patch("app.api.export_routes._get_provider", return_value=mock_provider):
+            section = await _build_options_chain_section_position(
+                contracts, legs, "QQQ", "2026-06-01", 485.50,
+            )
+        assert "### Original snapshot (at evaluation)" in section
+        assert "### Current chain at export" in section
+        # Original should render normally
+        assert "### Puts" in section
+        # Current should show unavailable
+        assert "unavailable (provider error)" in section
+
+    @pytest.mark.asyncio
+    async def test_no_original_snapshot(self):
+        """Position with no persisted snapshot — shows unavailable note for original."""
+        legs = [
+            {"side": "SELL", "option_type": "PUT", "strike": 470.0, "expiration": "2026-06-01", "qty": 1},
+        ]
+        mock_provider = AsyncMock()
+        mock_provider.get_chain.return_value = {
+            "contracts": _make_chain_snapshot_contracts(),
+            "underlying_price": 486.0,
+        }
+        with patch("app.api.export_routes._get_provider", return_value=mock_provider):
+            section = await _build_options_chain_section_position(
+                None, legs, "QQQ", "2026-06-01", 485.50,
+            )
+        assert "no snapshot persisted" in section
+        assert "### Current chain at export" in section
+
+
+class TestFullExportWithChainSection:
+    """Integration: chain section appears between Earnings and App verdict."""
+
+    @pytest.mark.asyncio
+    async def test_section_ordering_trade(self):
+        mock_provider = AsyncMock()
+        mock_provider.get_candles.return_value = _make_mock_candles()
+        db = _mock_db_with_asset_type("ETF")
+        chain = _make_chain_snapshot_contracts()
+
+        with patch("app.api.export_routes._get_provider", return_value=mock_provider):
+            body, _ = await _build_trade_markdown(_make_trade_candidate(), db, chain_contracts=chain)
+
+        earn_idx = body.index("## Earnings")
+        chain_idx = body.index("## Options chain")
+        verdict_idx = body.index("## App verdict")
+        assert earn_idx < chain_idx < verdict_idx
+
+    @pytest.mark.asyncio
+    async def test_no_dollar_in_chain_section(self):
+        mock_provider = AsyncMock()
+        mock_provider.get_candles.return_value = _make_mock_candles()
+        db = _mock_db_with_asset_type("ETF")
+        chain = _make_chain_snapshot_contracts()
+
+        with patch("app.api.export_routes._get_provider", return_value=mock_provider):
+            body, _ = await _build_trade_markdown(_make_trade_candidate(), db, chain_contracts=chain)
+
+        # Extract only the chain section
+        sections = body.split("## ")
+        for section in sections:
+            if section.startswith("Options chain"):
+                assert "$" not in section, f"Found $ in chain section: {section[:120]}"
