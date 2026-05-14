@@ -112,6 +112,10 @@ function normalizePos(apiPos) {
     entry_date:                apiPos.entry_date ?? null,
     last_monitored_at:         apiPos.last_monitored_at ?? null,
     dte_at_entry:              apiPos.dte_at_entry ?? null,
+    // OTA-650: orphan fields
+    eligible_strategies:       apiPos.eligible_strategies ?? [],
+    is_orphaned:               apiPos.is_orphaned ?? false,
+    best_fit:                  apiPos.best_fit ?? null,
   };
 }
 
@@ -220,8 +224,14 @@ export default function StrategyPage() {
     setPosLoading(true);
     setPosError(null);
     try {
-      const data = await getPositions({ strategy_key: key, include_archived: true });
-      setPositions((data.positions || []).map(normalizePos));
+      // OTA-650: Fetch all positions, filter client-side by eligible_strategies
+      // so positions whose structure is compatible show here regardless of strategy_at_entry
+      const data = await getPositions({ include_archived: true });
+      const all = (data.positions || []).map(normalizePos);
+      const eligible = all.filter(p =>
+        (p.eligible_strategies || []).includes(key)
+      );
+      setPositions(eligible);
       setLastRefreshed(new Date());
     } catch (err) {
       setPosError(err.message);

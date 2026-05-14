@@ -448,6 +448,10 @@ class PositionResponse(BaseModel):
     days_held: int
     dte_at_entry: Optional[int] = None
     trade_structure: dict
+    # OTA-650 — orphan detection fields
+    is_orphaned: bool = False
+    eligible_strategies: list[str] = []
+    best_fit: Optional[str] = None
     # Populated when status == CLOSED
     exit_price: Optional[float] = None
     exit_date: Optional[str] = None

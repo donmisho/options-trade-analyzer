@@ -606,6 +606,14 @@ export async function refreshPosition(positionId) {
   return apiFetch(`/positions/${encodeURIComponent(positionId)}/refresh`, { method: 'POST' });
 }
 
+/**
+ * OTA-650: Re-route an orphaned position to its best_fit strategy.
+ * @param {string} positionId — UUID
+ */
+export async function reroutePosition(positionId) {
+  return apiFetch(`/positions/${encodeURIComponent(positionId)}/reroute`, { method: 'POST' });
+}
+
 /** Alias for followTrade — POST /api/v1/positions/follow (source=PAPER) */
 export const followPosition = followTrade;
 

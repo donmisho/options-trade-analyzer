@@ -733,7 +733,7 @@ function normalizeEvalResponse(result, fallbackStrategyKey) {
 function TradeDetailExpansion({
   detailProps, rawTrade, symbol, underlying, tradeContext, evaluation,
   onEvaluate, onFollow, onTakePosition, onFollowUp, onDiscard,
-  scenarios, totalEV, outcome,
+  scenarios, totalEV, outcome, eligibleStrategies,
 }) {
   return (
     <div style={{
@@ -754,6 +754,7 @@ function TradeDetailExpansion({
         onFollowUp={onFollowUp}
         onDiscard={onDiscard}
         tradeKey={rawTrade?.trade_key || null}
+        eligibleStrategies={eligibleStrategies || []}
       />
     </div>
   );
@@ -871,13 +872,22 @@ export default function TradesPage() {
     if (symbol) fetchCandlesData(symbol, newRange);
   }
 
+  // ── Path B detection: symbol present, no strategy context ───────────────
+  const isPathB = !!(symbol && !strategyParam);
+
   // ── Auto-fetch on mount when symbol is pre-set from URL ──────────────────
   // Handles /trades?symbol=X (from scan card click) and /trades?strategy=X
   useEffect(() => {
     if (!symbol) return;
     fetchCandlesData(symbol);
-    if (!_isLongOptStrat) fetchVerticals(symbol);
-    if (_isLongOptStrat)  fetchCalls(symbol);
+    if (isPathB) {
+      // Path B: fetch all structure families for grouping by best_fit
+      fetchVerticals(symbol);
+      fetchCalls(symbol);
+    } else {
+      if (!_isLongOptStrat) fetchVerticals(symbol);
+      if (_isLongOptStrat)  fetchCalls(symbol);
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -962,10 +972,17 @@ export default function TradesPage() {
     setExpandedRowId(null);
     setEvaluations({});
     setCandles([]);
+    setPathBCollapsed({});
     // Fetch real candle data for the SMA chart
     fetchCandlesData(sym);
-    if (vertExpanded) fetchVerticals(sym);
-    if (callsExpanded) fetchCalls(sym);
+    if (isPathB || !strategyParam) {
+      // Path B: fetch all structure families
+      fetchVerticals(sym);
+      fetchCalls(sym);
+    } else {
+      if (vertExpanded) fetchVerticals(sym);
+      if (callsExpanded) fetchCalls(sym);
+    }
   }
 
   // ── Section toggle handlers ──────────────────────────────────────────────
@@ -1044,10 +1061,61 @@ export default function TradesPage() {
     }));
   }, [callResults, callsUnderlying]);
 
+  // ── Path B: strategy-grouped sections ───────────────────────────────────
+  // Groups all spreads by best_fit (strategies[0]), sorted by top score desc.
+  // Tiebreaker: alphabetical by strategy key (stable, documented).
+  const pathBGroups = useMemo(() => {
+    if (!isPathB) return [];
+    const allTrades = [
+      ...filteredVertSpreads.map((t, idx) => ({ trade: t, type: 'vert', idx, underlying: vertUnderlying })),
+      ...callsDisplay.map((t, idx) => ({ trade: t, type: 'calls', idx, underlying: callsUnderlying })),
+    ];
+    // Drop trades with no strategies (best_fit = null)
+    const withStrategy = allTrades.filter(item => item.trade.strategies?.length > 0);
+    // Group by best_fit = strategies[0]
+    const groupMap = {};
+    for (const item of withStrategy) {
+      const bestFit = item.trade.strategies[0];
+      if (!groupMap[bestFit]) groupMap[bestFit] = [];
+      groupMap[bestFit].push(item);
+    }
+    // Sort within each group by composite_score descending
+    for (const items of Object.values(groupMap)) {
+      items.sort((a, b) => (b.trade.composite_score ?? 0) - (a.trade.composite_score ?? 0));
+    }
+    // Sort groups by top candidate score desc; tiebreak by key alphabetical
+    const groups = Object.entries(groupMap).map(([key, items]) => ({
+      strategyKey: key,
+      trades: items,
+      topScore: items[0]?.trade.composite_score ?? 0,
+    }));
+    groups.sort((a, b) => {
+      const diff = b.topScore - a.topScore;
+      if (diff !== 0) return diff;
+      return a.strategyKey.localeCompare(b.strategyKey); // alphabetical tiebreaker
+    });
+    return groups;
+  }, [isPathB, filteredVertSpreads, callsDisplay, vertUnderlying, callsUnderlying]);
+
+  // Path B: strategies with zero candidates (for footer)
+  const pathBMissingStrategies = useMemo(() => {
+    if (!isPathB) return [];
+    const presentKeys = new Set(pathBGroups.map(g => g.strategyKey));
+    return SCORECARD_STRATEGIES
+      .map(s => s.key)
+      .filter(k => !presentKeys.has(k));
+  }, [isPathB, pathBGroups]);
+
+  // Path B: section collapse state (first group expanded, rest collapsed)
+  const [pathBCollapsed, setPathBCollapsed] = useState({});
+
   // ── Shared handler factory (closes over symbol, showToast, setEvaluations) ─
   function makeTradeHandlers(trade, rowId, underlying, { defaultStrategy, getEntryPrice, tradeLabel, smaAlign }) {
     const strategyKeys = (trade.strategies || []).map(a => STRATEGY_KEY_MAP[a] || a);
     if (!strategyKeys.length) strategyKeys.push(defaultStrategy);
+
+    // OTA-650: eligible strategies for this trade's structure
+    const eligibleStrategies = [...strategyKeys];
 
     async function handleEvaluate() {
       try {
@@ -1067,14 +1135,15 @@ export default function TradesPage() {
       }
     }
 
-    async function handleFollow() {
+    async function handleFollow(selectedStrategy) {
       try {
+        const chosenStrategy = selectedStrategy || strategyKeys[0];
         // OTA-624: Send trade_key when available — server reads persisted snapshot
         const payload = trade.trade_key
-          ? { trade_key: trade.trade_key }
+          ? { trade_key: trade.trade_key, strategy_key: chosenStrategy }
           : {
               symbol,
-              strategy_key: strategyKeys[0],
+              strategy_key: chosenStrategy,
               trade_structure: trade,
               entry_price: getEntryPrice(trade),
               entry_underlying_price: underlying,
@@ -1091,14 +1160,15 @@ export default function TradesPage() {
       }
     }
 
-    async function handleTakePosition() {
+    async function handleTakePosition(selectedStrategy) {
       try {
+        const chosenStrategy = selectedStrategy || strategyKeys[0];
         // OTA-624: Send trade_key when available
         const payload = trade.trade_key
-          ? { trade_key: trade.trade_key }
+          ? { trade_key: trade.trade_key, strategy_key: chosenStrategy }
           : {
               symbol,
-              strategy_key: strategyKeys[0],
+              strategy_key: chosenStrategy,
               trade_structure: trade,
               entry_price: getEntryPrice(trade),
               entry_underlying_price: underlying,
@@ -1124,7 +1194,7 @@ export default function TradesPage() {
       });
     }
 
-    return { handleEvaluate, handleFollow, handleTakePosition, handleFollowUp };
+    return { handleEvaluate, handleFollow, handleTakePosition, handleFollowUp, eligibleStrategies };
   }
 
   // ── Expansion row renderers ──────────────────────────────────────────────
@@ -1134,7 +1204,7 @@ export default function TradesPage() {
     const ctx = `${symbol} · ${detailProps.strikes} · ${detailProps.type} · ${detailProps.expiry || ''}`;
     const { scenarios, totalEV } = buildExitScenarios(trade, vertUnderlying);
     const outcome = buildOutcome(trade, vertUnderlying, totalEV);
-    const { handleEvaluate, handleFollow, handleTakePosition, handleFollowUp } = makeTradeHandlers(
+    const { handleEvaluate, handleFollow, handleTakePosition, handleFollowUp, eligibleStrategies } = makeTradeHandlers(
       trade, rowId, vertUnderlying, {
         defaultStrategy: VERT_STRATEGY_KEYS[0] || ALL_STRATEGY_KEYS[0],
         getEntryPrice: t => Math.abs(t.net_debit || 0),
@@ -1158,6 +1228,7 @@ export default function TradesPage() {
         scenarios={scenarios}
         totalEV={totalEV}
         outcome={outcome}
+        eligibleStrategies={eligibleStrategies}
       />
     );
   }
@@ -1167,7 +1238,7 @@ export default function TradesPage() {
     const detailProps = mapCallToDetail(trade);
     const ctx = `${symbol} · ${trade.option_type} · ${trade.strike} · ${trade.expiration || ''}`;
     const { scenarios, totalEV } = buildLongOptionExitScenarios(trade, callsUnderlying);
-    const { handleEvaluate, handleFollow, handleTakePosition, handleFollowUp } = makeTradeHandlers(
+    const { handleEvaluate, handleFollow, handleTakePosition, handleFollowUp, eligibleStrategies } = makeTradeHandlers(
       trade, rowId, callsUnderlying, {
         defaultStrategy: CALLS_STRATEGY_KEYS[0] || ALL_STRATEGY_KEYS[0],
         getEntryPrice: t => t.mid_price || 0,
@@ -1191,8 +1262,15 @@ export default function TradesPage() {
         scenarios={scenarios}
         totalEV={totalEV}
         outcome={null}
+        eligibleStrategies={eligibleStrategies}
       />
     );
+  }
+
+  // ── Path B expansion: delegates to vert or call renderer based on item type
+  function renderPathBExpansion(item) {
+    if (item.type === 'vert') return renderVertExpansion(item.trade);
+    return renderCallExpansion(item.trade);
   }
 
   // ── Row ID helpers ───────────────────────────────────────────────────────
@@ -1269,171 +1347,296 @@ export default function TradesPage() {
         {/* Trade structure sections */}
         <div>
 
-          {/* Vertical spreads */}
-          <SectionHeader
-            title="Vertical spreads"
-            count={vertCountText()}
-            expanded={vertExpanded}
-            onToggle={handleVertToggle}
-            showConfig
-            onConfig={() => setVertConfigOpen(true)}
-          />
-          {vertExpanded && (
-            <div style={{ paddingTop: 4 }}>
-              {/* DTE filter bar */}
-              {!vertLoading && !vertError && vertSpreads.length > 0 && (
-                <div style={{
-                  display: 'flex', alignItems: 'center', gap: 10,
-                  padding: '6px 10px', marginBottom: 6,
-                  background: 'var(--bg2)', borderRadius: 4,
-                  border: `1px solid ${BORDER}`,
-                  fontSize: 10, fontFamily: 'monospace', color: MUTED,
-                }}>
-                  <span style={{ whiteSpace: 'nowrap' }}>DTE:</span>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    Min
-                    <input
-                      type="number"
-                      min={1} max={365} step={1}
-                      value={dteMin}
-                      onChange={e => {
-                        const v = parseInt(e.target.value, 10);
-                        if (Number.isFinite(v)) updateDteFilter(v, dteMax);
-                      }}
-                      style={{
-                        width: 52, padding: '3px 6px',
-                        background: 'var(--bg)', border: `1px solid ${BORDER}`,
-                        borderRadius: 3, color: TEXT, fontSize: 10,
-                        fontFamily: 'monospace', textAlign: 'right',
-                      }}
-                    />
-                  </label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    Max
-                    <input
-                      type="number"
-                      min={1} max={365} step={1}
-                      value={dteMax}
-                      onChange={e => {
-                        const v = parseInt(e.target.value, 10);
-                        if (Number.isFinite(v)) updateDteFilter(dteMin, v);
-                      }}
-                      style={{
-                        width: 52, padding: '3px 6px',
-                        background: 'var(--bg)', border: `1px solid ${BORDER}`,
-                        borderRadius: 3, color: TEXT, fontSize: 10,
-                        fontFamily: 'monospace', textAlign: 'right',
-                      }}
-                    />
-                  </label>
-                  {dteFilterActive && (
-                    <button
-                      onClick={resetDteFilter}
-                      style={{
-                        background: 'transparent', border: `1px solid ${BORDER}`,
-                        color: MUTED, padding: '3px 8px', borderRadius: 3,
-                        fontSize: 10, fontFamily: 'monospace', cursor: 'pointer',
-                      }}
-                    >
-                      Reset
-                    </button>
-                  )}
-                </div>
-              )}
-              {vertLoading && (
-                <div style={{ padding: '12px 0', color: MUTED, fontSize: 11 }}>Loading vertical spreads…</div>
-              )}
-              {vertError && (
-                <div style={{ padding: '12px 0', color: 'var(--red)', fontSize: 11 }}>{vertError}</div>
-              )}
-              {!vertLoading && !vertError && vertSpreads.length > 0 && filteredVertSpreads.length > 0 && (
-                <ResultsTable
-                  results={filteredVertSpreads}
-                  columns={verticalsColumns}
-                  context={vertContext}
-                  expandedRowId={expandedRowId}
-                  onRowClick={handleRowClick}
-                  renderExpansionRow={renderVertExpansion}
-                  getRowId={getVertRowId}
-                  defaultSortKey="composite_score"
-                  defaultSortDir="desc"
-                />
-              )}
-              {!vertLoading && !vertError && vertSpreads.length > 0 && filteredVertSpreads.length === 0 && (
-                <div style={{ padding: '12px 0', color: MUTED, fontSize: 11 }}>
-                  No vertical spreads match DTE range {dteMin}–{dteMax}.{' '}
-                  <span
-                    onClick={resetDteFilter}
-                    style={{ color: 'var(--teal)', cursor: 'pointer', textDecoration: 'underline' }}
-                  >
-                    Reset filter
-                  </span>
-                </div>
-              )}
-              {!vertLoading && !vertError && vertSpreads.length === 0 && symbol && (
-                <div style={{ padding: '12px 0', color: MUTED, fontSize: 11 }}>No vertical spreads found.</div>
-              )}
-              {!symbol && (
-                <div style={{ padding: '12px 0', color: MUTED, fontSize: 11 }}>Enter a symbol above to scan for trades.</div>
-              )}
+          {/* ── Path B: no-symbol prompt ─────────────────────────────────── */}
+          {isPathB && !symbol && (
+            <div style={{ padding: '16px 0', color: MUTED, fontSize: 11, textAlign: 'center' }}>
+              Enter a symbol above to scan for trade recommendations.
             </div>
           )}
 
-          {/* Puts & calls */}
-          <div style={{ marginTop: 2 }}>
-            <SectionHeader
-              title="Puts & calls"
-              count={countText(callsLoading, callsError, callResults)}
-              expanded={callsExpanded}
-              onToggle={handleCallsToggle}
-              showConfig
-              onConfig={() => setCallsConfigOpen(true)}
-            />
-            {callsExpanded && (
-              <div style={{ paddingTop: 4 }}>
-                {callsLoading && (
-                  <div style={{ padding: '12px 0', color: MUTED, fontSize: 10 }}>Analyzing long options…</div>
-                )}
-                {callsError && (
-                  <div style={{ padding: '12px 0', color: 'var(--red)', fontSize: 11 }}>{callsError}</div>
-                )}
-                {!callsLoading && !callsError && callsDisplay.length > 0 && (
-                  <ResultsTable
-                    results={callsDisplay}
-                    columns={longOptionsColumns}
-                    context={callsContext}
-                    expandedRowId={expandedRowId}
-                    onRowClick={handleRowClick}
-                    renderExpansionRow={renderCallExpansion}
-                    getRowId={getCallRowId}
-                    defaultSortKey="composite_score"
-                    defaultSortDir="desc"
-                  />
-                )}
-                {!callsLoading && !callsError && callResults.length === 0 && symbol && (
-                  <div style={{ padding: '12px 0', color: MUTED, fontSize: 10, textAlign: 'center' }}>
-                    No candidates matching Trend Rider / Lottery Ticket filters for {symbol}
-                    {smaAlignment?.alignment && (
-                      <span> — SMA signal is {smaAlignment.alignment.charAt(0).toUpperCase() + smaAlignment.alignment.slice(1)}{smaAlignment.alignment === 'mixed' ? ' (requires Bullish or Bearish alignment)' : ''}</span>
+          {/* ── Path B: strategy-grouped recommendation view ──────────────── */}
+          {isPathB && symbol && (
+            <>
+              {/* Loading state */}
+              {(vertLoading || callsLoading) && (
+                <div style={{ padding: '12px 0', color: MUTED, fontSize: 11 }}>
+                  Scanning {symbol} across all strategies…
+                </div>
+              )}
+
+              {/* Strategy-grouped sections */}
+              {!vertLoading && !callsLoading && pathBGroups.map((group, groupIdx) => {
+                const stratCfg = SCORECARD_STRATEGIES.find(s => s.key === group.strategyKey);
+                const stratLabel = stratCfg?.label || group.strategyKey.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+                const stratColor = stratCfg?.color_text || 'var(--teal)';
+                const isRecommended = groupIdx === 0;
+                const isCollapsed = pathBCollapsed[group.strategyKey] ?? !isRecommended;
+
+                // Determine columns based on content type (mixed uses verticals columns)
+                const hasVerts = group.trades.some(t => t.type === 'vert');
+                const columns = hasVerts ? verticalsColumns : longOptionsColumns;
+                const context = hasVerts ? vertContext : callsContext;
+
+                return (
+                  <div key={group.strategyKey} style={{ marginTop: groupIdx > 0 ? 2 : 0 }}>
+                    <div
+                      onClick={() => setPathBCollapsed(prev => ({ ...prev, [group.strategyKey]: !isCollapsed }))}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        padding: '8px 10px', cursor: 'pointer',
+                        borderBottom: `1px solid ${BORDER}`,
+                      }}
+                    >
+                      <span style={{ color: MUTED, fontSize: 9 }}>{isCollapsed ? '▶' : '▼'}</span>
+                      <span style={{ color: stratColor, fontSize: 12, fontWeight: 700 }}>
+                        {stratLabel}
+                      </span>
+                      {isRecommended && (
+                        <span style={{
+                          background: 'rgba(255,255,255,0.06)',
+                          border: '1px solid rgba(255,255,255,0.35)',
+                          color: '#e6edf3',
+                          fontSize: 9, fontWeight: 700,
+                          padding: '2px 8px', borderRadius: 3,
+                          fontFamily: 'monospace',
+                        }}>
+                          Recommended
+                        </span>
+                      )}
+                      <span style={{ color: MUTED, fontSize: 10, marginLeft: 'auto' }}>
+                        {group.trades.length} candidate{group.trades.length !== 1 ? 's' : ''}
+                      </span>
+                    </div>
+                    {!isCollapsed && (
+                      <div style={{ paddingTop: 4 }}>
+                        <ResultsTable
+                          results={group.trades.map(item => item.trade)}
+                          columns={columns}
+                          context={context}
+                          expandedRowId={expandedRowId}
+                          onRowClick={handleRowClick}
+                          renderExpansionRow={(trade) => {
+                            const item = group.trades.find(t => t.trade === trade);
+                            return item ? renderPathBExpansion(item) : null;
+                          }}
+                          getRowId={(trade) => {
+                            const item = group.trades.find(t => t.trade === trade);
+                            return item ? `${item.type}-${item.idx}` : `unknown-${Math.random()}`;
+                          }}
+                          defaultSortKey="composite_score"
+                          defaultSortDir="desc"
+                        />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+
+              {/* All-null universe: no sections, just footer */}
+              {!vertLoading && !callsLoading && pathBGroups.length === 0 && (
+                <div style={{ padding: '16px 0', color: MUTED, fontSize: 11, textAlign: 'center' }}>
+                  No compatible setups today for: {SCORECARD_STRATEGIES.map(s => s.label).join(', ')}
+                </div>
+              )}
+
+              {/* Footer: strategies with zero candidates */}
+              {!vertLoading && !callsLoading && pathBGroups.length > 0 && pathBMissingStrategies.length > 0 && (
+                <div style={{
+                  padding: '10px 10px', marginTop: 8,
+                  fontSize: 10, color: MUTED, fontFamily: 'monospace',
+                  borderTop: `1px solid ${BORDER}`,
+                }}>
+                  No compatible setups today for:{' '}
+                  {pathBMissingStrategies.map(k => {
+                    const cfg = SCORECARD_STRATEGIES.find(s => s.key === k);
+                    return cfg?.label || k;
+                  }).join(', ')}
+                </div>
+              )}
+
+              {/* Full coverage footer */}
+              {!vertLoading && !callsLoading && pathBGroups.length > 0 && pathBMissingStrategies.length === 0 && (
+                <div style={{
+                  padding: '10px 10px', marginTop: 8,
+                  fontSize: 10, color: MUTED, fontFamily: 'monospace',
+                  borderTop: `1px solid ${BORDER}`,
+                }}>
+                  Full coverage for {symbol} — all strategies have candidates.
+                </div>
+              )}
+            </>
+          )}
+
+          {/* ── Path A: structure-grouped sections (existing behavior) ─────── */}
+          {!isPathB && (
+            <>
+              {/* Vertical spreads */}
+              <SectionHeader
+                title="Vertical spreads"
+                count={vertCountText()}
+                expanded={vertExpanded}
+                onToggle={handleVertToggle}
+                showConfig
+                onConfig={() => setVertConfigOpen(true)}
+              />
+              {vertExpanded && (
+                <div style={{ paddingTop: 4 }}>
+                  {/* DTE filter bar */}
+                  {!vertLoading && !vertError && vertSpreads.length > 0 && (
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      padding: '6px 10px', marginBottom: 6,
+                      background: 'var(--bg2)', borderRadius: 4,
+                      border: `1px solid ${BORDER}`,
+                      fontSize: 10, fontFamily: 'monospace', color: MUTED,
+                    }}>
+                      <span style={{ whiteSpace: 'nowrap' }}>DTE:</span>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        Min
+                        <input
+                          type="number"
+                          min={1} max={365} step={1}
+                          value={dteMin}
+                          onChange={e => {
+                            const v = parseInt(e.target.value, 10);
+                            if (Number.isFinite(v)) updateDteFilter(v, dteMax);
+                          }}
+                          style={{
+                            width: 52, padding: '3px 6px',
+                            background: 'var(--bg)', border: `1px solid ${BORDER}`,
+                            borderRadius: 3, color: TEXT, fontSize: 10,
+                            fontFamily: 'monospace', textAlign: 'right',
+                          }}
+                        />
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        Max
+                        <input
+                          type="number"
+                          min={1} max={365} step={1}
+                          value={dteMax}
+                          onChange={e => {
+                            const v = parseInt(e.target.value, 10);
+                            if (Number.isFinite(v)) updateDteFilter(dteMin, v);
+                          }}
+                          style={{
+                            width: 52, padding: '3px 6px',
+                            background: 'var(--bg)', border: `1px solid ${BORDER}`,
+                            borderRadius: 3, color: TEXT, fontSize: 10,
+                            fontFamily: 'monospace', textAlign: 'right',
+                          }}
+                        />
+                      </label>
+                      {dteFilterActive && (
+                        <button
+                          onClick={resetDteFilter}
+                          style={{
+                            background: 'transparent', border: `1px solid ${BORDER}`,
+                            color: MUTED, padding: '3px 8px', borderRadius: 3,
+                            fontSize: 10, fontFamily: 'monospace', cursor: 'pointer',
+                          }}
+                        >
+                          Reset
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {vertLoading && (
+                    <div style={{ padding: '12px 0', color: MUTED, fontSize: 11 }}>Loading vertical spreads…</div>
+                  )}
+                  {vertError && (
+                    <div style={{ padding: '12px 0', color: 'var(--red)', fontSize: 11 }}>{vertError}</div>
+                  )}
+                  {!vertLoading && !vertError && vertSpreads.length > 0 && filteredVertSpreads.length > 0 && (
+                    <ResultsTable
+                      results={filteredVertSpreads}
+                      columns={verticalsColumns}
+                      context={vertContext}
+                      expandedRowId={expandedRowId}
+                      onRowClick={handleRowClick}
+                      renderExpansionRow={renderVertExpansion}
+                      getRowId={getVertRowId}
+                      defaultSortKey="composite_score"
+                      defaultSortDir="desc"
+                    />
+                  )}
+                  {!vertLoading && !vertError && vertSpreads.length > 0 && filteredVertSpreads.length === 0 && (
+                    <div style={{ padding: '12px 0', color: MUTED, fontSize: 11 }}>
+                      No vertical spreads match DTE range {dteMin}–{dteMax}.{' '}
+                      <span
+                        onClick={resetDteFilter}
+                        style={{ color: 'var(--teal)', cursor: 'pointer', textDecoration: 'underline' }}
+                      >
+                        Reset filter
+                      </span>
+                    </div>
+                  )}
+                  {!vertLoading && !vertError && vertSpreads.length === 0 && symbol && (
+                    <div style={{ padding: '12px 0', color: MUTED, fontSize: 11 }}>No vertical spreads found.</div>
+                  )}
+                  {!symbol && (
+                    <div style={{ padding: '12px 0', color: MUTED, fontSize: 11 }}>Enter a symbol above to scan for trades.</div>
+                  )}
+                </div>
+              )}
+
+              {/* Puts & calls */}
+              <div style={{ marginTop: 2 }}>
+                <SectionHeader
+                  title="Puts & calls"
+                  count={countText(callsLoading, callsError, callResults)}
+                  expanded={callsExpanded}
+                  onToggle={handleCallsToggle}
+                  showConfig
+                  onConfig={() => setCallsConfigOpen(true)}
+                />
+                {callsExpanded && (
+                  <div style={{ paddingTop: 4 }}>
+                    {callsLoading && (
+                      <div style={{ padding: '12px 0', color: MUTED, fontSize: 10 }}>Analyzing long options…</div>
+                    )}
+                    {callsError && (
+                      <div style={{ padding: '12px 0', color: 'var(--red)', fontSize: 11 }}>{callsError}</div>
+                    )}
+                    {!callsLoading && !callsError && callsDisplay.length > 0 && (
+                      <ResultsTable
+                        results={callsDisplay}
+                        columns={longOptionsColumns}
+                        context={callsContext}
+                        expandedRowId={expandedRowId}
+                        onRowClick={handleRowClick}
+                        renderExpansionRow={renderCallExpansion}
+                        getRowId={getCallRowId}
+                        defaultSortKey="composite_score"
+                        defaultSortDir="desc"
+                      />
+                    )}
+                    {!callsLoading && !callsError && callResults.length === 0 && symbol && (
+                      <div style={{ padding: '12px 0', color: MUTED, fontSize: 10, textAlign: 'center' }}>
+                        No candidates matching Trend Rider / Lottery Ticket filters for {symbol}
+                        {smaAlignment?.alignment && (
+                          <span> — SMA signal is {smaAlignment.alignment.charAt(0).toUpperCase() + smaAlignment.alignment.slice(1)}{smaAlignment.alignment === 'mixed' ? ' (requires Bullish or Bearish alignment)' : ''}</span>
+                        )}
+                      </div>
+                    )}
+                    {!symbol && (
+                      <div style={{ padding: '12px 0', color: MUTED, fontSize: 11 }}>Enter a symbol above to scan for trades.</div>
                     )}
                   </div>
                 )}
-                {!symbol && (
-                  <div style={{ padding: '12px 0', color: MUTED, fontSize: 11 }}>Enter a symbol above to scan for trades.</div>
-                )}
               </div>
-            )}
-          </div>
 
-          {/* Iron condors — coming soon */}
-          <div style={{ marginTop: 2 }}>
-            <SectionHeader
-              title="Iron condors"
-              count="· coming soon"
-              expanded={false}
-              comingSoon
-            />
-          </div>
+              {/* Iron condors — coming soon */}
+              <div style={{ marginTop: 2 }}>
+                <SectionHeader
+                  title="Iron condors"
+                  count="· coming soon"
+                  expanded={false}
+                  comingSoon
+                />
+              </div>
+            </>
+          )}
 
         </div>
       </div>

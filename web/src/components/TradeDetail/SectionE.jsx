@@ -109,16 +109,18 @@ export default function SectionE({
   tradeContext,
   canEvaluate = true,  // false when price data not yet loaded
   onEvaluate,      // async () => void — parent handles API call + state update
-  onFollow,        // async () => void
-  onTakePosition,  // async () => void
+  onFollow,        // async (selectedStrategy?) => void
+  onTakePosition,  // async (selectedStrategy?) => void
   onFollowUp,      // async (question, evaluation) => { answer }
   onDiscard,
   tradeKey,        // string | null — from OTA-624 trade_candidates persistence
+  eligibleStrategies = [],  // OTA-650: strategy keys that are structurally compatible
 }) {
   const [isEvalLoading, setIsEvalLoading] = useState(false);
   const [followUps, setFollowUps] = useState([]);
   const [followUpInput, setFollowUpInput] = useState('');
   const [isFollowUpLoading, setIsFollowUpLoading] = useState(false);
+  const [selectedStrategy, setSelectedStrategy] = useState(null);
 
   async function handleEvaluate() {
     if (isEvalLoading) return;
@@ -343,24 +345,58 @@ export default function SectionE({
           const upperVerdict = verdict ? verdict.toUpperCase() : '';
           if (upperVerdict === 'WAIT_FOR_EARNINGS' || upperVerdict === 'PASS')
             disableReasons.push(`Verdict: ${verdict}`);
+
+          // OTA-650: Disable if no eligible strategies
+          const noEligible = eligibleStrategies.length === 0;
+          if (noEligible) disableReasons.push('No compatible strategy for this spread');
+
           const isDisabled = disableReasons.length > 0;
           const tip = disableReasons.join('; ');
           const disabledStyle = { opacity: 0.35, cursor: 'default', pointerEvents: 'none' };
+
+          // OTA-650: Determine effective strategy for button label
+          const effectiveStrategy = selectedStrategy || bestStrategy || (eligibleStrategies.length === 1 ? eligibleStrategies[0] : null);
+          const stratLabel = effectiveStrategy
+            ? effectiveStrategy.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+            : null;
+
           return (
             <>
+              {/* OTA-650: Strategy selector when multiple eligible */}
+              {eligibleStrategies.length > 1 && (
+                <select
+                  value={selectedStrategy || bestStrategy || eligibleStrategies[0]}
+                  onChange={e => setSelectedStrategy(e.target.value)}
+                  style={{
+                    background: 'var(--bg)',
+                    border: '1px solid var(--border)',
+                    color: 'var(--text)',
+                    fontFamily: 'monospace',
+                    fontSize: 10,
+                    padding: '5px 8px',
+                    borderRadius: 4,
+                  }}
+                >
+                  {eligibleStrategies.map(k => (
+                    <option key={k} value={k}>
+                      {k.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+                    </option>
+                  ))}
+                </select>
+              )}
               <span title={isDisabled ? tip : undefined}>
                 <button
                   style={{ ...tealOutlined, ...(isDisabled ? disabledStyle : {}) }}
-                  onClick={() => !isDisabled && onFollow?.()}
+                  onClick={() => !isDisabled && onFollow?.(effectiveStrategy)}
                   disabled={isDisabled}
                 >
-                  Follow (Paper)
+                  Follow (Paper){stratLabel && eligibleStrategies.length === 1 ? ` · ${stratLabel}` : ''}
                 </button>
               </span>
               <span title={isDisabled ? tip : undefined}>
                 <button
                   style={{ ...greenFilled, ...(isDisabled ? disabledStyle : {}) }}
-                  onClick={() => !isDisabled && onTakePosition?.()}
+                  onClick={() => !isDisabled && onTakePosition?.(effectiveStrategy)}
                   disabled={isDisabled}
                 >
                   Take Position (Live)

@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import require_read, require_write
 from app.models.session import get_db
 from app.models.database import Position, PositionAssessment, TradeCandidate
+from app.analysis.strategy_routing import get_compatible_strategies, normalize_to_structure
 from app.models.schemas import (
     FollowPositionRequest,
     TakePositionRequest,
@@ -150,6 +151,101 @@ def _strategy_label(key: str) -> str:
     return _STRATEGY_LABELS.get(key, key.replace("-", " ").title())
 
 
+def _extract_canonical_structure(trade_structure: dict) -> Optional[str]:
+    """
+    Extract the canonical compatible_structures value from a position's trade_structure.
+    Handles both direct 'structure' field and legacy 'spread_type'/'option_type' fields.
+    Returns e.g. 'bull_put_credit', 'bear_put_debit', 'long_call', or None.
+    """
+    # Direct structure field (from TradeCandidate path)
+    structure = trade_structure.get("structure")
+    if structure:
+        # Normalize: lower-case, underscores
+        s = structure.lower().replace("-", "_").replace(" ", "_")
+        # Already canonical?
+        if s in ("bull_put_credit", "bear_call_credit", "bull_call_debit",
+                 "bear_put_debit", "long_call", "long_put"):
+            return s
+        # Map SINGLE_LONG_CALL / SINGLE_LONG_PUT variants
+        if "single_long_call" in s or s == "long_call":
+            return "long_call"
+        if "single_long_put" in s or s == "long_put":
+            return "long_put"
+        # Try normalize_to_structure (handles engine spread_type values)
+        normalized = normalize_to_structure(spread_type=s)
+        if normalized:
+            return normalized
+
+    # Legacy: spread_type field (from scan results)
+    spread_type = trade_structure.get("spread_type")
+    if spread_type:
+        s = spread_type.lower().replace("-", "_")
+        # spread_type is engine-level: 'bull_put', 'bear_call', 'bull_call', 'bear_put'
+        normalized = normalize_to_structure(spread_type=s)
+        if normalized:
+            return normalized
+        # May already be canonical
+        if s in ("bull_put_credit", "bear_call_credit", "bull_call_debit", "bear_put_debit"):
+            return s
+
+    # Legacy: option_type field for single-leg
+    option_type = trade_structure.get("option_type")
+    if option_type:
+        normalized = normalize_to_structure(option_type=option_type.lower())
+        if normalized:
+            return normalized
+
+    # Infer from legs if present
+    legs = trade_structure.get("legs", [])
+    if len(legs) == 1:
+        leg = legs[0]
+        ot = (leg.get("option_type") or "").lower()
+        if ot in ("call", "put"):
+            return f"long_{ot}"
+    elif len(legs) == 2:
+        # Two legs = spread. Determine type from strikes + option_type
+        long_leg = next((l for l in legs if (l.get("side") or "").lower() == "long"), None)
+        short_leg = next((l for l in legs if (l.get("side") or "").lower() == "short"), None)
+        if long_leg and short_leg:
+            ot = (long_leg.get("option_type") or "").lower()
+            ls = float(long_leg.get("strike", 0))
+            ss = float(short_leg.get("strike", 0))
+            if ot == "put":
+                # long put higher strike = bear put debit, long put lower strike = bull put credit
+                if ls > ss:
+                    return "bear_put_debit"
+                else:
+                    return "bull_put_credit"
+            elif ot == "call":
+                # long call lower strike = bull call debit, long call higher strike = bear call credit
+                if ls < ss:
+                    return "bull_call_debit"
+                else:
+                    return "bear_call_credit"
+
+    return None
+
+
+def _compute_orphan_fields(trade_structure: dict, strategy_key: str) -> dict:
+    """
+    Compute orphan detection fields for a position.
+    Returns dict with is_orphaned, eligible_strategies, best_fit.
+    """
+    canonical = _extract_canonical_structure(trade_structure)
+    if canonical is None:
+        # Can't determine structure — not orphaned (defensive)
+        return {"is_orphaned": False, "eligible_strategies": [], "best_fit": None}
+
+    eligible = get_compatible_strategies(canonical)
+    is_orphaned = strategy_key not in eligible
+    best_fit = eligible[0] if eligible else None
+    return {
+        "is_orphaned": is_orphaned,
+        "eligible_strategies": eligible,
+        "best_fit": best_fit,
+    }
+
+
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _dte_at_entry(trade_structure: dict, entry_date: datetime) -> Optional[int]:
@@ -204,6 +300,9 @@ def _to_response(pos: Position) -> PositionResponse:
         except (ValueError, TypeError):
             return None
 
+    # OTA-650: compute orphan detection fields
+    orphan_fields = _compute_orphan_fields(trade_struct, pos.strategy_key)
+
     return PositionResponse(
         position_id=pos.position_id,
         symbol=pos.symbol,
@@ -227,6 +326,9 @@ def _to_response(pos: Position) -> PositionResponse:
         days_held=_days_held(pos.entry_date, pos.exit_date),
         dte_at_entry=_dte_at_entry(trade_struct, pos.entry_date),
         trade_structure=trade_struct,
+        is_orphaned=orphan_fields["is_orphaned"],
+        eligible_strategies=orphan_fields["eligible_strategies"],
+        best_fit=orphan_fields["best_fit"],
         exit_price=float(pos.exit_price) if pos.exit_price is not None else None,
         exit_date=pos.exit_date.isoformat() if pos.exit_date is not None else None,
         exit_reason=pos.exit_reason,
@@ -535,8 +637,25 @@ async def follow_position(
             },
         )
 
-    # OTA-557: ensure trade_structure always has expiration for auto-archive sweep
+    # OTA-650: Validate strategy_key against eligible_strategies(spread)
     _ts = req.trade_structure or {}
+    canonical_structure = _extract_canonical_structure(_ts)
+    if canonical_structure and req.strategy_key:
+        eligible = get_compatible_strategies(canonical_structure)
+        if eligible and req.strategy_key not in eligible:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "error": "incompatible_strategy",
+                    "message": (
+                        f"strategy_at_entry={req.strategy_key} not in "
+                        f"eligible_strategies={eligible} for "
+                        f"spread.trade_structure={canonical_structure}"
+                    ),
+                },
+            )
+
+    # OTA-557: ensure trade_structure always has expiration for auto-archive sweep
     if not _ts.get("expiration"):
         legs = _ts.get("legs")
         if legs and isinstance(legs, list) and len(legs) > 0:
@@ -604,8 +723,25 @@ async def take_position(
                 detail="trade_key or full trade payload required",
             )
 
-    # OTA-557: ensure trade_structure always has expiration for auto-archive sweep
+    # OTA-650: Validate strategy_key against eligible_strategies(spread)
     _ts = req.trade_structure or {}
+    canonical_structure = _extract_canonical_structure(_ts)
+    if canonical_structure and req.strategy_key:
+        eligible = get_compatible_strategies(canonical_structure)
+        if eligible and req.strategy_key not in eligible:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "error": "incompatible_strategy",
+                    "message": (
+                        f"strategy_at_entry={req.strategy_key} not in "
+                        f"eligible_strategies={eligible} for "
+                        f"spread.trade_structure={canonical_structure}"
+                    ),
+                },
+            )
+
+    # OTA-557: ensure trade_structure always has expiration for auto-archive sweep
     if not _ts.get("expiration"):
         legs = _ts.get("legs")
         if legs and isinstance(legs, list) and len(legs) > 0:
@@ -636,6 +772,72 @@ async def take_position(
     await db.commit()
     await db.refresh(pos)
     log.info(f"take_position: {pos.symbol} {pos.strategy_key} user={_user_id}")
+    return _to_response(pos)
+
+
+@router.post("/{position_id}/reroute", response_model=PositionResponse)
+async def reroute_position(
+    position_id: str,
+    user: dict = Depends(require_write),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    OTA-650: Re-route an orphaned position to its best_fit strategy.
+    No request body — server computes best_fit from eligible_strategies(spread).
+    Records audit trail (previous strategy_key + timestamp) in position metadata.
+    """
+    _user_id = user.get("sub", "")
+    if not _user_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    result = await db.execute(
+        select(Position).where(
+            Position.position_id == position_id,
+            Position.user_id == _user_id,
+        )
+    )
+    pos = result.scalar_one_or_none()
+    if not pos:
+        raise HTTPException(status_code=404, detail="Position not found")
+
+    # Parse trade_structure and compute best_fit
+    ts_raw = pos.trade_structure
+    trade_struct = json.loads(ts_raw) if isinstance(ts_raw, str) else (ts_raw or {})
+    canonical = _extract_canonical_structure(trade_struct)
+
+    if not canonical:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "no_eligible_strategy", "message": "cannot determine trade structure for this position"},
+        )
+
+    eligible = get_compatible_strategies(canonical)
+    if not eligible:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "no_eligible_strategy", "message": "no compatible strategy for this position's spread"},
+        )
+
+    best_fit = eligible[0]
+    previous_strategy = pos.strategy_key
+
+    # Update strategy_key
+    pos.strategy_key = best_fit
+    pos.updated_at = datetime.now(timezone.utc)
+
+    # Record audit trail in trade_structure metadata
+    reroute_audit = trade_struct.get("_reroute_audit", [])
+    reroute_audit.append({
+        "previous_strategy": previous_strategy,
+        "new_strategy": best_fit,
+        "rerouted_at": datetime.now(timezone.utc).isoformat(),
+    })
+    trade_struct["_reroute_audit"] = reroute_audit
+    pos.trade_structure = json.dumps(trade_struct)
+
+    await db.commit()
+    await db.refresh(pos)
+    log.info(f"reroute_position: {pos.symbol} {previous_strategy} → {best_fit} user={_user_id}")
     return _to_response(pos)
 
 

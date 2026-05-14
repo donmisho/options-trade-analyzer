@@ -18,6 +18,7 @@ import {
   refreshPosition,
   archivePosition,
   getPositionCurrentPrices,
+  reroutePosition,
 } from '../api/client';
 import RefreshConfirmDialog from '../components/RefreshConfirmDialog';
 import PositionDetailPanel from '../components/PositionDetailPanel';
@@ -92,6 +93,10 @@ function normalizePosition(apiPos) {
     last_monitored_at:         apiPos.last_monitored_at ?? null,
     current_price:             apiPos.current_price ?? null,
     dte_at_entry:              apiPos.dte_at_entry ?? null,
+    // OTA-650: orphan detection
+    is_orphaned:         apiPos.is_orphaned ?? false,
+    eligible_strategies: apiPos.eligible_strategies ?? [],
+    best_fit:            apiPos.best_fit ?? null,
   };
 }
 
@@ -705,6 +710,27 @@ export default function PositionsPage() {
       .catch(err => showToast({ type: 'error', message: `Archive failed: ${err.message}` }));
   }
 
+  async function handleReroute(pos) {
+    try {
+      const updated = await reroutePosition(pos.id);
+      // Update local state with the rerouted position
+      setPositions(prev => prev.map(p => {
+        if (p.id !== pos.id) return p;
+        return {
+          ...p,
+          strategy_key: updated.strategy_key,
+          is_orphaned: updated.is_orphaned ?? false,
+          eligible_strategies: updated.eligible_strategies ?? [],
+          best_fit: updated.best_fit ?? null,
+        };
+      }));
+      const targetLabel = STRATEGY_LABELS[updated.strategy_key] || updated.strategy_key;
+      showToast({ type: 'success', message: `${pos.symbol} re-routed to ${targetLabel}` });
+    } catch (err) {
+      showToast({ type: 'error', message: `Re-route failed: ${err.message}` });
+    }
+  }
+
   function handleRefreshAllClick() {
     if (filtered.length > 1) {
       setPendingRefreshPositions(filtered); // capture current filter snapshot
@@ -749,10 +775,20 @@ export default function PositionsPage() {
     });
   }, [positions, filters]);
 
-  // ── Group positions ────────────────────────────────────────────────────────
+  // ── Separate orphans from normal positions ──────────────────────────────────
+  const orphanedPositions = useMemo(
+    () => filtered.filter(pos => pos.is_orphaned),
+    [filtered]
+  );
+  const nonOrphanFiltered = useMemo(
+    () => filtered.filter(pos => !pos.is_orphaned),
+    [filtered]
+  );
+
+  // ── Group positions (non-orphaned only) ───────────────────────────────────
   const groups = useMemo(() => {
     const map = {};
-    for (const pos of filtered) {
+    for (const pos of nonOrphanFiltered) {
       const key = getGroupValue(pos, filters.groupBy);
       if (!map[key]) map[key] = [];
       map[key].push(pos);
@@ -779,7 +815,7 @@ export default function PositionsPage() {
     }
 
     return result;
-  }, [filtered, filters.groupBy]);
+  }, [nonOrphanFiltered, filters.groupBy]);
 
   // Empty groups default to collapsed
   const effectiveCollapsed = useMemo(() => {
@@ -833,6 +869,64 @@ export default function PositionsPage() {
           <div className="empty-icon">⚠</div>
           <h3>Could not load positions</h3>
           <p style={{ color: 'var(--text-muted)', fontSize: 12 }}>{error}</p>
+        </div>
+      )}
+
+      {/* OTA-650: Orphaned positions group (only when orphans exist) */}
+      {!loading && !error && orphanedPositions.length > 0 && (
+        <div className="pos-strategy-group pos-orphan-group">
+          <div
+            className="pos-group-header pos-group-header--clickable"
+            onClick={() => toggleGroup('__orphaned')}
+            style={{ cursor: 'pointer' }}
+          >
+            <span style={{ color: 'var(--muted, #8b949e)', fontSize: 9, marginRight: 4 }}>
+              {effectiveCollapsed['__orphaned'] ? '▶' : '▼'}
+            </span>
+            <span style={{ color: 'var(--amber, #f59e0b)', fontSize: 12, fontWeight: 700 }}>
+              Orphaned — strategy mismatch
+            </span>
+            <span style={{ color: 'var(--muted, #8b949e)', fontSize: 10, marginLeft: 6 }}>
+              {orphanedPositions.length}
+            </span>
+          </div>
+          {!effectiveCollapsed['__orphaned'] && (
+            <>
+              <PositionsTable
+                positions={orphanedPositions}
+                expandedRowIds={expandedRowIds}
+                onRowClick={handleRowClick}
+                onRefresh={handleRefresh}
+                onArchive={handleArchive}
+                refreshingId={refreshingId}
+                assessmentsCache={assessmentsCache}
+                loadingAssessmentIds={loadingAssessmentIds}
+              />
+              <div style={{ padding: '6px 12px', display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {orphanedPositions.map(pos => (
+                  <span key={pos.id} title={pos.best_fit ? `Re-route to ${STRATEGY_LABELS[pos.best_fit] || pos.best_fit}` : 'No eligible strategy for this spread'}>
+                    <button
+                      disabled={!pos.best_fit}
+                      onClick={() => handleReroute(pos)}
+                      style={{
+                        background: pos.best_fit ? 'rgba(245,158,11,0.1)' : 'transparent',
+                        border: `1px solid ${pos.best_fit ? 'rgba(245,158,11,0.4)' : 'var(--border)'}`,
+                        color: pos.best_fit ? 'var(--amber, #f59e0b)' : 'var(--muted)',
+                        padding: '4px 10px',
+                        borderRadius: 4,
+                        fontSize: 10,
+                        fontFamily: 'monospace',
+                        cursor: pos.best_fit ? 'pointer' : 'default',
+                        opacity: pos.best_fit ? 1 : 0.5,
+                      }}
+                    >
+                      Re-route {pos.symbol} → {STRATEGY_LABELS[pos.best_fit] || pos.best_fit || '—'}
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       )}
 
