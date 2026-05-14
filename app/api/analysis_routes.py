@@ -50,6 +50,21 @@ from app.models.schemas import (
 
 log = logging.getLogger(__name__)
 
+# OTA-649: Human-readable labels for compatible_structures values.
+_STRUCTURE_LABELS = {
+    "bull_put_credit":   "Bull Put Credit",
+    "bear_call_credit":  "Bear Call Credit",
+    "bull_call_debit":   "Bull Call Debit",
+    "bear_put_debit":    "Bear Put Debit",
+    "long_call":         "Long Call",
+    "long_put":          "Long Put",
+}
+
+
+def _structure_human_label(structure: str) -> str:
+    return _STRUCTURE_LABELS.get(structure, structure.replace("_", " ").title())
+
+
 router = APIRouter(prefix="/analyze", tags=["Analysis"])
 
 # Initialized in main.py at startup
@@ -882,23 +897,38 @@ async def get_strategy_scorecard(
     if candles and price_for_sma:
         sma_signal = compute_sma_signal(candles, price_for_sma)
 
-    return ScorecardResponse(
-        symbol=sym,
-        underlying_price=underlying_price,
-        quote=quote_data,
-        sma_signal=sma_signal,
-        strategies=[
-            StrategyScoreItem(
+    # OTA-649: Return all four strategies in canonical order (SP, WG, TR, LT).
+    # None entries from score_all_strategies become score=null + reason for N/A display.
+    strategy_items = []
+    for i, (strategy_key, strategy_def) in enumerate(STRATEGIES.items()):
+        s = scores[i] if i < len(scores) else None
+        if s is not None:
+            strategy_items.append(StrategyScoreItem(
                 strategy_key=s.strategy_key,
                 label=s.label,
                 score=s.score,
                 best_trade=s.best_trade,
                 signal_summary=s.signal_summary,
                 metric_scores=s.metric_scores,
+            ))
+        else:
+            structures = ", ".join(
+                _structure_human_label(st)
+                for st in strategy_def.compatible_structures
             )
-            for s in scores
-            if s is not None  # OTA-636: None = structurally incompatible
-        ],
+            strategy_items.append(StrategyScoreItem(
+                strategy_key=strategy_key,
+                label=strategy_def.label,
+                score=None,
+                reason=f"No eligible {strategy_def.label} candidates — strategy requires {structures}",
+            ))
+
+    return ScorecardResponse(
+        symbol=sym,
+        underlying_price=underlying_price,
+        quote=quote_data,
+        sma_signal=sma_signal,
+        strategies=strategy_items,
     )
 
 

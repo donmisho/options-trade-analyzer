@@ -198,10 +198,11 @@ export default function ScanCard({
         </div>
       )}
 
-      {/* ── Strategy score bars ── */}
-      {strategies.filter(s => (s.score ?? null) !== null).map(s => {
+      {/* ── Strategy score bars (OTA-649: render all four; N/A for incompatible) ── */}
+      {strategies.map(s => {
         const key = s.key ?? s.strategy_key;
         const meta = STRATEGY_META[key] || { color: '#8b949e' };
+        const isNA = s.score == null;
         const score = s.score ?? 0;
         return (
           <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
@@ -212,24 +213,45 @@ export default function ScanCard({
             }}>
               {s.label || key}
             </span>
-            <div style={{
-              flex: 1, height: 3, borderRadius: 2,
-              background: C.border, overflow: 'hidden',
-            }}>
-              <div style={{
-                width: `${Math.min(100, Math.max(0, score))}%`,
-                height: '100%',
-                borderRadius: 2,
-                background: meta.color,
-              }} />
-            </div>
-            <span style={{
-              fontSize: 11, fontWeight: 700, fontFamily: mono,
-              color: scoreColor(score),
-              width: 38, textAlign: 'right', flexShrink: 0,
-            }}>
-              {score.toFixed(2)}
-            </span>
+            {isNA ? (
+              /* N/A row: empty bar track + muted "N/A" with tooltip */
+              <>
+                <div style={{ flex: 1, height: 3, borderRadius: 2, background: C.border }} />
+                <span
+                  title={s.reason || 'Not compatible'}
+                  style={{
+                    fontSize: 11, fontWeight: 700, fontFamily: mono,
+                    color: '#8b949e',
+                    width: 38, textAlign: 'right', flexShrink: 0,
+                    cursor: 'default',
+                  }}
+                >
+                  N/A
+                </span>
+              </>
+            ) : (
+              /* Populated row: score bar + ##.00 */
+              <>
+                <div style={{
+                  flex: 1, height: 3, borderRadius: 2,
+                  background: C.border, overflow: 'hidden',
+                }}>
+                  <div style={{
+                    width: `${Math.min(100, Math.max(0, score))}%`,
+                    height: '100%',
+                    borderRadius: 2,
+                    background: meta.color,
+                  }} />
+                </div>
+                <span style={{
+                  fontSize: 11, fontWeight: 700, fontFamily: mono,
+                  color: scoreColor(score),
+                  width: 38, textAlign: 'right', flexShrink: 0,
+                }}>
+                  {score.toFixed(2)}
+                </span>
+              </>
+            )}
           </div>
         );
       })}

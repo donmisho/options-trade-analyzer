@@ -248,13 +248,18 @@ class ScorecardRequest(BaseModel):
 
 
 class StrategyScoreItem(BaseModel):
-    """Score for a single strategy."""
+    """Score for a single strategy.
+
+    score=None means the strategy is structurally incompatible with the
+    available candidates (OTA-649). reason carries a human-readable explanation.
+    """
     strategy_key: str
     label: str
-    score: int                          # 0-100
+    score: Optional[int] = None         # 0-100; None = N/A (incompatible)
     best_trade: Optional[dict] = None   # top-scoring candidate trade
-    signal_summary: str
-    metric_scores: dict
+    signal_summary: Optional[str] = None
+    metric_scores: Optional[dict] = None
+    reason: Optional[str] = None        # populated when score is None
 
 
 class ScorecardResponse(BaseModel):
