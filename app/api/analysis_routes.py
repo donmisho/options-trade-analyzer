@@ -897,6 +897,7 @@ async def get_strategy_scorecard(
                 metric_scores=s.metric_scores,
             )
             for s in scores
+            if s is not None  # OTA-636: None = structurally incompatible
         ],
     )
 

@@ -15,6 +15,12 @@ from datetime import datetime, date
 from typing import List, Optional
 
 from app.analysis.strategy_definitions import STRATEGIES
+from app.analysis.strategy_routing import (
+    get_spread_types_for_strategy,
+    get_option_types_for_strategy,
+    uses_vertical_engine,
+    uses_long_option_engine,
+)
 from app.analysis.vertical_engine import VerticalSpreadEngine, SpreadFilters
 from app.analysis.long_call_engine import LongCallEngine, LongCallFilters
 
@@ -143,7 +149,7 @@ def _score_credit_spread_strategy(
     underlying_price: float,
     user_config: dict,
     atm_iv: float,
-) -> StrategyScore:
+) -> Optional[StrategyScore]:
     """
     Score a credit spread strategy (steady-paycheck or weekly-grind).
 
@@ -162,9 +168,14 @@ def _score_credit_spread_strategy(
     dte_max = int(cfg.get("dte_max", strategy.dte_max))
     delta_max = float(cfg.get("delta_max", 0.30))
 
+    # Derive spread_types from strategy's compatible_structures (OTA-636)
+    spread_types = get_spread_types_for_strategy(strategy_key)
+    if not spread_types:
+        return None  # strategy has no vertical-compatible structures
+
     # Relaxed liquidity filters — we want candidates even in low-volume symbols
     filters = SpreadFilters(
-        spread_types=["bull_put", "bear_call"],
+        spread_types=spread_types,
         min_short_delta=0.05,
         max_short_delta=delta_max,
         min_volume=1,
@@ -317,7 +328,7 @@ def _score_long_option_strategy(
     underlying_price: float,
     user_config: dict,
     atm_iv: float,
-) -> StrategyScore:
+) -> Optional[StrategyScore]:
     """
     Score a long option strategy (trend-rider or lottery-ticket).
 
@@ -333,6 +344,11 @@ def _score_long_option_strategy(
     delta_min = float(cfg.get("delta_min", 0.05))
     delta_max = float(cfg.get("delta_max", 0.85))
 
+    # Derive option_types from strategy's compatible_structures (OTA-636)
+    option_types = get_option_types_for_strategy(strategy_key)
+    if not option_types:
+        return None  # strategy has no single-long-compatible structures
+
     filters = LongCallFilters(
         min_delta=delta_min,
         max_delta=delta_max,
@@ -342,7 +358,7 @@ def _score_long_option_strategy(
         min_volume=1,
         min_open_interest=10,
         max_bid_ask_spread_pct=0.50,
-        option_types=["call"],
+        option_types=option_types,
     )
     engine = LongCallEngine(filters=filters)
     result = engine.analyze(contracts, underlying_price)
@@ -524,10 +540,14 @@ async def score_all_strategies(
     symbol: str,
     provider,
     user_config: dict = None,
-) -> List[StrategyScore]:
+) -> tuple:
     """
-    Fetch options chain ONCE, run all four strategy scoring functions,
-    return normalized 0-100 scores for each strategy.
+    Fetch options chain ONCE, run all strategy scoring functions,
+    return (scores, underlying_price).
+
+    scores is a list of Optional[StrategyScore] — None entries mean the
+    strategy had no structurally compatible engine (OTA-636 null contract).
+    Callers must filter out None before ranking.
 
     CRITICAL: exactly one provider.get_chain() call regardless of strategy count.
     This is enforced by design — chain is fetched here and passed down.
@@ -584,20 +604,21 @@ async def score_all_strategies(
             return {}
         return user_config.get(key, {})
 
-    # Run all four scorers against the same contracts list
-    scores = [
-        _score_credit_spread_strategy(
-            "steady-paycheck", contracts, underlying_price, _cfg_for("steady-paycheck"), atm_iv
-        ),
-        _score_credit_spread_strategy(
-            "weekly-grind", contracts, underlying_price, _cfg_for("weekly-grind"), atm_iv
-        ),
-        _score_long_option_strategy(
-            "trend-rider", contracts, underlying_price, _cfg_for("trend-rider"), atm_iv
-        ),
-        _score_long_option_strategy(
-            "lottery-ticket", contracts, underlying_price, _cfg_for("lottery-ticket"), atm_iv
-        ),
-    ]
+    # Route each strategy to the correct scorer based on compatible_structures (OTA-636).
+    # Returns None for strategies with no compatible engine — callers must handle nulls.
+    scores: List[Optional[StrategyScore]] = []
+    for strategy_key, strategy in STRATEGIES.items():
+        cfg = _cfg_for(strategy_key)
+        if uses_vertical_engine(strategy_key):
+            result = _score_credit_spread_strategy(
+                strategy_key, contracts, underlying_price, cfg, atm_iv
+            )
+        elif uses_long_option_engine(strategy_key):
+            result = _score_long_option_strategy(
+                strategy_key, contracts, underlying_price, cfg, atm_iv
+            )
+        else:
+            result = None  # no compatible engine for this strategy
+        scores.append(result)
 
     return scores, underlying_price

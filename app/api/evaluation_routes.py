@@ -57,6 +57,7 @@ from app.analysis.scoring_factors.asymmetry import (
     asymmetry_ratio as _asymmetry_ratio,
 )
 from app.analysis.strategy_classifier import classify_best_strategy
+from app.analysis.strategy_routing import normalize_to_structure
 from app.analysis.strategy_scorer import StrategyScore
 
 router = APIRouter(prefix="/evaluate", tags=["Trade Evaluation"])
@@ -1001,7 +1002,14 @@ async def evaluate_structured(
         )
         for card in evaluations
     ]
-    _classification = classify_best_strategy(_clf_candidates, effective_dte=dte)
+    # OTA-636: resolve trade_structure for structural compatibility gating
+    _trade_structure = normalize_to_structure(
+        spread_type=(request.trade or {}).get("spread_type"),
+        option_type=(request.trade or {}).get("option_type"),
+    )
+    _classification = classify_best_strategy(
+        _clf_candidates, effective_dte=dte, trade_structure=_trade_structure,
+    )
     _strategy_fit = {
         "best_fit":    _classification.best_fit,
         "reason":      _classification.reason,

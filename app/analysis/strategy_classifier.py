@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 from app.analysis.strategy_scorer import StrategyScore
+from app.analysis.strategy_routing import is_compatible
 
 
 # ─── Entry eligibility DTE requirements ───────────────────────────────────────
@@ -103,13 +104,14 @@ def filter_strategies_by_effective_dte(
 def classify_best_strategy(
     candidates: List[StrategyScore],
     effective_dte: int,
+    trade_structure: Optional[str] = None,
 ) -> StrategyClassification:
     """
-    Filter candidates by effective DTE eligibility, then return the
-    highest-scoring viable strategy.
+    Filter candidates by structural compatibility (OTA-636) and effective DTE
+    eligibility, then return the highest-scoring viable strategy.
 
     Returns StrategyClassification with best_fit=None when no strategy
-    qualifies for the given effective DTE. Never raises.
+    qualifies. Never raises.
 
     Args:
         candidates: scored strategies (from score_all_strategies or a
@@ -117,17 +119,30 @@ def classify_best_strategy(
                     .label, and .score attributes.
         effective_dte: effective DTE of the trade — MUST be the post
                        gate-override value, not nominal DTE.
+        trade_structure: if provided, only strategies whose compatible_structures
+                         include this value are considered. None = skip structural filter.
     """
-    viable = filter_strategies_by_effective_dte(candidates, effective_dte)
+    # OTA-636: structural compatibility filter
+    if trade_structure:
+        viable = [
+            c for c in candidates
+            if is_compatible(c.strategy_key, trade_structure)
+        ]
+    else:
+        viable = list(candidates)
+
+    # DTE eligibility filter
+    viable = filter_strategies_by_effective_dte(viable, effective_dte)
 
     if not viable:
+        reason_parts = []
+        if trade_structure:
+            reason_parts.append(f"structure '{trade_structure}'")
+        reason_parts.append(f"effective DTE {effective_dte}")
         return StrategyClassification(
             best_fit=None,
             score=None,
-            reason=(
-                f"No viable strategy — effective DTE {effective_dte} "
-                f"insufficient for any profile"
-            ),
+            reason=f"No viable strategy for {' + '.join(reason_parts)}",
         )
 
     best = max(viable, key=lambda c: c.score)
