@@ -269,4 +269,5 @@ Default to **defer**. The cost of deferring something quick is low. The cost of 
 
 | Date | Ticket | Change |
 |---|---|---|
+| 2026-05-14 UTC | OTA-645 | Regression coverage for verdict/narrative consistency added: `tests/regression/test_verdict_narrative_consistency.py` (82 tests — structural incompatibility short-circuit, verdict score-band invariant, MMM Bear Put canary). |
 | 2026-05-06 UTC | TBD | Initial draft. Memorializes the bug-fix session workflow first run under OTA-556 on 2026-05-06. Adopts the rollup format that emerged organically from that first session: `mm-dd-yyyy` hyphenated date, single end-of-session commit, batch Subtask creation, deferred items captured in the parent ticket rollup. References CLAUDE.md for Jira mechanics, transition IDs, hierarchy rules, and SoT doc inventory rather than duplicating. |
