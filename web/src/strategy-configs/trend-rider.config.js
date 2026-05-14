@@ -18,7 +18,7 @@ const config = {
   // ── Strategy classification ────────────────────────────────────────────
   scorecardStrategy: true,
   enabled: true,
-  compatible_structures: ['long_call', 'long_put', 'bull_call_debit', 'bear_put_debit'],
+  compatible_structures: ['bull_call_debit', 'bear_put_debit'],
   dte_min: 14,
   dte_max: 60,
 

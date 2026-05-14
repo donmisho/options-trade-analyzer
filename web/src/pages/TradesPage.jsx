@@ -711,9 +711,13 @@ function normalizeEvalResponse(result, fallbackStrategyKey) {
     ? evals[0]
     : (result?.verdict ? result : null);
   if (!e) return null;
+  // OTA-637: Wire bestStrategy from strategy_fit.best_fit (classifier result)
+  const strategyFit = result?.strategy_fit;
+  const bestFit = strategyFit?.best_fit || e.strategy_key || fallbackStrategyKey || null;
   return {
     verdict: e.verdict,
-    bestStrategy: e.strategy || fallbackStrategyKey,
+    bestStrategy: bestFit,
+    bestFitReason: strategyFit?.reason || null,
     analysis: e.claude_read,
     score: e.score ?? null,
     keyLevelPrice: e.key_level?.price ?? null,

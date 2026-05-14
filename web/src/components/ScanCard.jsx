@@ -199,7 +199,7 @@ export default function ScanCard({
       )}
 
       {/* ── Strategy score bars ── */}
-      {strategies.map(s => {
+      {strategies.filter(s => (s.score ?? null) !== null).map(s => {
         const key = s.key ?? s.strategy_key;
         const meta = STRATEGY_META[key] || { color: '#8b949e' };
         const score = s.score ?? 0;

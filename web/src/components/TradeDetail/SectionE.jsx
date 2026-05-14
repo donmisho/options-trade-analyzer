@@ -33,26 +33,28 @@ function VerdictBadge({ verdict }) {
   );
 }
 
-function SummaryAdviceBadge({ bestStrategy }) {
-  if (!bestStrategy) return null;
-  const stratColor = getStrategyColor(bestStrategy);
-  const displayName = bestStrategy
-    .replace(/-/g, ' ')
-    .replace(/\b\w/g, c => c.toUpperCase());
+function SummaryAdviceBadge({ bestStrategy, bestFitReason }) {
+  const hasBestFit = bestStrategy != null;
+  const stratColor = hasBestFit ? getStrategyColor(bestStrategy) : 'var(--muted)';
+  const displayName = hasBestFit
+    ? bestStrategy.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+    : 'none';
   return (
-    <span style={{
-      background: 'rgba(255,255,255,0.06)',
-      border: '1px solid rgba(255,255,255,0.35)',
-      color: '#e6edf3',
-      fontSize: 9,
-      fontWeight: 700,
-      padding: '3px 10px',
-      borderRadius: 3,
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: 4,
-      fontFamily: 'monospace',
-    }}>
+    <span
+      title={!hasBestFit && bestFitReason ? bestFitReason : undefined}
+      style={{
+        background: 'rgba(255,255,255,0.06)',
+        border: '1px solid rgba(255,255,255,0.35)',
+        color: '#e6edf3',
+        fontSize: 9,
+        fontWeight: 700,
+        padding: '3px 10px',
+        borderRadius: 3,
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 4,
+        fontFamily: 'monospace',
+      }}>
       <span style={{ color: '#e6edf3' }}>Best fit:&nbsp;</span>
       <span style={{ color: stratColor }}>{displayName}</span>
     </span>
@@ -197,6 +199,7 @@ export default function SectionE({
   const {
     verdict,
     bestStrategy,
+    bestFitReason,
     analysis,
     keyLevelPrice,
     keyLevelExplanation,
@@ -236,7 +239,7 @@ export default function SectionE({
         </span>
 
         <VerdictBadge verdict={verdict} />
-        <SummaryAdviceBadge bestStrategy={bestStrategy} />
+        <SummaryAdviceBadge bestStrategy={bestStrategy} bestFitReason={bestFitReason} />
 
         {score != null && (
           <span style={{
