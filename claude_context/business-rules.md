@@ -1,6 +1,6 @@
 # business-rules.md
 
-**Last Updated:** 2026-05-12 UTC
+**Last Updated:** 2026-05-18 UTC
 **Instigating Ticket:** OTA-495 (v1 Create — Extract business rules from architecture-plan.md and CLAUDE.md)
 **Status:** Cost Guardrails section populated. Strategy Scoring → Strategy-Structure Compatibility subsection populated (canonical compatibility map established). Remaining subsections (Strategy Scoring formula and weights, Hard Gates, PoP Computation, Health Grade Computation, Position Lifecycle, Signal Freshness / TTL Windows, Display Formatting Rules, Validation Baseline) are placeholders. Full extraction of remaining content is the body of OTA-495 implementation work.
 
@@ -247,12 +247,17 @@ The UI implementation pattern that enforces the confirmation requirement (`Refre
 - *When the baseline can be updated: only after a Level 2 QA run with all tests passing (see CLAUDE.md Post-Build QA Gate)*
 - *Where snapshots live: `agents/qa-context/baseline-ux.json`, `baseline-data.json`*
 
+### QA Harness Assertions
+
+**D6 — Narrative drift (advisory).** Compares the `claude_read` text between two runs of the same trade using `SequenceMatcher.ratio()`. Threshold: ≥ 0.85. Pairs where either side is the fallback placeholder text `"Narrative unavailable this cycle"` are skipped and logged, not warned. Per OTA-656, the fallback-text filter prevents narrative-availability nondeterminism (a separate concern, tracked under OTA-507) from polluting the drift signal. The character-level metric remains a known limitation and is tracked separately for upgrade.
+
 ---
 
 ## Change Log
 
 | Date | Ticket | Change |
 |---|---|---|
+| 2026-05-18 UTC | OTA-656 | Validation Baseline: added D6 narrative drift assertion documentation with fallback-text filter rule. Pairs where either narrative matches the placeholder "Narrative unavailable this cycle" are skipped rather than warned. Threshold (0.85) unchanged. |
 | 2026-05-12 UTC | OTA-640 | Regime Classification subsection added: VIX x IVR 9-cell grid, 5-day trend classification rule, VIX 52w percentile computation, distance-from-50d SMA for SPY/QQQ. All rules deterministic (no Claude call). |
 | 2026-05-11 UTC | OTA-641 | Technicals Classification subsection added under Strategy Scoring: SMA alignment narrative rules (bullish/bearish/clustered/mixed), distance-from-50d label thresholds, computation inputs (SMA, ATR, source). |
 | 2026-05-11 UTC | OTA-635 | Strategy Scoring section: Strategy-Structure Compatibility subsection populated. Canonical compatibility map established: SP/WG → credit structures only (BULL_PUT_CREDIT, BEAR_CALL_CREDIT); TR → debit structures only (BULL_CALL_DEBIT, BEAR_PUT_DEBIT); LT → single-leg long options (SINGLE_LONG_CALL, SINGLE_LONG_PUT). Rationale documented: strategy is a mechanism (premium collection vs directional payoff), not a metrics bucket. Resolves the production contradiction where bear_put debit spreads were scored against SP and produced verdicts contradicting their own narrative. `best_fit` semantics under compatibility documented. Scoring formula and weights subsection remains a placeholder under OTA-495. |
