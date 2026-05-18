@@ -1,6 +1,6 @@
 # architecture-plan.md
 
-**Last Updated:** 2026-05-11 UTC
+**Last Updated:** 2026-05-18 UTC
 **Instigating Ticket:** OTA-535 (Architecture Optimization Framework v1 Epic; absorbs cancelled OTA-244, OTA-246, OTA-247, OTA-474, OTA-475, OTA-521; merges and supersedes project-hierarchy.md; incorporates findings from the 2026-04-30 GPT-5.4 and Opus-4.7 architectural reviews; adds OTAR roadmap reference per OTA-495; links to OTAR-24 and OTAR-27)
 
 ---
@@ -49,6 +49,31 @@ The architectural patterns and engines documented in this file map onto OTAR Cat
 - **Live Trading (Phase 5)** → OTAR-12 (Live Trade Execution)
 
 Historical delivery history (which features shipped when) lives in git history and Production Deployed Jira tickets. The Phase History section in §7 describes the system as it stands, not its evolution.
+
+---
+
+## ADR-1: Scoring Architecture — Deterministic Code with Agent-Driven Judgment
+
+**Decision Date:** 2026-05-18 UTC
+**Status:** Accepted
+
+**Decision:** Do not consolidate code-based scoring into an LLM agent. The 15 bright-line scoring sites (strategy scorer, vertical engine, long option engine, strategy routing, strategy classifier, hard gates, asymmetry penalty, verdict banding, Black-Scholes matrix, health grade, narrative grounding validator) remain code-based. The 3 judgment sites (Claude Deep Dive Evaluation, Position Monitor Agent, Insight Engine) remain in their existing SKILL.md-mediated agent paths. Consumer-wiring deduplication (frontend strategy-configs mirror, score color threshold unification) proceeds as follow-up housekeeping work under the Architecture Optimization Epic.
+
+**Scope:** No scoring sites move to agent. Existing agent-driven judgment paths (evaluation_routes.py Claude call, position_monitor.py, insight_engine.py) are unchanged. Frontend strategy metadata deduplication (web/src/strategy-configs/ → API-served config) and score color constant unification are the recommended follow-up.
+
+**Constraints:**
+- Scoring engines must remain deterministic to preserve D2/D3/D4 QA harness assertions at byte-equality tolerance.
+- SKILL.md files remain the source of truth for all Claude prompt content; skill edits follow the governance model in the discovery document (Don approval, harness validation gate, git-versioned content hash).
+- No page-load or timer-driven Claude calls for scoring (cost guardrail from business-rules.md applies).
+- Frontend strategy metadata must be served from the backend STRATEGIES dict, not maintained as a static copy, to eliminate the structural source of compatibility drift.
+
+**Supporting discovery:** The full 19-site catalog, latency analysis, cost projection, determinism analysis, reproducibility model, and governance model that informed this decision are archived at `docs/decisions/OTA-653-scoring-agent-discovery.md`.
+
+**Change Log**
+
+| Date | Story | Change |
+|---|---|---|
+| 2026-05-18 UTC | OTA-653 | Initial decision recorded. Scoring agent adoption declined: bright-line sites are deterministic and correct, judgment sites are already agent-driven, consolidation would degrade harness determinism assertions and increase cost and latency without quality benefit. |
 
 ---
 
@@ -893,6 +918,7 @@ The Architecture Optimization Epic (OTA-535) tracks the active drift items ident
 
 | Date | Ticket | Change |
 |---|---|---|
+| 2026-05-18 UTC | OTA-653 | Introduced ADR convention to this document. Added ADR-1: Scoring Architecture — Deterministic Code with Agent-Driven Judgment. Records the OTA-653 discovery outcome: scoring agent adoption declined; bright-line sites stay code, judgment sites are already agent-driven, consumer-wiring deduplication proceeds as housekeeping under OTA-535. |
 | 2026-05-11 UTC | OTA-635 | Strategy System section amended. Removed the "Strategy identity is not tied to credit vs debit structure" framing, which proved trading-incorrect in production: bear_put debit spreads were scored against Steady Paycheck (a credit-focused strategy) producing scores like 57.00 while the narrative simultaneously rejected them as structurally incompatible — generating contradictory verdicts (WAIT pill with PASS narrative). New framing: strategy and structure remain technically orthogonal axes, but each strategy declares an explicit `compatible_structures` map. The scorer gates at pipeline entry; incompatible pairs return null and never reach Foundry. Canonical compatibility map lives in `business-rules.md` → Strategy Scoring. This decision is also a prerequisite for the future strategy-taxonomy redesign (mechanics-based names cannot replace cute names while pretending strategies are structure-agnostic). |
 | 2026-05-06 UTC | OTA-601 | Added § Deployment Architecture subsection "Cold-start and runtime OS dependencies" recording the OTA-553 Option B decision: ODBC Driver 18 install in `app/main.py` lifespan is the intentional pattern. Documents the ~90s cold-start cost mitigated by Always On, the deferred Option A alternative (custom container image), and the explicit prohibition against retrying the user-supplied `startup.sh` approach (OTA-545 Phase 2, reverted 2026-05-02). |
 | 2026-05-06 03:00 UTC | OTA-554 | Corrected Pattern 7 and Deployment Architecture to reflect actual request routing: Cloudflare proxies custom domains (`oa-dev.tmtctech.ai`, `oa.tmtctech.ai`) directly to the App Service — the SWA is not in the request path. Added "Request Routing — Cloudflare to App Service Direct" subsection with verification commands and health endpoint inventory. Fixed SWA SKU (was "Standard", actually "Free") and URL in Azure Resources Summary. Marked SWA as orphan candidate for cleanup. Removed incorrect claims that the `static/` directory is absent from the deployment artifact and that the SPA fallback in `main.py` is dead code — the build workflow bundles the SPA into `static/` and the App Service actively serves it. |
