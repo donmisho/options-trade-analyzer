@@ -91,7 +91,7 @@ async def get_current_user(
 
     if settings.skip_auth:
         return {
-            "sub": "00000000-0000-0000-0000-000000000001",  # UUID-format so position routes accept it
+            "sub": "6232a881-23e9-4954-8ed0-6303ea7d188",  # Don's Entra oid — matches deployed BFF auth
             "username": "dev",
             "role": "admin",
             "mfa": True,

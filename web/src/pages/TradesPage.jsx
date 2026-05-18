@@ -1406,6 +1406,22 @@ export default function TradesPage() {
                       <span style={{ color: MUTED, fontSize: 10, marginLeft: 'auto' }}>
                         {group.trades.length} candidate{group.trades.length !== 1 ? 's' : ''}
                       </span>
+                      <button
+                        onClick={e => { e.stopPropagation(); setVertConfigOpen(true); }}
+                        style={{
+                          background: 'transparent',
+                          border: `1px solid ${BORDER}`,
+                          color: MUTED,
+                          padding: '4px 10px',
+                          borderRadius: 4,
+                          fontSize: 10,
+                          fontFamily: 'monospace',
+                          cursor: 'pointer',
+                          marginLeft: 8,
+                        }}
+                      >
+                        ⚙ Config
+                      </button>
                     </div>
                     {!isCollapsed && (
                       <div style={{ paddingTop: 4 }}>

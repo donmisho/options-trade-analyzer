@@ -66,7 +66,9 @@ async function apiFetch(path, options = {}) {
       const detail = errorBody.detail;
       const message = Array.isArray(detail)
         ? `Validation error: ${detail.map(d => d.msg || JSON.stringify(d)).join('; ')}`
-        : (detail || `API error: ${response.status}`);
+        : (typeof detail === 'object' && detail !== null)
+          ? (detail.detail || detail.message || JSON.stringify(detail))
+          : (detail || `API error: ${response.status}`);
       throw new Error(message);
     }
 
