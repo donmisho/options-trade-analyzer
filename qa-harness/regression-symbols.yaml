@@ -1,0 +1,15 @@
+symbols:
+  - ticker: VOO
+    role: full_bullish_stack
+    reproduces_qa: VOO scenario (Image 1/2/5 in QA samples)
+  - ticker: MMM
+    role: bearish_stack
+    reproduces_qa: OTA-646 canonical problem statement
+  - ticker: AAPL
+    role: mixed_signals_mid_vol
+  - ticker: TSM
+    role: stretched_uptrend
+    reproduces_qa: TSM SINGLE_LONG_PUT QA sample
+  - ticker: ROTATING
+    role: earnings_in_next_7_days
+    manual_selection_required: true

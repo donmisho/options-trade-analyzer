@@ -1,0 +1,30 @@
+# Canonical compatibility map — mirrored from app/analysis/strategy_definitions.py
+# The harness imports strategy_routing.py directly for assertions (Phase 3).
+# This YAML exists for human reference and offline validation only.
+
+strategies:
+  steady-paycheck:
+    compatible_structures:
+      - bull_put_credit
+      - bear_call_credit
+  weekly-grind:
+    compatible_structures:
+      - bull_put_credit
+      - bear_call_credit
+  trend-rider:
+    compatible_structures:
+      - bull_call_debit
+      - bear_put_debit
+  lottery-ticket:
+    compatible_structures:
+      - long_call
+      - long_put
+
+# Engine-level type to structure mapping
+engine_to_structure:
+  bull_call: bull_call_debit
+  bear_put: bear_put_debit
+  bull_put: bull_put_credit
+  bear_call: bear_call_credit
+  call: long_call
+  put: long_put
