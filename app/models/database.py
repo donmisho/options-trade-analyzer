@@ -24,10 +24,33 @@ class Base(DeclarativeBase):
     pass
 
 
+# ─── Symbol Reference (master symbol table) ─────────────────────────────────
+
+
+class SymbolReference(Base):
+    """
+    Master symbol table. Every symbol used across the application must exist
+    here. Child tables reference this via FK on the symbol column.
+
+    api_symbol stores the provider-specific form for symbols that differ
+    (e.g., canonical 'SPX' maps to api_symbol '$SPX' for Schwab).
+    """
+    __tablename__ = "symbol_reference"
+
+    symbol       = Column(String(20), primary_key=True)
+    name         = Column(String(400), nullable=False)
+    exchange     = Column(String(40), nullable=True)
+    sector       = Column(String(100), nullable=True)
+    sub_industry = Column(String(200), nullable=True)
+    asset_type   = Column(String(40), nullable=True)
+    last_updated = Column(DateTime, nullable=True)
+    api_symbol   = Column(String(20), nullable=True)
+
+
 class User(Base):
     """
     User accounts. Each person who uses the app gets a row here.
-    
+
     Roles:
       - admin: Full access, user management, MCP integration
       - trader: Can connect brokerage, trade with per-trade MFA
@@ -64,7 +87,7 @@ class User(Base):
 class UserConfig(Base):
     """
     Per-user analysis configuration: filters, scoring weights, risk settings.
-    
+
     This replaces the Setup sheet's B28-B80 cells from the Excel tool.
     Each user gets their own config with their own preferences.
     """
@@ -74,7 +97,7 @@ class UserConfig(Base):
     user_id = Column(String(36), ForeignKey("users.id"), unique=True, nullable=False)
 
     # --- Symbol / Defaults ---
-    default_symbol = Column(String(10), default="QQQ")
+    default_symbol = Column(String(20), default="QQQ")
 
     # --- DTE Filters ---
     min_dte = Column(Integer, default=14)
@@ -113,7 +136,7 @@ class UserConfig(Base):
 class TradeLog(Base):
     """
     Trade journal: every trade validated, previewed, or executed.
-    
+
     This is your trade history — what you traded, why, and how it turned out.
     Critical for learning and for the audit trail.
     """
@@ -123,7 +146,7 @@ class TradeLog(Base):
     user_id = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
 
     # What
-    symbol = Column(String(10), nullable=False)
+    symbol = Column(String(20), ForeignKey("symbol_reference.symbol"), nullable=False)
     strategy = Column(String(50), nullable=False)  # bull_call_spread, long_call, etc.
     legs = Column(JSON, nullable=False)  # [{strike, type, side, quantity}, ...]
     quantity = Column(Integer, default=1)
@@ -159,7 +182,7 @@ class TradeLog(Base):
 class AuditLog(Base):
     """
     Security audit trail: logins, config changes, trade actions, failures.
-    
+
     WHY: When real money is involved, you need to know exactly what happened
     and when. This table is append-only — rows are never updated or deleted.
     """
@@ -189,11 +212,8 @@ class AuditLog(Base):
 
 class UserWatchlist(Base):
     """
-    Per-user watchlist: the symbols shown in the sidebar.
-
-    WHY no FK on user_id: Allows SKIP_AUTH dev mode (user_id = "dev-user")
-    to work without needing a real user row in the users table.
-    The position column preserves sidebar order (0 = top).
+    Legacy per-user watchlist (superseded by watchlists + watchlist_symbols).
+    Scheduled for drop in Phase 4.
     """
     __tablename__ = "user_watchlist"
 
@@ -217,15 +237,13 @@ class UserFavorite(Base):
     trade_id is the same unique key the frontend builds (e.g. "SPY-call-450-460-2024-01-19").
     trade_data stores the full snapshot so the Favorites page can show the
     original pricing and score without re-fetching.
-
-    WHY no FK on user_id: Same reason as UserWatchlist — dev mode compatibility.
     """
     __tablename__ = "user_favorites"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(String(36), nullable=False, index=True)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     trade_id = Column(String(300), nullable=False)   # Unique trade key from frontend
-    symbol = Column(String(10), nullable=False)
+    symbol = Column(String(20), ForeignKey("symbol_reference.symbol"), nullable=False)
     label = Column(String(300), nullable=True)        # Display name
     strategy = Column(String(50), nullable=True)      # bull_call_spread, long_call, etc.
     trade_data = Column(JSON, nullable=False)          # Full trade snapshot
@@ -256,7 +274,7 @@ class AgentRunLog(Base):
     agent_name = Column(String(100), nullable=False)
     stage = Column(String(50), nullable=False)       # triage | deep_dive | followup
     trade_key = Column(String(255), nullable=True)   # "{symbol}:{spread}:{expiration}"
-    symbol = Column(String(20), nullable=True)
+    symbol = Column(String(20), ForeignKey("symbol_reference.symbol", ondelete="SET NULL"), nullable=True)
     user_id = Column(String(36), ForeignKey("users.id"), nullable=True)
 
     # Full inputs sent to the model
@@ -309,7 +327,7 @@ class TradeRecommendation(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(String(36), ForeignKey("users.id"), nullable=True, index=True)
     trade_key = Column(String(255), nullable=False, index=True)
-    symbol = Column(String(20), nullable=False)
+    symbol = Column(String(20), ForeignKey("symbol_reference.symbol"), nullable=False)
     spread_label = Column(String(100), nullable=False)
     expiration = Column(String(20), nullable=False)
 
@@ -347,7 +365,7 @@ class SymbolQuote(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
-    symbol = Column(String(10), nullable=False)
+    symbol = Column(String(20), ForeignKey("symbol_reference.symbol"), nullable=False)
 
     price = Column(Float, nullable=True)
     bid = Column(Float, nullable=True)
@@ -377,7 +395,7 @@ class OptionChainSnapshot(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
-    symbol = Column(String(10), nullable=False)
+    symbol = Column(String(20), ForeignKey("symbol_reference.symbol"), nullable=False)
     underlying_price = Column(Float, nullable=True)
     provider = Column(String(50), nullable=True)
     contract_count = Column(Integer, nullable=True)  # len(contracts) for quick filtering
@@ -406,7 +424,7 @@ class AnalysisRun(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
-    symbol = Column(String(10), nullable=False)
+    symbol = Column(String(20), ForeignKey("symbol_reference.symbol"), nullable=False)
     analysis_type = Column(String(20), nullable=False)  # "verticals" | "naked"
     underlying_price = Column(Float, nullable=True)
     provider = Column(String(50), nullable=True)
@@ -453,7 +471,7 @@ class AnalyzedTrade(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     run_id = Column(Integer, ForeignKey("analysis_runs.id"), nullable=False, index=True)
     user_id = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
-    symbol = Column(String(10), nullable=False)
+    symbol = Column(String(20), ForeignKey("symbol_reference.symbol"), nullable=False)
     analysis_type = Column(String(20), nullable=False)  # "vertical" | "naked"
 
     # Trade identity
@@ -525,7 +543,7 @@ class SymbolContext(Base):
     __tablename__ = "symbol_context"
 
     context_id  = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    symbol      = Column(String(20), nullable=False, index=True)
+    symbol      = Column(String(20), ForeignKey("symbol_reference.symbol"), nullable=False, index=True)
     source_id   = Column(String(50), nullable=False)   # e.g. "schwab_quotes"
     signal_type = Column(String(50), nullable=False)   # PRICE | SENTIMENT | FUNDAMENTAL | TECHNICAL | NEWS
     signal_value = Column(Text, nullable=False)        # JSON blob — shape defined by source
@@ -572,6 +590,8 @@ class Insight(Base):
     created_at          = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     dismissed_at        = Column(DateTime)
     acted_on_at         = Column(DateTime)
+    user_id             = Column(String(36), ForeignKey("users.id"), nullable=True)
+    source_position_id  = Column(String(36), ForeignKey("positions.position_id", ondelete="SET NULL"), nullable=True)
 
     __table_args__ = (
         Index("ix_insights_domain_entity", "domain", "entity_id", "status"),
@@ -594,7 +614,7 @@ class ValidationAssessment(Base):
     assessment_id   = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     assessment_date = Column(DateTime, nullable=False)
     jira_ticket     = Column(String(20), nullable=False)
-    ticker          = Column(String(20), nullable=False)
+    symbol          = Column(String(20), ForeignKey("symbol_reference.symbol"), nullable=False)
     tab             = Column(String(20), nullable=False)   # 'VERTICALS' | 'PUTS_AND_CALLS'
     strike          = Column(String(20), nullable=False)
     expiration      = Column(String(20), nullable=False)
@@ -606,7 +626,7 @@ class ValidationAssessment(Base):
 
     __table_args__ = (
         Index("ix_validation_assessments_ticket", "jira_ticket"),
-        Index("ix_validation_assessments_ticker", "ticker"),
+        Index("ix_validation_assessments_symbol", "symbol"),
     )
 
 
@@ -628,8 +648,8 @@ class Position(Base):
     __tablename__ = "positions"
 
     position_id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id = Column(String(36), nullable=False)  # WHY no FK: SKIP_AUTH dev mode compat (same as UserWatchlist)
-    symbol = Column(String(20), nullable=False)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False)
+    symbol = Column(String(20), ForeignKey("symbol_reference.symbol"), nullable=False)
     strategy_key = Column(String(50), nullable=False)
     trade_structure = Column(Text, nullable=False)           # JSON
     source = Column(String(10), nullable=False)              # PAPER | LIVE
@@ -713,7 +733,7 @@ class DashboardLayout(Base):
     __tablename__ = "dashboard_layouts"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(String(36), nullable=False, unique=True, index=True)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
     layout_json = Column(Text, nullable=False)
     widgets_json = Column(Text, nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
@@ -782,14 +802,12 @@ class NamedWatchlist(Base):
 
     One watchlist per user is marked is_default=True and is created lazily
     on first access. The default watchlist cannot be deleted.
-
-    WHY no FK on user_id: Same SKIP_AUTH dev mode compat reason as UserWatchlist.
     """
     __tablename__ = "watchlists"
 
     id         = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     name       = Column(String(100), nullable=False)
-    user_id    = Column(String(255), nullable=False)
+    user_id    = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     is_default = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
@@ -820,7 +838,7 @@ class WatchlistEntry(Base):
         ForeignKey("watchlists.id", ondelete="CASCADE"),
         nullable=False,
     )
-    symbol   = Column(String(20), nullable=False)
+    symbol   = Column(String(20), ForeignKey("symbol_reference.symbol"), nullable=False)
     added_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     watchlist = relationship("NamedWatchlist", back_populates="symbols")
@@ -849,7 +867,7 @@ class UserSession(Base):
 
     id                      = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     session_id              = Column(String(128), unique=True, nullable=False)
-    user_id                 = Column(String(255), nullable=False)
+    user_id                 = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     provider                = Column(String(50), nullable=False, default="entra")
     email                   = Column(String(255))
     display_name            = Column(String(255))
@@ -920,8 +938,8 @@ class TradeCandidate(Base):
     __tablename__ = "trade_candidates"
 
     trade_key           = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id             = Column(String(36), nullable=False)
-    symbol              = Column(String(20), nullable=False)
+    user_id             = Column(String(36), ForeignKey("users.id"), nullable=False)
+    symbol              = Column(String(20), ForeignKey("symbol_reference.symbol"), nullable=False)
     structure           = Column(Text, nullable=False)
     leg_count           = Column(Integer, nullable=False)
     legs                = Column(Text)          # JSON per-leg detail
