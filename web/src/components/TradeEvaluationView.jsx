@@ -183,7 +183,7 @@ export default function TradeEvaluationView({ spread }) {
         risk_free_rate:   riskFreeRate,
       }),
       getProbabilityMatrix({
-        symbol:        spread.symbol || '',
+        symbol:        (spread.symbol || '').toUpperCase(),
         current_price: underlyingPrice,
         iv,
         dte:           spreadDte,

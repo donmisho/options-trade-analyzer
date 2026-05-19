@@ -564,7 +564,7 @@ async def evaluate_structured(
             _gate_ev = None
 
     _gate_ctx = GateTradeContext(
-        symbol=request.symbol,
+        symbol=canonicalize(request.symbol),
         entry_date=date.today(),
         expiry_date=_expiry_date,
         dte=dte,
@@ -748,7 +748,7 @@ async def evaluate_structured(
     )
 
     market_snapshot = {
-        "symbol": request.symbol,
+        "symbol": canonicalize(request.symbol),
         "underlying_price": request.current_price,
         "iv": request.iv,
         **request.sma_alignment,
