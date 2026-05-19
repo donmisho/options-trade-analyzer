@@ -23,6 +23,7 @@ from app.analysis.strategy_routing import (
 )
 from app.analysis.vertical_engine import VerticalSpreadEngine, SpreadFilters
 from app.analysis.long_call_engine import LongCallEngine, LongCallFilters
+from app.services.symbol_cache import to_api_symbol_cached
 
 log = logging.getLogger(__name__)
 
@@ -559,8 +560,9 @@ async def score_all_strategies(
     """
     # Single chain fetch — wide range to cover all strategies (lottery 1d to trend-rider 65d)
     try:
+        api_sym = to_api_symbol_cached(symbol, "schwab")
         chain_data = await provider.get_chain(
-            symbol=symbol.upper(),
+            symbol=api_sym,
             min_dte=0,
             max_dte=70,
             strike_range_pct=20.0,

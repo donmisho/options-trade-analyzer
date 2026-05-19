@@ -180,6 +180,11 @@ async def lifespan(app: FastAPI):
     logger.info("Database initialized")
     _log_startup_timing("database_connected", _app_startup_start)
 
+    # 1b. Populate api_symbol cache (OTA-672) — must follow init_db()
+    from app.services.symbol_cache import start_symbol_cache_refresh_task
+    symbol_cache_task = await start_symbol_cache_refresh_task()
+    _log_startup_timing("symbol_cache_loaded", _app_startup_start)
+
     # 2. Initialize secrets manager (Key Vault or .env fallback)
     secrets_manager = SecretsManager(vault_url=settings.azure_keyvault_url)
 
@@ -391,6 +396,15 @@ async def lifespan(app: FastAPI):
     if scheduler is not None:
         scheduler.shutdown(wait=True)
         logger.info("Shutdown: APScheduler stopped (in-progress jobs completed)")
+
+    # 1.5. Symbol cache refresh task (OTA-672)
+    if not symbol_cache_task.done():
+        symbol_cache_task.cancel()
+        try:
+            await asyncio.wait_for(symbol_cache_task, timeout=2.0)
+        except (asyncio.CancelledError, asyncio.TimeoutError):
+            pass
+    logger.info("Shutdown: Symbol cache refresh task stopped")
 
     # 2. Token refresh background task — cancel with grace period
     if not token_refresh_task.done():

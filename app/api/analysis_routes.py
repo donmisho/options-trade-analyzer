@@ -42,6 +42,7 @@ from app.analysis.long_call_engine import (
 from app.analysis.directional_engine import DirectionalEngine, Thesis
 from app.analysis.strategy_scorer import score_all_strategies, compute_sma_signal
 from app.services.symbol_normalization import canonicalize
+from app.services.symbol_cache import to_api_symbol_cached
 from app.analysis.strategy_definitions import STRATEGIES
 from app.analysis.black_scholes import compute_probability_matrix
 from app.models.schemas import (
@@ -184,8 +185,9 @@ async def _fetch_chain(
     provider = registry.get_market_data(settings.default_market_data_provider, user_id=user.get("sub"))
 
     try:
+        api_sym = to_api_symbol_cached(symbol, "schwab")
         chain_data = await provider.get_chain(
-            symbol=symbol.upper(),
+            symbol=api_sym,
             min_dte=min_dte,
             max_dte=max_dte,
             strike_range_pct=strike_range_pct,
@@ -854,6 +856,7 @@ async def get_strategy_scorecard(
     IMPORTANT: exactly one chain fetch happens regardless of how many strategies are scored.
     """
     sym = canonicalize(req.symbol)
+    api_sym = to_api_symbol_cached(sym, "schwab")
     registry = _get_registry()
     provider = registry.get_market_data(settings.default_market_data_provider, user_id=user.get("sub"))
 
@@ -864,15 +867,15 @@ async def get_strategy_scorecard(
     if has_price_history:
         results = await asyncio.gather(
             scores_task,
-            provider.get_quote(sym),
-            provider.get_price_history(sym),
+            provider.get_quote(api_sym),
+            provider.get_price_history(api_sym),
             return_exceptions=True,
         )
         scores_result, quote_result, history_result = results
     else:
         results = await asyncio.gather(
             scores_task,
-            provider.get_quote(sym),
+            provider.get_quote(api_sym),
             return_exceptions=True,
         )
         scores_result, quote_result = results

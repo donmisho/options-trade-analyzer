@@ -81,6 +81,11 @@ class SchwabMarketData(MarketDataProvider):
 
         Returns normalized Quote dict matching the same shape as Tradier's.
 
+        Expects the api_symbol form (e.g. ``$SPX`` for indexes), not the
+        canonical form.  Callers must translate via
+        ``to_api_symbol_cached(symbol, "schwab")`` before invoking.
+        See architecture-plan.md Pattern 1.
+
         WHY fields=quote,fundamental,reference: Schwab's quote endpoint can
         return different "root nodes" of data. We need quote data (prices,
         volume), fundamental data (avg volume for rel-volume), and reference
@@ -139,6 +144,11 @@ class SchwabMarketData(MarketDataProvider):
 
         Fetches the option chain and normalizes Schwab's nested structure
         into the flat list of contracts that the analysis engines expect.
+
+        Expects the api_symbol form (e.g. ``$SPX`` for indexes), not the
+        canonical form.  Callers must translate via
+        ``to_api_symbol_cached(symbol, "schwab")`` before invoking.
+        See architecture-plan.md Pattern 1.
 
         SCHWAB'S RESPONSE STRUCTURE:
           {

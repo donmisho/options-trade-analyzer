@@ -25,6 +25,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from app.providers.base import ContextSource
+from app.services.symbol_cache import to_api_symbol_cached
 
 if TYPE_CHECKING:
     from app.providers.schwab import SchwabMarketData
@@ -56,8 +57,14 @@ class SchwabPriceContextSource(ContextSource):
         return 300  # 5 minutes — enough freshness for post-close monitoring
 
     async def fetch(self, symbol: str) -> dict:
-        """Delegate to the existing Schwab adapter — returns normalized Quote dict."""
-        return await self._provider.get_quote(symbol)
+        """Delegate to the existing Schwab adapter — returns normalized Quote dict.
+
+        Expects canonical symbol; translates to api_symbol form internally
+        via ``to_api_symbol_cached(symbol, "schwab")``.
+        See architecture-plan.md Pattern 1.
+        """
+        api_sym = to_api_symbol_cached(symbol, "schwab")
+        return await self._provider.get_quote(api_sym)
 
     def normalize(self, raw: dict) -> dict:
         """

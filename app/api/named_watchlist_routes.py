@@ -27,6 +27,7 @@ from sqlalchemy import select, delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require_read
+from app.services.symbol_cache import to_api_symbol_cached
 from app.models.session import get_db
 from app.models.database import NamedWatchlist, WatchlistEntry, Position
 from app.models.schemas import (
@@ -256,7 +257,8 @@ async def add_symbol(
                 settings.default_market_data_provider,
                 user_id=user.get("sub"),
             )
-            quote = await provider.get_quote(symbol)
+            api_sym = to_api_symbol_cached(symbol, "schwab")
+            quote = await provider.get_quote(api_sym)
             if not quote or not quote.get("price"):
                 raise HTTPException(status_code=400, detail=f"Symbol not found: {symbol}")
         except HTTPException:

@@ -35,6 +35,7 @@ from mcp.server.auth.settings import AuthSettings
 from mcp.server.auth.middleware.auth_context import get_access_token
 
 from app.core.config import settings
+from app.services.symbol_cache import to_api_symbol_cached
 from app.core.secrets import SecretsManager
 from app.models.database import AgentRunLog, User
 from app.models.session import async_session
@@ -344,7 +345,8 @@ async def get_quote(ticker: str) -> dict:
 
     try:
         provider = _get_provider()
-        result = await provider.get_quote(ticker)
+        api_ticker = to_api_symbol_cached(ticker, "schwab")
+        result = await provider.get_quote(api_ticker)
 
         latency_ms = int((time.monotonic() - t0) * 1000)
 
@@ -453,8 +455,9 @@ async def get_option_chain(
             adapter_option_type = option_type
 
         provider = _get_provider()
+        api_ticker = to_api_symbol_cached(ticker, "schwab")
         chain = await provider.get_chain(
-            symbol=ticker,
+            symbol=api_ticker,
             min_dte=dte,
             max_dte=dte,
             strike_range_pct=adapter_strike_pct,
@@ -606,8 +609,9 @@ async def get_smas(ticker: str, periods: list[int] | None = None) -> dict:
             }
 
         # Fetch price history and current quote
-        candles = await provider.get_price_history(ticker, num_periods=request_months)
-        quote = await provider.get_quote(ticker)
+        api_ticker = to_api_symbol_cached(ticker, "schwab")
+        candles = await provider.get_price_history(api_ticker, num_periods=request_months)
+        quote = await provider.get_quote(api_ticker)
 
         current_price = quote.get("price", 0)
         if not current_price or current_price <= 0:

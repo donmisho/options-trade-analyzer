@@ -1,6 +1,6 @@
 # architecture-plan.md
 
-**Last Updated:** 2026-05-11 UTC
+**Last Updated:** 2026-05-19 UTC
 **Instigating Ticket:** OTA-535 (Architecture Optimization Framework v1 Epic; absorbs cancelled OTA-244, OTA-246, OTA-247, OTA-474, OTA-475, OTA-521; merges and supersedes project-hierarchy.md; incorporates findings from the 2026-04-30 GPT-5.4 and Opus-4.7 architectural reviews; adds OTAR roadmap reference per OTA-495; links to OTAR-24 and OTAR-27)
 
 ---
@@ -60,7 +60,7 @@ These seven patterns are permanent foundations. Every new feature must align wit
 
 ### Pattern 1 — Provider Adapter Pattern
 
-All external sources — market data, AI models, brokerages, signal sources — implement a standard interface. Adding a new source requires writing one adapter class. Engines, routes, and the frontend never change. Each provider owns its own credential lifecycle (OAuth, federation, API key, service account); the calling code calls `provider.fetch()` and never knows how the credential was obtained. Provider lifecycle states (Active / Inactive / Deprecated / Removed) are first-class — see §3 for the full state machine.
+All external sources — market data, AI models, brokerages, signal sources — implement a standard interface. Adding a new source requires writing one adapter class. Engines, routes, and the frontend never change. Each provider owns its own credential lifecycle (OAuth, federation, API key, service account); the calling code calls `provider.fetch()` and never knows how the credential was obtained. Provider lifecycle states (Active / Inactive / Deprecated / Removed) are first-class — see §3 for the full state machine. Providers consume `api_symbol`-form strings; canonical-to-API translation is the caller's responsibility. See `app/services/symbol_cache.to_api_symbol_cached` for the sync cached helper (OTA-672).
 
 ### Pattern 2 — Skill-Driven Prompt Architecture
 
@@ -893,6 +893,7 @@ The Architecture Optimization Epic (OTA-535) tracks the active drift items ident
 
 | Date | Ticket | Change |
 |---|---|---|
+| 2026-05-19 UTC | OTA-672 | Pattern 1: added contract note — providers consume api_symbol-form strings; canonical-to-API translation is the caller's responsibility via `to_api_symbol_cached`. |
 | 2026-05-11 UTC | OTA-635 | Strategy System section amended. Removed the "Strategy identity is not tied to credit vs debit structure" framing, which proved trading-incorrect in production: bear_put debit spreads were scored against Steady Paycheck (a credit-focused strategy) producing scores like 57.00 while the narrative simultaneously rejected them as structurally incompatible — generating contradictory verdicts (WAIT pill with PASS narrative). New framing: strategy and structure remain technically orthogonal axes, but each strategy declares an explicit `compatible_structures` map. The scorer gates at pipeline entry; incompatible pairs return null and never reach Foundry. Canonical compatibility map lives in `business-rules.md` → Strategy Scoring. This decision is also a prerequisite for the future strategy-taxonomy redesign (mechanics-based names cannot replace cute names while pretending strategies are structure-agnostic). |
 | 2026-05-06 UTC | OTA-601 | Added § Deployment Architecture subsection "Cold-start and runtime OS dependencies" recording the OTA-553 Option B decision: ODBC Driver 18 install in `app/main.py` lifespan is the intentional pattern. Documents the ~90s cold-start cost mitigated by Always On, the deferred Option A alternative (custom container image), and the explicit prohibition against retrying the user-supplied `startup.sh` approach (OTA-545 Phase 2, reverted 2026-05-02). |
 | 2026-05-06 03:00 UTC | OTA-554 | Corrected Pattern 7 and Deployment Architecture to reflect actual request routing: Cloudflare proxies custom domains (`oa-dev.tmtctech.ai`, `oa.tmtctech.ai`) directly to the App Service — the SWA is not in the request path. Added "Request Routing — Cloudflare to App Service Direct" subsection with verification commands and health endpoint inventory. Fixed SWA SKU (was "Standard", actually "Free") and URL in Azure Resources Summary. Marked SWA as orphan candidate for cleanup. Removed incorrect claims that the `static/` directory is absent from the deployment artifact and that the SPA fallback in `main.py` is dead code — the build workflow bundles the SPA into `static/` and the App Service actively serves it. |

@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.database import OptionsChainSnapshot
 from app.services.symbol_normalization import canonicalize
+from app.services.symbol_cache import to_api_symbol_cached
 
 log = logging.getLogger(__name__)
 
@@ -44,7 +45,8 @@ async def collect_chain_snapshot(symbol: str, db_session: AsyncSession, factory)
         provider = factory.get_market_data(settings.default_market_data_provider)
 
     try:
-        chain_data = await provider.get_chain(symbol, min_dte=0, max_dte=70, strike_range_pct=20)
+        api_sym = to_api_symbol_cached(symbol, "schwab")
+        chain_data = await provider.get_chain(api_sym, min_dte=0, max_dte=70, strike_range_pct=20)
     except Exception as exc:
         log.error("chain_collection: provider error for %s: %s", symbol, exc)
         return {"symbol": symbol, "snapshot_date": str(today), "status": "error", "error": str(exc)}

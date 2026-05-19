@@ -17,6 +17,7 @@ from app.models.database import SymbolQuote
 from app.auth.dependencies import require_read, require_write
 from app.providers.factory import ProviderRegistry
 from app.core.config import settings
+from app.services.symbol_cache import to_api_symbol_cached
 
 router = APIRouter(prefix="/market", tags=["Market Data"])
 log = logging.getLogger(__name__)
@@ -68,7 +69,8 @@ async def get_quote(
 
     try:
         provider = _get_provider(registry, user_id)
-        data = await provider.get_quote(sym)
+        api_sym = to_api_symbol_cached(sym, "schwab")
+        data = await provider.get_quote(api_sym)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Provider error: {str(e)}")
 
@@ -129,8 +131,9 @@ async def get_option_chain(
     provider = _get_provider(registry, user.get("sub"))
 
     try:
+        api_sym = to_api_symbol_cached(symbol, "schwab")
         data = await provider.get_chain(
-            symbol=symbol.upper(),
+            symbol=api_sym,
             min_dte=min_dte,
             max_dte=max_dte,
             strike_range_pct=strike_range_pct,
@@ -255,7 +258,8 @@ async def get_market_overview(
     quotes = {}
     for sym in symbols:
         try:
-            quotes[sym] = await provider.get_quote(sym)
+            api_sym = to_api_symbol_cached(sym, "schwab")
+            quotes[sym] = await provider.get_quote(api_sym)
         except Exception:
             quotes[sym] = None
     return {"quotes": quotes, "fetched_at": datetime.now(timezone.utc).isoformat()}

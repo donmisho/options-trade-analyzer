@@ -35,6 +35,7 @@ from app.models.session import get_db
 from app.models.database import Position, PositionAssessment, TradeCandidate
 from app.analysis.strategy_routing import get_compatible_strategies, normalize_to_structure
 from app.services.symbol_normalization import canonicalize
+from app.services.symbol_cache import to_api_symbol_cached
 from app.models.schemas import (
     FollowPositionRequest,
     TakePositionRequest,
@@ -944,7 +945,8 @@ async def update_health_grades(
     quotes: dict[str, float] = {}
     for sym in symbols:
         try:
-            q = await provider.get_quote(sym)
+            api_sym = to_api_symbol_cached(sym, "schwab")
+            q = await provider.get_quote(api_sym)
             quotes[sym] = q.get("price")
         except Exception as exc:
             log.warning(f"update_health_grades: quote error for {sym}: {exc}")
@@ -1027,7 +1029,8 @@ async def get_current_prices(
 
         try:
             # Fetch underlying quote
-            quote = await provider.get_quote(pos.symbol)
+            api_sym = to_api_symbol_cached(pos.symbol, "schwab")
+            quote = await provider.get_quote(api_sym)
             underlying_price = quote.get("price") if isinstance(quote, dict) else getattr(quote, "price", None)
 
             # Determine if this is a spread or single leg
@@ -1039,7 +1042,7 @@ async def get_current_prices(
                 # Spread: fetch option chain and compute net mid
                 expiration = trade_struct.get("expiration") or (legs[0].get("expiration") if legs else None)
                 try:
-                    chain_resp = await provider.get_option_chain(pos.symbol, expiration=expiration)
+                    chain_resp = await provider.get_option_chain(api_sym, expiration=expiration)
                     contracts = (
                         chain_resp.get("contracts", []) if isinstance(chain_resp, dict)
                         else getattr(chain_resp, "contracts", [])
@@ -1072,7 +1075,7 @@ async def get_current_prices(
                 leg = legs[0]
                 expiration = leg.get("expiration") or trade_struct.get("expiration")
                 try:
-                    chain_resp = await provider.get_option_chain(pos.symbol, expiration=expiration)
+                    chain_resp = await provider.get_option_chain(api_sym, expiration=expiration)
                     contracts = (
                         chain_resp.get("contracts", []) if isinstance(chain_resp, dict)
                         else getattr(chain_resp, "contracts", [])
@@ -1252,7 +1255,8 @@ async def refresh_position(
     iv_approx: Optional[float] = None
 
     try:
-        quote = await provider.get_quote(pos.symbol)
+        api_sym = to_api_symbol_cached(pos.symbol, "schwab")
+        quote = await provider.get_quote(api_sym)
         underlying_price = quote.get("price") if isinstance(quote, dict) else getattr(quote, "price", None)
         iv_approx = quote.get("implied_volatility") if isinstance(quote, dict) else getattr(quote, "implied_volatility", None)
     except Exception as e:
@@ -1262,7 +1266,7 @@ async def refresh_position(
     expiration = trade_struct.get("expiration") or (legs[0].get("expiration") if legs else None)
     if legs and expiration:
         try:
-            chain_resp = await provider.get_option_chain(pos.symbol, expiration=expiration)
+            chain_resp = await provider.get_option_chain(api_sym, expiration=expiration)
             contracts = (
                 chain_resp.get("contracts", []) if isinstance(chain_resp, dict)
                 else getattr(chain_resp, "contracts", [])

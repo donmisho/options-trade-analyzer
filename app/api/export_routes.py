@@ -24,6 +24,7 @@ from sqlalchemy import select, and_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require_read
+from app.services.symbol_cache import to_api_symbol_cached
 from app.core.config import settings
 from app.models.session import get_db
 from app.models.database import Position, PositionAssessment, OptionChainSnapshot
@@ -798,8 +799,9 @@ async def _build_options_chain_section_position(
     lines.extend(["", "### Current chain at export"])
     try:
         provider = _get_provider()
+        api_sym = to_api_symbol_cached(symbol, "schwab")
         chain_data = await provider.get_chain(
-            symbol=symbol.upper(),
+            symbol=api_sym,
             min_dte=0,
             max_dte=70,
             strike_range_pct=20.0,
