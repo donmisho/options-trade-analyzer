@@ -72,7 +72,9 @@ class InsightEngine:
         entity_label: str,
         deviation: DeviationResult,
         context_signals: List[dict],
+        user_id: str,
         agent_run_id: Optional[str] = None,
+        source_position_id: Optional[str] = None,
     ) -> Insight:
         """
         Craft an insight for a detected deviation and persist it.
@@ -152,6 +154,9 @@ class InsightEngine:
             existing.recommended_actions = json.dumps(recommended_actions)
             existing.source_signals = json.dumps(context_signals)
             existing.agent_run_id = run_id
+            existing.user_id = user_id
+            if source_position_id is not None:
+                existing.source_position_id = source_position_id
             insight = existing
             logger.info(
                 f"InsightEngine: updated existing insight {existing.insight_id} "
@@ -175,6 +180,8 @@ class InsightEngine:
                 status="ACTIVE",
                 source_signals=json.dumps(context_signals),
                 agent_run_id=run_id,
+                user_id=user_id,
+                source_position_id=source_position_id,
                 created_at=now,
             )
             db.add(insight)
@@ -189,7 +196,7 @@ class InsightEngine:
             agent_name="insight-engine",
             stage="generate",
             symbol=entity_id,
-            user_id=None,
+            user_id=user_id,
             prompt_system=system_prompt,
             prompt_user=user_message,
             prompt_version=self._skill.prompt_version,

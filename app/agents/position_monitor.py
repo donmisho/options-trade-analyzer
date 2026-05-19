@@ -376,7 +376,9 @@ class PositionMonitorAgent:
                     entity_label=entity_label,
                     deviation=deviation,
                     context_signals=context_signals,
+                    user_id=pos.user_id,
                     agent_run_id=run_id,
+                    source_position_id=pos.position_id,
                 )
             except Exception as e:
                 logger.error(
