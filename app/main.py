@@ -175,9 +175,14 @@ async def lifespan(app: FastAPI):
     # 0. Install ODBC Driver 18 if on Azure App Service Linux (needed for Azure SQL)
     _install_odbc_if_needed()
 
-    # 1. Initialize database tables
-    await init_db()
-    logger.info("Database initialized")
+    # 1. Initialize database tables (with timeout — Alembic can hang on F1 tier)
+    try:
+        await asyncio.wait_for(init_db(), timeout=30.0)
+        logger.info("Database initialized")
+    except asyncio.TimeoutError:
+        logger.warning("init_db() timed out after 30s — skipping migrations (DB likely already at head)")
+    except Exception as exc:
+        logger.warning("init_db() failed: %s — app starting without migration check", exc)
     _log_startup_timing("database_connected", _app_startup_start)
 
     # 1b. Populate api_symbol cache (OTA-672) — must follow init_db()
