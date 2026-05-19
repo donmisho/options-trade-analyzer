@@ -80,7 +80,10 @@ async def start_symbol_cache_refresh_task() -> asyncio.Task:
     Call this from the lifespan startup, after init_db().
     Returns the background Task (caller should cancel it on shutdown).
     """
-    await _refresh_api_symbol_cache()
+    try:
+        await _refresh_api_symbol_cache()
+    except Exception as exc:
+        logger.warning("symbol_cache: initial load failed (cache empty, passthrough mode): %s", exc)
 
     async def _loop():
         while True:
