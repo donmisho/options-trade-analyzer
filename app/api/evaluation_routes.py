@@ -52,6 +52,7 @@ from app.analysis.black_scholes import compute_probability_matrix
 from app.models.session import async_session
 from app.validators.narrative_grounding import EvaluationFields, validate_narrative
 from app.analysis.hard_gates import evaluate_hard_gates, GateTradeContext
+from app.services.symbol_normalization import canonicalize
 from app.analysis.scoring_factors.asymmetry import (
     asymmetry_penalty as _asymmetry_penalty,
     asymmetry_ratio as _asymmetry_ratio,
@@ -676,7 +677,7 @@ async def evaluate_structured(
             run_id=run_id,
             agent_name="claude-trade-agent",
             stage="auto_pass",
-            symbol=request.symbol,
+            symbol=canonicalize(request.symbol),
             user_id=user_id,
             prompt_system="AUTO_PASS",
             prompt_user="AUTO_PASS",
@@ -1024,7 +1025,7 @@ async def evaluate_structured(
         run_id=run_id,
         agent_name="claude-trade-agent",
         stage="structured_eval",
-        symbol=request.symbol,
+        symbol=canonicalize(request.symbol),
         user_id=user_id,
         prompt_system=system_prompt,
         prompt_user=user_message,

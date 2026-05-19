@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.database import OptionsChainSnapshot
+from app.services.symbol_normalization import canonicalize
 
 log = logging.getLogger(__name__)
 
@@ -53,7 +54,7 @@ async def collect_chain_snapshot(symbol: str, db_session: AsyncSession, factory)
     dtes = [c.get("dte", 0) for c in contracts if c.get("dte") is not None]
 
     snapshot = OptionsChainSnapshot(
-        symbol=symbol,
+        symbol=canonicalize(symbol),
         snapshot_date=today,
         captured_at=datetime.now(timezone.utc),
         underlying_price=underlying_price,

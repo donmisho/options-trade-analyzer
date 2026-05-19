@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.database import SymbolContext
 from app.providers.base import ContextSignal, ContextSource
+from app.services.symbol_normalization import canonicalize
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +73,7 @@ class ContextStore:
         now = datetime.now(timezone.utc)
         expires_at = now + timedelta(seconds=signal.ttl_seconds)
         row = SymbolContext(
-            symbol=signal.symbol.upper(),
+            symbol=canonicalize(signal.symbol),
             source_id=signal.source_id,
             signal_type=signal.signal_type,
             signal_value=json.dumps(signal.value),

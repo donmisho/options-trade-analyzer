@@ -41,6 +41,7 @@ from app.analysis.long_call_engine import (
 )
 from app.analysis.directional_engine import DirectionalEngine, Thesis
 from app.analysis.strategy_scorer import score_all_strategies, compute_sma_signal
+from app.services.symbol_normalization import canonicalize
 from app.analysis.strategy_definitions import STRATEGIES
 from app.analysis.black_scholes import compute_probability_matrix
 from app.models.schemas import (
@@ -505,7 +506,7 @@ async def analyze_verticals(
     Every run persists the chain snapshot, run parameters, and all scored trades.
     """
     user_id = user.get("sub")
-    sym = req.symbol.upper()
+    sym = canonicalize(req.symbol)
 
     # OTA-559: Compute DTE envelope from enabled strategies
     _strategy_bands = _resolve_strategy_bands(
@@ -681,7 +682,7 @@ async def analyze_long_calls(
     Every run persists the chain snapshot, run parameters, and all scored trades.
     """
     user_id = user.get("sub")
-    sym = req.symbol.upper()
+    sym = canonicalize(req.symbol)
 
     chain_type = None
     if len(req.option_types) == 1:
@@ -821,7 +822,7 @@ async def analyze_directional(
     )
 
     thesis = Thesis(
-        symbol=req.symbol.upper(),
+        symbol=canonicalize(req.symbol),
         direction=req.direction,
         target_price=req.target_price,
         timeframe_days=req.timeframe_days,
@@ -852,7 +853,7 @@ async def get_strategy_scorecard(
 
     IMPORTANT: exactly one chain fetch happens regardless of how many strategies are scored.
     """
-    sym = req.symbol.upper()
+    sym = canonicalize(req.symbol)
     registry = _get_registry()
     provider = registry.get_market_data(settings.default_market_data_provider, user_id=user.get("sub"))
 
@@ -960,7 +961,7 @@ async def get_probability_matrix(
         raise HTTPException(status_code=422, detail=f"Matrix computation failed: {e}")
 
     return ProbabilityMatrixResponse(
-        symbol=req.symbol.upper(),
+        symbol=canonicalize(req.symbol),
         current_price=req.current_price,
         iv=req.iv,
         dte=req.dte,

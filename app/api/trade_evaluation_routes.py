@@ -47,6 +47,7 @@ from app.models.database import AgentRunLog, TradeRecommendation
 from app.ai.base import AIAdapter
 from app.skills.skill_loader import get_skill
 from app.agents.telemetry import invoke_with_tracing
+from app.services.symbol_normalization import canonicalize
 
 router = APIRouter(prefix="/agent", tags=["Claude Trade Agent"])
 log = logging.getLogger(__name__)
@@ -257,7 +258,7 @@ async def triage(
         agent_name="claude-trade-agent",
         stage="triage",
         trade_key=None,
-        symbol=request.symbol,
+        symbol=canonicalize(request.symbol),
         user_id=user_id,
         prompt_system=system_prompt,
         prompt_user=user_message,
@@ -494,7 +495,7 @@ async def deep_dive(
         db.add(TradeRecommendation(
             user_id=user_id,
             trade_key=trade_key,
-            symbol=request.symbol,
+            symbol=canonicalize(request.symbol),
             spread_label=request.spread_label,
             expiration=request.expiration,
             verdict=verdict,
@@ -513,7 +514,7 @@ async def deep_dive(
         agent_name="claude-trade-agent",
         stage="deep_dive",
         trade_key=trade_key,
-        symbol=request.symbol,
+        symbol=canonicalize(request.symbol),
         user_id=user_id,
         prompt_system=system_prompt,
         prompt_user=user_message,
@@ -613,7 +614,7 @@ async def followup(
         agent_name="claude-trade-agent",
         stage="followup",
         trade_key=request.trade_key,
-        symbol=request.symbol,
+        symbol=canonicalize(request.symbol),
         user_id=user_id,
         prompt_system=system_prompt,
         prompt_user=user_message,

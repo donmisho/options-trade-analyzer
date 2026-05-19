@@ -34,6 +34,7 @@ from app.auth.dependencies import require_read, require_write
 from app.models.session import get_db
 from app.models.database import Position, PositionAssessment, TradeCandidate
 from app.analysis.strategy_routing import get_compatible_strategies, normalize_to_structure
+from app.services.symbol_normalization import canonicalize
 from app.models.schemas import (
     FollowPositionRequest,
     TakePositionRequest,
@@ -663,7 +664,7 @@ async def follow_position(
 
     pos = Position(
         user_id=_user_id,
-        symbol=req.symbol.upper(),
+        symbol=canonicalize(req.symbol),
         strategy_key=req.strategy_key,
         trade_structure=json.dumps(_ts),
         source="PAPER",
@@ -749,7 +750,7 @@ async def take_position(
 
     pos = Position(
         user_id=_user_id,
-        symbol=req.symbol.upper(),
+        symbol=canonicalize(req.symbol),
         strategy_key=req.strategy_key,
         trade_structure=json.dumps(_ts),
         source="LIVE",
