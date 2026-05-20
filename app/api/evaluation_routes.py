@@ -727,7 +727,9 @@ async def evaluate_structured(
             created_at=datetime.now(timezone.utc),
         ))
         # OTA-624: Update trade candidate with auto-pass evaluation
-        await _update_trade_candidate_evaluation(db, request.trade_key, user_id or "", auto_pass_cards)
+        # Use user.get("sub") directly — user_id may be None (skip_auth AgentRunLog FK safety)
+        # but TradeCandidate was created with the real sub from analysis_routes.
+        await _update_trade_candidate_evaluation(db, request.trade_key, user.get("sub", ""), auto_pass_cards)
         await db.commit()
 
         return StructuredEvaluationResponse(
@@ -1085,7 +1087,8 @@ async def evaluate_structured(
         created_at=datetime.now(timezone.utc),
     ))
     # OTA-624: Update trade candidate with Claude evaluation
-    await _update_trade_candidate_evaluation(db, request.trade_key, user_id or "", evaluations)
+    # Use user.get("sub") directly — same reasoning as auto-pass path above.
+    await _update_trade_candidate_evaluation(db, request.trade_key, user.get("sub", ""), evaluations)
     await db.commit()
 
     return StructuredEvaluationResponse(

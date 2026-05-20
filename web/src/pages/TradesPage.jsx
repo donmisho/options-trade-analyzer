@@ -1165,8 +1165,19 @@ export default function TradesPage() {
       try {
         const chosenStrategy = selectedStrategy || strategyKeys[0];
         // OTA-624: Send trade_key when available — server reads persisted snapshot
+        // OTA-677: Also send evaluation data as fallback in case claude_evaluation
+        // was not persisted on the TradeCandidate row.
+        const evalRaw = evaluations[rowId]?._raw;
         const payload = trade.trade_key
-          ? { trade_key: trade.trade_key, strategy_key: chosenStrategy }
+          ? {
+              trade_key: trade.trade_key,
+              strategy_key: chosenStrategy,
+              claude_score: evaluations[rowId]?.score ?? null,
+              claude_verdict: evalRaw ?? null,
+              claude_exit_levels: evalRaw
+                ? { take_profit: evalRaw.take_profit, warning_level: evalRaw.warning_level, hard_stop: evalRaw.hard_stop }
+                : null,
+            }
           : {
               symbol,
               strategy_key: chosenStrategy,
@@ -1190,8 +1201,18 @@ export default function TradesPage() {
       try {
         const chosenStrategy = selectedStrategy || strategyKeys[0];
         // OTA-624: Send trade_key when available
+        // OTA-677: Also send evaluation data as fallback (same as handleFollow)
+        const takeEvalRaw = evaluations[rowId]?._raw;
         const payload = trade.trade_key
-          ? { trade_key: trade.trade_key, strategy_key: chosenStrategy }
+          ? {
+              trade_key: trade.trade_key,
+              strategy_key: chosenStrategy,
+              claude_score: evaluations[rowId]?.score ?? null,
+              claude_verdict: takeEvalRaw ?? null,
+              claude_exit_levels: takeEvalRaw
+                ? { take_profit: takeEvalRaw.take_profit, warning_level: takeEvalRaw.warning_level, hard_stop: takeEvalRaw.hard_stop }
+                : null,
+            }
           : {
               symbol,
               strategy_key: chosenStrategy,
