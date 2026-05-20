@@ -91,7 +91,7 @@ async def get_current_user(
 
     if settings.skip_auth:
         return {
-            "sub": "6232a881-23e9-4954-8ed0-6303ea7d188",  # Don's Entra oid — matches deployed BFF auth
+            "sub": "6232a881-23e9-4954-8ed0-6303ea7fd188",  # Don's Entra oid — matches deployed BFF auth
             "username": "dev",
             "role": "admin",
             "mfa": True,
