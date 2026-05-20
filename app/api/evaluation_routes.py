@@ -535,6 +535,39 @@ async def evaluate_structured(
     # Capture nominal DTE before any gate override (OTA-506)
     nominal_dte = dte
 
+    # ─── OTA-676: Compute EV for naked single-leg long options ────────────────
+    # NakedOptionEngine does not emit total_ev. Compute it server-side so
+    # NegativeEVGate can evaluate instead of receiving None (fail-soft pass).
+    if request.trade:
+        _opt_type = request.trade.get("option_type")
+        _has_spread = (
+            request.trade.get("long_strike") is not None
+            and request.trade.get("short_strike") is not None
+        )
+        if _opt_type and not _has_spread and request.trade.get("total_ev") is None:
+            _strike = request.trade.get("strike")
+            _entry = request.trade.get("mid_price") or request.trade.get("entry_price")
+            if _strike is not None and _entry is not None:
+                try:
+                    _computed_ev = _compute_naked_long_option_ev(
+                        option_type=_opt_type,
+                        strike=float(_strike),
+                        underlying_price=request.current_price,
+                        iv=request.iv,
+                        days_to_exp=dte,
+                        entry_price=float(_entry),
+                    )
+                    request.trade["total_ev"] = _computed_ev
+                    logger.info(
+                        f"OTA-676: computed naked option EV={_computed_ev:.2f} "
+                        f"for {request.symbol} {_opt_type} {_strike}"
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        f"OTA-676: failed to compute naked option EV for "
+                        f"{request.symbol}: {exc}"
+                    )
+
     # ─── Hard Gate Evaluation (OTA-502+) ─────────────────────────────────────
     # Runs BEFORE all inline gates. Registered gates are evaluated in order;
     # first triggered gate forces PASS. Non-triggered gates may inject
@@ -1089,6 +1122,53 @@ async def ai_health():
     if not ok:
         raise HTTPException(status_code=503, detail="Evaluation AI provider unavailable")
     return {"status": "ok", "provider": "foundry"}
+
+
+# ─── OTA-676: Naked Single-Leg Long Option EV ────────────────────────────────
+
+def _compute_naked_long_option_ev(
+    option_type: str,
+    strike: float,
+    underlying_price: float,
+    iv: float,
+    days_to_exp: int,
+    entry_price: float,
+    risk_free_rate: float = 0.05,
+) -> float:
+    """
+    Compute total expected value in dollars per contract for a naked single-leg
+    long option using the canonical lognormal probability matrix.
+
+    Uses compute_probability_matrix() from app/analysis/black_scholes.py with a
+    wide price range (±50%) to capture the full distribution including the modal
+    outcome (option expiring worthless for OTM trades).
+
+    Returns EV in dollars per contract (same units as _build_exit_rows total_ev).
+    """
+    from app.analysis.black_scholes import compute_probability_matrix
+
+    pm = compute_probability_matrix(
+        current_price=underlying_price,
+        iv=iv,
+        dte=max(days_to_exp, 1),
+        risk_free_rate=risk_free_rate,
+        price_range_pct=0.50,
+        price_step=5.0,
+    )
+
+    expiry_probs = pm.matrix[-1]
+    is_put = option_type.upper() in ("PUT", "P")
+
+    total_ev = 0.0
+    for price, prob in zip(pm.price_levels, expiry_probs):
+        if is_put:
+            intrinsic = max(0.0, strike - price)
+        else:
+            intrinsic = max(0.0, price - strike)
+        pnl = (intrinsic - entry_price) * 100
+        total_ev += pnl * prob
+
+    return round(total_ev, 4)
 
 
 # ─── OTA-292: Exit Scenario Engine ───────────────────────────────────────────

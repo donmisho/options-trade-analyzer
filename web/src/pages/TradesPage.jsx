@@ -307,6 +307,32 @@ function buildLongOptionExitScenarios(option, underlying) {
     if (mmpIdx >= 0) scenarios[mmpIdx].exitSignal = 'MONITOR PROFIT';
   }
 
+  // ── OTA-676: EXPIRES WORTHLESS row for OTM long options ─────────────────
+  const isOTM = isCall ? underlying < strike : underlying > strike;
+  if (isOTM) {
+    const zExpire = (strike - underlying) / sigma;
+    const ewProb = isCall
+      ? normCdf(zExpire) * 100
+      : (1 - normCdf(zExpire)) * 100;
+    const ewPrice = isCall ? strike - 0.01 : strike + 0.01;
+    const ewPnl = -premium * 100;
+    const ewRow = {
+      price: ewPrice,
+      spreadValue: 0,
+      pnl: ewPnl,
+      pnlPct: maxLoss > 0 ? (ewPnl / maxLoss) * 100 : -100,
+      probability: ewProb,
+      expectedValue: ewPnl * ewProb / 100,
+      exitSignal: 'EXPIRES WORTHLESS',
+    };
+    const insertIdx = scenarios.findIndex(r => r.price > ewPrice);
+    if (insertIdx >= 0) {
+      scenarios.splice(insertIdx, 0, ewRow);
+    } else {
+      scenarios.push(ewRow);
+    }
+  }
+
   return { scenarios, totalEV };
 }
 
