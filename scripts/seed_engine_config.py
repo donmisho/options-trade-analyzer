@@ -242,7 +242,7 @@ def parse_workbook(xlsx_path: Path):
 
             # For lookup-based thresholds (width tier compliance)
             if low_val == "lookup" or high_val == "lookup":
-                params["lookup_set"] = "spread_width_tiers"
+                params["lookup_set"] = "width_configuration"
 
             # Determine stop_if_fail and score_penalty
             if rule_type == "Hard Gate":
@@ -277,6 +277,27 @@ def parse_workbook(xlsx_path: Path):
                 "enabled": True,
             }
             junctions.append(junction)
+
+    # ── Post-process: enrich ETF adjustment rule's referenced_named_values ──
+    # OTA-690: is_etf is a required input (producer = options-chain adapter,
+    # not yet built). The ETF rule also references the width_configuration
+    # lookup for ETF-specific spread width adjustments.
+    for r in rules:
+        if r["rule_key"].startswith("adj_") and "etf" in r["rule_key"]:
+            r["referenced_named_values"] = [
+                {
+                    "name": "is_etf",
+                    "producer": "options-chain-adapter",
+                    "status": "requirement-only",
+                    "note": "Producer not yet built — later feature. Records the input requirement.",
+                },
+                {
+                    "name": "width_configuration",
+                    "type": "lookup_ref",
+                    "lookup_set": "width_configuration",
+                    "note": "Width tiers may vary for ETF underlyings; runtime resolves via lookup.",
+                },
+            ]
 
     # ── Strategies ───────────────────────────────────────────────────────
     # Verdict bands (rows 62-64)
@@ -387,12 +408,13 @@ def parse_workbook(xlsx_path: Path):
 
     # Width tiers from Width Configuration sheet (OTA)
     ws2 = wb["Width Configuration"]
+    tier_count = 0
     for i, row in enumerate(ws2.iter_rows(min_row=3, max_row=7, values_only=True), 1):
         if row[0] is None:
             continue
         lookups.append({
             "owner_app_id": "OTA",
-            "lookup_set": "spread_width_tiers",
+            "lookup_set": "width_configuration",
             "lookup_key": f"tier_{i}",
             "payload": {
                 "price_min": row[0],
@@ -403,6 +425,26 @@ def parse_workbook(xlsx_path: Path):
             },
             "sort_order": i,
         })
+        tier_count = i
+
+    # Per-security override shape (empty — overrides added later via admin UI)
+    lookups.append({
+        "owner_app_id": "OTA",
+        "lookup_set": "width_configuration",
+        "lookup_key": "_override_schema",
+        "payload": {
+            "type": "per_security_override",
+            "fields": {
+                "ticker": {"type": "string", "required": True},
+                "width_min": {"type": "number", "required": True},
+                "width_max": {"type": "number", "required": True},
+                "width_increment": {"type": "number", "required": True},
+                "note": {"type": "string", "required": False},
+            },
+            "description": "Per-security width overrides. Ticker match → use override; else fall back to price-tier default.",
+        },
+        "sort_order": tier_count + 1,
+    })
 
     # Scan parameters per strategy (OTA)
     for strat_key, params in scan_params_by_strategy.items():
@@ -519,6 +561,370 @@ def _extract_penalty(condition) -> float | None:
     if m:
         return float(m.group(1))
     return None
+
+
+# ── Compound rule decomposition (OTA-683) ───────────────────────────────
+#
+# Post-parse step: identifies compound rules in the workbook-parsed output
+# and replaces each with its stated number of atomic rules (2/2/2/4/2/2 = 14).
+# BETWEEN → two comparison rows. No runtime BETWEEN operator is implemented.
+# Earnings 4-route tree mirrors earnings_gate.py route semantics exactly.
+# Graduated cushion penalty mirrors strategy_scorer.py _cushion_penalty bands.
+
+
+def _find_compound(rules, *keywords, phase=None, exclude=None):
+    """Find a rule whose rule_key or intent contains all given keywords."""
+    for r in rules:
+        key = r["rule_key"].lower()
+        intent = (r.get("intent") or "").lower()
+        text = f"{key} {intent}"
+        if all(kw.lower() in text for kw in keywords):
+            if phase and r["phase"] != phase:
+                continue
+            if exclude and exclude.lower() in key:
+                continue
+            return r
+    return None
+
+
+def _make_atomic(base_rule, *, rule_key, intent, condition_expr=None,
+                 formula_ref=None, ref_values=None, param_schema=None):
+    """Create an atomic rule dict derived from a compound rule's metadata."""
+    return {
+        "owner_app_id": base_rule["owner_app_id"],
+        "rule_key": rule_key,
+        "phase": base_rule["phase"],
+        "tier": base_rule["tier"],
+        "intent": intent,
+        "condition_expression": condition_expr,
+        "formula_ref": formula_ref,
+        "referenced_named_values": ref_values if ref_values is not None else base_rule.get("referenced_named_values", []),
+        "parameter_schema": param_schema,
+        "null_semantics": base_rule.get("null_semantics"),
+        "enabled": True,
+    }
+
+
+# ── Individual decomposers ──────────────────────────────────────────────
+# Each returns (old_rule_key, [(atomic_rule_dict, junction_overrides)]) or None.
+# junction_overrides is a dict of fields to override on each replicated junction,
+# or None to inherit the compound's junction properties unchanged.
+
+
+def _decompose_chart_state(rules):
+    """1. Chart state confirms direction → 2 atomic rules."""
+    compound = _find_compound(rules, "chart_state", "direction", phase="gate")
+    if not compound:
+        compound = _find_compound(rules, "chart_state", "confirms", phase="gate")
+    if not compound:
+        return None
+
+    atoms = [
+        (_make_atomic(
+            compound,
+            rule_key="chart_state_valid_alignment",
+            intent="Chart state must be Bullish Alignment or Bearish Alignment",
+            condition_expr="chart_state IN ('Bullish Alignment', 'Bearish Alignment')",
+            ref_values=["chart_state"],
+        ), None),
+        (_make_atomic(
+            compound,
+            rule_key="chart_state_matches_trade_direction",
+            intent="Chart state alignment must match trade direction (bullish for bull trades, bearish for bear trades)",
+            formula_ref="formula:chart_state_matches_direction",
+            ref_values=["chart_state", "trade_direction"],
+        ), None),
+    ]
+    return compound["rule_key"], atoms
+
+
+def _decompose_stock_extended(rules):
+    """2. Stock extended in trade direction → 2 atomic rules."""
+    compound = _find_compound(rules, "stock", "extended", phase="adjustment")
+    if not compound:
+        return None
+
+    atoms = [
+        (_make_atomic(
+            compound,
+            rule_key="adj_stock_extended_magnitude",
+            intent="Stock price extended > 5% from 50-day SMA",
+            condition_expr="abs(spot - SMA_50) / SMA_50 > 0.05",
+            ref_values=["stock_price", "sma_50"],
+        ), None),
+        (_make_atomic(
+            compound,
+            rule_key="adj_stock_extended_direction_match",
+            intent="Extension direction matches trade direction (above SMA for bull, below for bear)",
+            formula_ref="formula:extension_matches_trade_direction",
+            ref_values=["stock_price", "sma_50", "trade_direction"],
+        ), None),
+    ]
+    return compound["rule_key"], atoms
+
+
+def _decompose_cushion_atr(rules):
+    """3. Cushion barely above ATR floor (BETWEEN) → 2 comparison rules."""
+    compound = _find_compound(rules, "cushion", "atr", phase="adjustment")
+    if not compound:
+        return None
+
+    atoms = [
+        (_make_atomic(
+            compound,
+            rule_key="adj_cushion_vs_atr_gte_floor",
+            intent="Cushion-to-ATR ratio at or above lower bound (>= 1.0)",
+            condition_expr="cushion_vs_ATR >= 1.0",
+            ref_values=["cushion_vs_atr"],
+            param_schema={"threshold": {"type": "number", "default": 1.0}},
+        ), None),
+        (_make_atomic(
+            compound,
+            rule_key="adj_cushion_vs_atr_lte_ceiling",
+            intent="Cushion-to-ATR ratio at or below upper bound (<= 1.5)",
+            condition_expr="cushion_vs_ATR <= 1.5",
+            ref_values=["cushion_vs_atr"],
+            param_schema={"threshold": {"type": "number", "default": 1.5}},
+        ), None),
+    ]
+    return compound["rule_key"], atoms
+
+
+def _decompose_earnings(rules):
+    """4. Earnings gate 4-route tree → 4 atomic rules per earnings_gate.py.
+
+    Route semantics mirror EarningsInWindowGate exactly:
+      Route 1: dte_before <= 7, dte_after < 14  → PASS (stop)
+      Route 2: dte_before <= 7, dte_after >= 14  → WAIT_FOR_EARNINGS (stop)
+      Route 3: dte_before >= 8, dte_after >= 21  → WAIT_FOR_EARNINGS (stop)
+      Route 4: dte_before >= 8, dte_after < 21   → score with 15-pt penalty (non-stop)
+    """
+    compound = _find_compound(rules, "earnings", phase="gate")
+    if not compound:
+        return None
+
+    atoms = [
+        (_make_atomic(
+            compound,
+            rule_key="earnings_route1_no_viable_window",
+            intent="Route 1: No viable window — dte_before <= 7 and dte_after < 14. Verdict: PASS.",
+            formula_ref="formula:earnings_route1_no_viable_window",
+            ref_values=["next_earnings_date", "entry_date", "expiry_date",
+                        "dte_before_earnings", "dte_after_earnings"],
+        ), {"stop_if_fail": True, "score_penalty": None}),
+
+        (_make_atomic(
+            compound,
+            rule_key="earnings_route2_wait_post_window",
+            intent="Route 2: Pre-earnings window too short, strong post-earnings window — dte_before <= 7 and dte_after >= 14. Verdict: WAIT_FOR_EARNINGS.",
+            formula_ref="formula:earnings_route2_wait_post_window",
+            ref_values=["next_earnings_date", "entry_date", "expiry_date",
+                        "dte_before_earnings", "dte_after_earnings"],
+        ), {"stop_if_fail": True, "score_penalty": None}),
+
+        (_make_atomic(
+            compound,
+            rule_key="earnings_route3_post_entry_better",
+            intent="Route 3: Post-earnings entry likely better — dte_before >= 8 and dte_after >= 21. Verdict: WAIT_FOR_EARNINGS.",
+            formula_ref="formula:earnings_route3_post_entry_better",
+            ref_values=["next_earnings_date", "entry_date", "expiry_date",
+                        "dte_before_earnings", "dte_after_earnings"],
+        ), {"stop_if_fail": True, "score_penalty": None}),
+
+        (_make_atomic(
+            compound,
+            rule_key="earnings_route4_pre_momentum_play",
+            intent="Route 4: Pre-earnings momentum play — dte_before >= 8 and dte_after < 21. Score normally with 15-point penalty, effective DTE = dte_before - 1.",
+            formula_ref="formula:earnings_route4_pre_momentum_play",
+            ref_values=["next_earnings_date", "entry_date", "expiry_date",
+                        "dte_before_earnings", "dte_after_earnings"],
+        ), {"stop_if_fail": False, "score_penalty": -15.0}),
+    ]
+    return compound["rule_key"], atoms
+
+
+def _decompose_credit_debit(rules):
+    """5. Credit/debit quality gate → 2 atomic rules.
+
+    Thresholds from evaluation_routes.py lines 626-663:
+      Credit: credit_pct_of_width >= 0.30 (fail below)
+      Debit:  debit_pct_of_width  <= 0.40 (fail above)
+    """
+    compound = _find_compound(rules, "credit", "debit", phase="gate")
+    if not compound:
+        compound = _find_compound(rules, "credit", "width", phase="gate")
+    if not compound:
+        compound = _find_compound(rules, "spread", "quality", phase="gate")
+    if not compound:
+        return None
+
+    atoms = [
+        (_make_atomic(
+            compound,
+            rule_key="credit_pct_of_width_floor",
+            intent="Credit spread: credit received must be >= 30% of spread width",
+            condition_expr="credit_pct_of_width >= 0.30",
+            ref_values=["credit_width_pct", "spread_width", "net_credit"],
+            param_schema={"threshold": {"type": "number", "default": 0.30}},
+        ), {"stop_if_fail": True, "score_penalty": None}),
+        (_make_atomic(
+            compound,
+            rule_key="debit_pct_of_width_ceiling",
+            intent="Debit spread: debit paid must be <= 40% of spread width",
+            condition_expr="debit_pct_of_width <= 0.40",
+            ref_values=["debit_width_pct", "spread_width", "net_debit"],
+            param_schema={"threshold": {"type": "number", "default": 0.40}},
+        ), {"stop_if_fail": True, "score_penalty": None}),
+    ]
+    return compound["rule_key"], atoms
+
+
+def _decompose_cushion_penalty(rules):
+    """6. Cushion penalty graduated bands → 2 ordered adjustment rules.
+
+    Bands from strategy_scorer.py _cushion_penalty (lines 138-142):
+      Band 1: cushion_pct < 1.0%  → -20 points
+      Band 2: cushion_pct in [1.0%, 2.0%) → -10 points
+
+    This compound exists in code (strategy_scorer.py) but may not be in the
+    workbook as a single row. If no compound is found, the atomic rules are
+    injected directly using a synthetic base template.
+    """
+    compound = _find_compound(rules, "cushion", phase="adjustment", exclude="atr")
+    if not compound:
+        compound = _find_compound(rules, "cushion", "penalty", phase="adjustment")
+
+    # Synthetic base when the workbook has no matching compound row
+    base = compound or {
+        "owner_app_id": "OTA",
+        "phase": "adjustment",
+        "tier": "DERIVED",
+        "null_semantics": None,
+    }
+
+    atoms = [
+        (_make_atomic(
+            base,
+            rule_key="adj_cushion_penalty_severe",
+            intent="Cushion < 1.0% of underlying price — severe proximity to short strike (-20 points)",
+            condition_expr="cushion_pct < 1.0",
+            ref_values=["stock_price", "short_strike"],
+        ), {"score_penalty": -20.0}),
+        (_make_atomic(
+            base,
+            rule_key="adj_cushion_penalty_moderate",
+            intent="Cushion >= 1.0% and < 2.0% of underlying price — moderate proximity to short strike (-10 points)",
+            formula_ref="formula:cushion_penalty_moderate",
+            ref_values=["stock_price", "short_strike"],
+        ), {"score_penalty": -10.0}),
+    ]
+
+    if compound:
+        return compound["rule_key"], atoms
+    # No compound to remove — return sentinel key that won't match any existing rule
+    return "_synthetic_cushion_penalty_", atoms
+
+
+# ── Orchestrator ────────────────────────────────────────────────────────
+
+def decompose_compound_rules(rules, junctions):
+    """
+    OTA-683: Decompose compound rules into atomic engine_rules rows.
+
+    Six compounds are decomposed into 14 total atomic rules (2+2+2+4+2+2).
+    BETWEEN-style conditions become two comparison rows; the runtime BETWEEN
+    operator is deferred to the engine-core expression library.
+    Earnings routes mirror earnings_gate.py; stop_if_fail is intrinsic per route.
+    Graduated cushion penalty mirrors strategy_scorer.py _cushion_penalty bands.
+    """
+    decomposers = [
+        ("chart_state_confirms_direction",    _decompose_chart_state),
+        ("stock_extended_in_trade_direction",  _decompose_stock_extended),
+        ("cushion_barely_above_atr_floor",     _decompose_cushion_atr),
+        ("earnings_4_route_tree",              _decompose_earnings),
+        ("credit_debit_quality_gate",          _decompose_credit_debit),
+        ("cushion_penalty_graduated_bands",    _decompose_cushion_penalty),
+    ]
+
+    removals = set()
+    additions = []       # (old_key, [(rule, junction_overrides)])
+    injections = []      # [(rule, junction_overrides)] — new rules with no compound to replace
+
+    for label, decomposer in decomposers:
+        result = decomposer(rules)
+        if result is None:
+            log.warning(f"  Compound '{label}' not found in parsed rules — skipping")
+            continue
+        old_key, atoms = result
+        atom_keys = [a[0]["rule_key"] for a in atoms]
+        if old_key.startswith("_synthetic_"):
+            # No compound to remove; rules are injected fresh
+            injections.extend(atoms)
+            log.info(f"  Injected (no workbook compound): {atom_keys}")
+        else:
+            removals.add(old_key)
+            additions.append((old_key, atoms))
+            log.info(f"  Decomposed '{old_key}' → {atom_keys}")
+
+    # Rebuild rules: remove compounds, add atomics + injections
+    new_rules = [r for r in rules if r["rule_key"] not in removals]
+    for _, atoms in additions:
+        for rule, _ in atoms:
+            new_rules.append(rule)
+    for rule, _ in injections:
+        new_rules.append(rule)
+
+    # Rebuild junctions: replace compound refs with per-atomic refs
+    new_junctions = []
+    for j in junctions:
+        if j["rule_key"] not in removals:
+            new_junctions.append(j)
+            continue
+        for old_key, atoms in additions:
+            if j["rule_key"] == old_key:
+                for rule, overrides in atoms:
+                    new_j = dict(j)
+                    new_j["rule_key"] = rule["rule_key"]
+                    if overrides:
+                        new_j.update(overrides)
+                    new_junctions.append(new_j)
+                break
+
+    # Create junctions for injected rules (no compound junction to expand).
+    # Cushion penalty applies to credit-spread strategies (short strike present).
+    if injections:
+        _inject_junctions(new_junctions, injections)
+
+    total_atomic = sum(len(a) for _, a in additions) + len(injections)
+    log.info(f"Decomposition complete: {len(removals)} compounds → "
+             f"{total_atomic} atomic rules ({len(injections)} injected fresh)")
+    return new_rules, new_junctions
+
+
+# Strategies that use cushion-based adjustments (credit spreads with a short strike)
+_CUSHION_PENALTY_STRATEGIES = ["steady_paycheck", "weekly_grind"]
+
+
+def _inject_junctions(junctions, injections):
+    """Create junction rows for freshly injected rules (no compound to expand from)."""
+    for rule, overrides in injections:
+        key = rule["rule_key"]
+        if not key.startswith("adj_cushion_penalty_"):
+            continue
+        for strat_key in _CUSHION_PENALTY_STRATEGIES:
+            j = {
+                "rule_key": key,
+                "strategy_key": strat_key,
+                "evaluation_order": 0,   # placeholder — OTA-684 sets proper ordering
+                "stop_if_fail": False,
+                "score_penalty": (overrides or {}).get("score_penalty"),
+                "weight": None,
+                "parameters": None,
+                "enabled": True,
+            }
+            junctions.append(j)
+    log.info(f"  Injected {len(_CUSHION_PENALTY_STRATEGIES) * len(injections)} "
+             f"junctions for cushion penalty bands")
 
 
 # ── Database write ───────────────────────────────────────────────────────
@@ -707,6 +1113,12 @@ def main():
 
     log.info(f"Parsed: {len(rules)} rules, {len(strategies)} strategies, "
              f"{len(junctions)} junctions, {len(lookups)} lookups")
+
+    # OTA-683: Decompose compound rules into atomic rules
+    log.info("Decomposing compound rules into atomic rules (OTA-683)...")
+    rules, junctions = decompose_compound_rules(rules, junctions)
+
+    log.info(f"After decomposition: {len(rules)} rules, {len(junctions)} junctions")
 
     if args.dry_run:
         log.info("DRY RUN — no database writes")
