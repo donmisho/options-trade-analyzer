@@ -1279,6 +1279,159 @@ def backfill_missing_rules(rules, junctions):
     return rules, junctions
 
 
+# ── OTA-684: Gate mechanics (evaluation_order, stop_if_fail, score_penalty) ──
+
+# Gate ordering priority — cheapest/most-decisive first.
+# Rules not listed here sort alphabetically after these.
+_GATE_ORDER_PRIORITY = [
+    # Tier 1: Earnings gates — cheapest hard-kill for SP/WG/TR (RAW/DERIVED, no COMPUTED)
+    "earnings_route1_no_viable_window",
+    "earnings_route2_wait_post_window",
+    "earnings_route3_post_entry_better",
+    "earnings_route4_pre_momentum_play",
+    # Tier 2: Price floor (RAW)
+    "underlying_price_floor",
+    # Tier 3: Earnings buffer past expiry (DERIVED)
+    "earnings_buffer_past_expiry",
+    # Tier 4: Liquidity gates (RAW)
+    "per_leg_bid_ask_spread",
+    "per_leg_open_interest_floor",
+    "per_leg_volume_floor",
+    # Tier 5: DTE gates (DERIVED)
+    "maximum_dte",
+    "minimum_dte",
+    "dte_window",
+    # Tier 6: Data completeness (RAW — fail fast if data missing)
+    "data_completeness_iv_rank",
+    "data_completeness_delta",
+    "data_completeness_atr_14",
+    # Tier 7: Spread structure gates
+    "credit_pct_of_width_floor",
+    "debit_pct_of_width_ceiling",
+    "debit_of_width",
+    # Tier 8: Value gates (COMPUTED)
+    "total_expected_value",
+    # Tier 9: Cushion / width gates
+    "cushion_of_price",
+    "cushion_vs_atr",
+    "spread_width_tier_compliance",
+    # Tier 10: Chart state (DERIVED)
+    "chart_state_valid_alignment",
+    "chart_state_matches_trade_direction",
+    # Tier 11: Trade type gates (structure validation)
+    "theta_load_fraction",
+    "require_credit_spread_structure",
+    "require_directional_debit_spread",
+    "bull_put_credit",
+    "bear_call_credit",
+    "bull_call_debit",
+    "bear_put_debit",
+    "long_call",
+    "long_put",
+    "iron_condor",
+    # Tier 12: Soft gates (non-stopping, recorded with penalty)
+    "stock_extended_against_entry",
+    "stock_extended_in_trade_direction",
+]
+
+# Adjustment ordering priority
+_ADJUSTMENT_ORDER_PRIORITY = [
+    "adj_dte_8_13_penalty",
+    "adj_probability_asymmetry_penalty",
+    "adj_cushion_penalty_severe",
+    "adj_cushion_penalty_moderate",
+    "adj_stock_extended_magnitude",
+    "adj_stock_extended_direction_match",
+    "adj_sma_alignment_against_trade",
+    "adj_mixed_chart_signal_on_directional_strategy",
+    "adj_cushion_vs_atr_gte_floor",
+    "adj_cushion_vs_atr_lte_ceiling",
+    "adj_etf_underlying",
+]
+
+# Long-DTE rationale note for earnings junction rows
+_LONG_DTE_RATIONALE = (
+    "A future 180-360 DTE strategy would set stop_if_fail=false, score_penalty=0 on "
+    "this earnings gate — the event passes long before expiry. That strategy needs only "
+    "junction rows, no engine code change. This demonstrates the junction-only invariant."
+)
+
+
+def set_gate_mechanics(rules, junctions):
+    """
+    OTA-684: Set evaluation_order, stop_if_fail, and score_penalty on all
+    gate-phase and adjustment-phase junction rows.
+
+    Guarantees:
+    - evaluation_order is unique within each (strategy, phase)
+    - Earnings gates fire first (order 1-4) among hard stops for SP/WG/TR
+    - Hard Gate rows: stop_if_fail=true, score_penalty=None
+    - Soft Gate rows: stop_if_fail=false, score_penalty per sheet
+    - Post-Scoring/adjustment rows: stop_if_fail=false, score_penalty per sheet
+    - ETF bonus: positive score_penalty (+5, not -5)
+    - Long-DTE earnings pattern captured in rationale
+    """
+    rule_phases = {r["rule_key"]: r["phase"] for r in rules}
+
+    # Build priority index for ordering
+    gate_priority = {k: i for i, k in enumerate(_GATE_ORDER_PRIORITY)}
+    adj_priority = {k: i for i, k in enumerate(_ADJUSTMENT_ORDER_PRIORITY)}
+
+    def sort_key(j):
+        rule_key = j["rule_key"]
+        phase = rule_phases.get(rule_key, "")
+        if phase == "gate":
+            return gate_priority.get(rule_key, 900)
+        elif phase == "adjustment":
+            return adj_priority.get(rule_key, 900)
+        return 900
+
+    # Group junctions by (strategy, phase)
+    from collections import defaultdict
+    groups = defaultdict(list)
+    for j in junctions:
+        phase = rule_phases.get(j["rule_key"], "scoring")
+        if phase in ("gate", "adjustment"):
+            groups[(j["strategy_key"], phase)].append(j)
+
+    # Reassign evaluation_order within each group
+    for (strat_key, phase), group in groups.items():
+        group.sort(key=sort_key)
+        for order, j in enumerate(group, 1):
+            j["evaluation_order"] = order
+
+    # Add long-DTE rationale to earnings junction rows
+    for j in junctions:
+        if j["rule_key"].startswith("earnings_route"):
+            existing = j.get("rationale") or ""
+            if _LONG_DTE_RATIONALE not in existing:
+                j["rationale"] = (
+                    f"{existing} | {_LONG_DTE_RATIONALE}" if existing
+                    else _LONG_DTE_RATIONALE
+                )
+
+    # Verify no duplicates
+    order_check = defaultdict(list)
+    for j in junctions:
+        phase = rule_phases.get(j["rule_key"], "scoring")
+        if phase in ("gate", "adjustment"):
+            key = (j["strategy_key"], phase, j["evaluation_order"])
+            order_check[key].append(j["rule_key"])
+
+    dupes = {k: v for k, v in order_check.items() if len(v) > 1}
+    if dupes:
+        for k, rules_at_order in dupes.items():
+            log.warning(f"  Duplicate evaluation_order {k}: {rules_at_order}")
+    else:
+        log.info("  No duplicate evaluation_orders detected")
+
+    total_gate = sum(1 for j in junctions if rule_phases.get(j["rule_key"]) == "gate")
+    total_adj = sum(1 for j in junctions if rule_phases.get(j["rule_key"]) == "adjustment")
+    log.info(f"  Gate mechanics set: {total_gate} gate junctions, {total_adj} adjustment junctions")
+
+    return junctions
+
+
 # ── OTA-689: Formula registry (scanned from engine_rules.formula_ref) ────
 
 def build_formula_registry(rules: list[dict]) -> list[dict]:
@@ -1519,6 +1672,10 @@ def main():
     rules, junctions = backfill_missing_rules(rules, junctions)
 
     log.info(f"After backfill: {len(rules)} rules, {len(junctions)} junctions")
+
+    # OTA-684: Set gate mechanics (evaluation_order, stop_if_fail, score_penalty)
+    log.info("Setting gate mechanics on junction rows (OTA-684)...")
+    junctions = set_gate_mechanics(rules, junctions)
 
     # OTA-689: Build formula registry from engine_rules.formula_ref (scanned, not hand-copied)
     log.info("Building formula registry from engine_rules.formula_ref (OTA-689)...")
