@@ -1470,6 +1470,12 @@ def main():
     log.info("Enriching TBD scoring formulas (OTA-686)...")
     rules = enrich_scoring_formulas(rules)
 
+    # OTA-688: Backfill missing rules + resolve code-only rules
+    log.info("Backfilling missing rules + injecting code-only rules (OTA-688)...")
+    rules, junctions = backfill_missing_rules(rules, junctions)
+
+    log.info(f"After backfill: {len(rules)} rules, {len(junctions)} junctions")
+
     if args.dry_run:
         log.info("DRY RUN — no database writes")
         for r in rules:
