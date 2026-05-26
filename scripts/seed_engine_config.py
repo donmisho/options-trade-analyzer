@@ -220,12 +220,18 @@ def parse_workbook(xlsx_path: Path):
         for strat in STRATEGIES:
             cols = strat["cols"]
             include = row[cols["include"]]
-            if not include or str(include).upper() != "Y":
-                continue
-
             low_val = row[cols["low"]]
             high_val = row[cols["high"]]
             weight_val = row[cols["weight"]]
+
+            # Scoring criteria: participation is indicated by a non-null weight,
+            # not by the Include column. Gates/adjustments use Include = "Y".
+            if phase == "scoring":
+                if weight_val is None:
+                    continue
+            else:
+                if not include or str(include).upper() != "Y":
+                    continue
 
             # Build parameters JSON
             params = {}
@@ -1273,6 +1279,44 @@ def backfill_missing_rules(rules, junctions):
     return rules, junctions
 
 
+# ── OTA-689: Formula registry (scanned from engine_rules.formula_ref) ────
+
+def build_formula_registry(rules: list[dict]) -> list[dict]:
+    """Scan all rules for non-null formula_ref values and produce SHARED
+    engine_lookups rows under lookup_set='formula_registry'.
+
+    The list is scanned from the rules data (not hand-maintained) so it stays
+    correct as OTA-686/OTA-688 add formula names. The engine's startup
+    validation (§6.6) checks that every formula_ref in engine_rules has a
+    matching entry in this registry.
+    """
+    seen = {}  # formula_name → rule_key (first rule that references it)
+    for r in rules:
+        ref = r.get("formula_ref")
+        if not ref:
+            continue
+        # Normalise: strip 'formula:' prefix if present
+        name = ref.removeprefix("formula:")
+        if name not in seen:
+            seen[name] = r["rule_key"]
+
+    lookups = []
+    for i, name in enumerate(sorted(seen), 1):
+        lookups.append({
+            "owner_app_id": "SHARED",
+            "lookup_set": "formula_registry",
+            "lookup_key": name,
+            "payload": {
+                "status": "pending",
+                "description": f"Formula implementation required for rule library. "
+                               f"First referenced by rule '{seen[name]}'.",
+            },
+            "sort_order": i,
+        })
+
+    return lookups
+
+
 # ── Database write ───────────────────────────────────────────────────────
 
 def upsert_rules(cursor, rules: list[dict]) -> dict[str, int]:
@@ -1475,6 +1519,12 @@ def main():
     rules, junctions = backfill_missing_rules(rules, junctions)
 
     log.info(f"After backfill: {len(rules)} rules, {len(junctions)} junctions")
+
+    # OTA-689: Build formula registry from engine_rules.formula_ref (scanned, not hand-copied)
+    log.info("Building formula registry from engine_rules.formula_ref (OTA-689)...")
+    formula_lookups = build_formula_registry(rules)
+    lookups.extend(formula_lookups)
+    log.info(f"Formula registry: {len(formula_lookups)} formulas registered")
 
     if args.dry_run:
         log.info("DRY RUN — no database writes")
