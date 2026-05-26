@@ -927,6 +927,352 @@ def _inject_junctions(junctions, injections):
              f"junctions for cushion penalty bands")
 
 
+# ── TBD scoring formula capture (OTA-686) ───────────────────────────────
+#
+# Captures code formulas as definitions for all TBD scoring criteria.
+# Canonical formulas are recorded from strategy_scorer.py.
+# Proxy formulas are captured AND flagged with their planned replacement.
+# We are NOT defining optimal formulas — only capturing what exists today.
+
+_SCORING_FORMULA_DEFINITIONS = {
+    # ── Canonical formulas (code has the real formula) ──────────────────
+    "credit_width": {
+        "condition_expression": "abs(net_debit) / spread_width * 100",
+        "intent": (
+            "Credit Width %: net credit received as percentage of spread width. "
+            "Canonical formula from strategy_scorer.py:222-226. Output: 0–100 (natural %)."
+        ),
+        "referenced_named_values": ["net_debit", "spread_width"],
+        "parameter_schema": None,
+    },
+    "liquidity": {
+        "condition_expression": "long_volume + short_volume + long_oi + short_oi",
+        "intent": (
+            "Liquidity: sum of both legs' volume and open interest. "
+            "Canonical formula from strategy_scorer.py:228-233. "
+            "NORMALIZATION OWED: raw sum, not yet on [0,100] scale."
+        ),
+        "referenced_named_values": ["long_volume", "short_volume", "long_oi", "short_oi"],
+        "parameter_schema": None,
+    },
+    "delta_quality": {
+        "condition_expression": "formula:delta_quality",
+        "intent": (
+            "Delta Quality: gaussian-like peak around target delta range. "
+            "Canonical formula from strategy_scorer.py:389-392. "
+            "Output: 0–1, multiplied by 100 at scoring. "
+            "Parameterised by delta_center and delta_half_range."
+        ),
+        "referenced_named_values": ["delta"],
+        "parameter_schema": {
+            "delta_center": {"type": "number", "description": "Peak delta target"},
+            "delta_half_range": {"type": "number", "description": "Half-width of gaussian peak"},
+        },
+    },
+    "payout_ratio": {
+        "condition_expression": "(delta * underlying_price * 0.10 * 100) / premium_dollars",
+        "intent": (
+            "Payout Ratio: expected 10% move payout relative to premium paid. "
+            "Canonical formula from strategy_scorer.py:399-407. "
+            "NORMALIZATION OWED: raw ratio, not yet on [0,100] scale."
+        ),
+        "referenced_named_values": ["delta", "underlying_price", "premium_dollars"],
+        "parameter_schema": None,
+    },
+    "delta_otm_score": {
+        "condition_expression": "1.0 - delta / 0.25",
+        "intent": (
+            "Delta OTM Score: how far out-of-the-money the option is. "
+            "Canonical formula from strategy_scorer.py:394-397. "
+            "Output: 0–1 range (0.25 delta → 0, 0 delta → 1). "
+            "NORMALIZATION OWED: 0–1 scale, multiply by 100 for [0,100]."
+        ),
+        "referenced_named_values": ["delta"],
+        "parameter_schema": None,
+    },
+    "bid_ask_tightness": {
+        "condition_expression": "1.0 - bid_ask_spread_pct / 100.0",
+        "intent": (
+            "Bid Ask Tightness: inverse of bid-ask spread percentage. "
+            "Canonical formula from strategy_scorer.py:409-412. "
+            "Output: 0–1 range. "
+            "NORMALIZATION OWED: 0–1 scale, multiply by 100 for [0,100]."
+        ),
+        "referenced_named_values": ["bid_ask_spread_pct"],
+        "parameter_schema": None,
+    },
+
+    # ── Proxy formulas (captured as-is, flagged for replacement) ────────
+    "theta_gamma_ratio": {
+        "condition_expression": "abs(net_theta) / max_loss",
+        "intent": (
+            "Theta Gamma Ratio: PROXY — currently identical to theta_margin_ratio "
+            "(abs(net_theta) / max_loss). NO gamma involved. "
+            "PLANNED REPLACEMENT: true theta/gamma ratio requires per-leg gamma "
+            "propagated to the candidate by the options-chain adapter (later feature). "
+            "NORMALIZATION OWED: raw ratio, not yet on [0,100] scale."
+        ),
+        "referenced_named_values": ["net_theta", "max_loss"],
+        "parameter_schema": None,
+    },
+    "sma_alignment_score": {
+        "condition_expression": "0.5",
+        "intent": (
+            "SMA Alignment Score: PROXY — currently a 0.5 passthrough (no real formula). "
+            "PLANNED REPLACEMENT: classification(BULLISH/BEARISH/MIXED/NEUTRAL) → [0,1] "
+            "formula to be defined during tuning. SMA 8/21/50 and alignment classification "
+            "already computed in compute_sma_signal(). "
+            "NORMALIZATION OWED: 0–1 scale, multiply by 100 for [0,100]."
+        ),
+        "referenced_named_values": ["sma_8", "sma_21", "sma_50", "sma_alignment_classification"],
+        "parameter_schema": None,
+    },
+    "iv_percentile_cost": {
+        "condition_expression": "1.0 - iv_decimal",
+        "intent": (
+            "IV Percentile Cost: PROXY — linear inversion of raw IV. "
+            "PLANNED REPLACEMENT: true IV percentile requires historical-IV producer "
+            "(adapter feature, later). Current formula penalises high IV linearly. "
+            "NORMALIZATION OWED: 0–1 scale, multiply by 100 for [0,100]."
+        ),
+        "referenced_named_values": ["iv"],
+        "parameter_schema": None,
+    },
+    "runway_score": {
+        "condition_expression": "theta_runway_days",
+        "intent": (
+            "Runway Score: PROXY — raw theta_runway_days (premium / daily_theta). "
+            "PLANNED REPLACEMENT: [0,100] normalization to be defined during tuning "
+            "(e.g. sigmoid or min-max over a domain-appropriate range). "
+            "NORMALIZATION OWED: raw days, not on [0,100] scale."
+        ),
+        "referenced_named_values": ["theta_runway_days"],
+        "parameter_schema": None,
+    },
+    "open_interest": {
+        "condition_expression": "open_interest",
+        "intent": (
+            "Open Interest: PROXY — raw open_interest value. "
+            "PLANNED REPLACEMENT: [0,100] normalization to be defined during tuning "
+            "(e.g. log-scale or percentile rank over recent chain). "
+            "NORMALIZATION OWED: raw count, not on [0,100] scale."
+        ),
+        "referenced_named_values": ["open_interest"],
+        "parameter_schema": None,
+    },
+}
+
+
+def enrich_scoring_formulas(rules):
+    """
+    OTA-686: Fill in TBD scoring formula definitions.
+
+    For each scoring criterion with condition_expression == 'TBD', replace with
+    the captured formula definition from _SCORING_FORMULA_DEFINITIONS.
+    """
+    enriched = 0
+    for r in rules:
+        if r["phase"] != "scoring":
+            continue
+        ce = r.get("condition_expression") or ""
+        if "TBD" not in ce:
+            continue
+        key = r["rule_key"]
+        defn = _SCORING_FORMULA_DEFINITIONS.get(key)
+        if defn is None:
+            log.warning(f"  No formula definition for TBD scoring rule '{key}' — skipping")
+            continue
+
+        r["condition_expression"] = defn["condition_expression"]
+        r["intent"] = defn["intent"]
+        if defn["referenced_named_values"]:
+            r["referenced_named_values"] = defn["referenced_named_values"]
+        if defn["parameter_schema"] is not None:
+            r["parameter_schema"] = defn["parameter_schema"]
+        enriched += 1
+        is_proxy = "PROXY" in defn["intent"]
+        label = "proxy+flag" if is_proxy else "canonical"
+        log.info(f"  Enriched '{key}' ({label})")
+
+    log.info(f"Scoring formula enrichment: {enriched} rules captured")
+    return rules
+
+
+# ── OTA-688: Backfill missing rules + resolve code-only rules ───────────
+#
+# Three responsibilities:
+# 1. Flag dependency-owed rules (no-producer inputs) in intent
+# 2. Inject code-only rules not in the workbook (DTE 8-13, prob-asymmetry)
+# 3. Record architectural dispositions (narrative validator, WAIT_FOR_EARNINGS,
+#    engine-internal weights) as documented decisions — NOT as engine rules.
+#
+# Items already handled by OTA-683 and NOT re-seeded here:
+#   - Chart state confirms direction → OTA-683 decomposed to 2 atomic rules
+#   - Earnings Route-4 penalty → OTA-683 decomposed to 4 atomic earnings rules
+#   - Cushion graduated penalty → OTA-683 injected adj_cushion_penalty_severe/moderate
+#   - Stock Extended in Trade Direction (post-scoring) → OTA-683 decomposed
+#
+# Architectural dispositions (NOT seeded as rules — recorded here as decisions):
+#   - Narrative-grounding validator: app-layer post-Claude quality gate, NOT an
+#     engine rule. Lives in evaluation_routes.py:917-1024. The engine evaluates
+#     deterministic math; Claude narrative validation is a separate concern.
+#   - WAIT_FOR_EARNINGS: NOT a 4th verdict band. It is the earnings-gate halt
+#     outcome — a candidate stopped by the earnings gate (stop_if_fail=true)
+#     exits at that terminal_phase; the app labels it WAIT_FOR_EARNINGS. The
+#     sheet's 3 verdict bands (EXECUTE >= 70, WAIT 50-69, PASS < 50) stand.
+#   - VerticalSpreadEngine internal weights (EV35/RR25/Prob20/Liq15/Theta5) and
+#     NakedOptionEngine internal weights (Delta30/Theta25/IV20/RR15/Liq10): a
+#     legacy second scoring system SUPERSEDED by the strategy junction weights
+#     (the engine has one weight set per strategy via engine_strategy_rule_junction).
+#     NOT seeded. Actual code removal tracked in later screening-rules feature.
+
+# Rules whose inputs have no producer yet — flag in intent
+_DEPENDENCY_FLAGS = {
+    # Data completeness gates — input not yet produced at runtime
+    "data_completeness_iv_rank": (
+        "DEPENDENCY: true IV rank requires a historical-IV producer (adapter feature, "
+        "later). Current code uses ATM IV / 0.60 as proxy. Gate records the requirement."
+    ),
+    "data_completeness_atr_14": (
+        "DEPENDENCY: ATR_14 requires a technical-indicator producer (adapter feature, "
+        "later). Not computed anywhere in the current pipeline. Gate records the requirement."
+    ),
+    # Cushion vs ATR depends on ATR_14 producer
+    "cushion_vs_atr": (
+        "DEPENDENCY: cushion_vs_ATR computation requires ATR_14, which has no producer yet. "
+        "Gate records the requirement; will activate when ATR_14 adapter ships."
+    ),
+    # Spread width tier compliance references the width_configuration lookup (OTA-690)
+    "spread_width_tier_compliance": (
+        "DEPENDENCY: references width_configuration lookup (seeded from Width Configuration "
+        "sheet, OTA-690). Runtime tier resolution not yet built."
+    ),
+}
+
+
+def backfill_missing_rules(rules, junctions):
+    """
+    OTA-688: Backfill missing rules and resolve code-only rules.
+
+    1. Flags dependency-owed rules with no-producer annotations in intent.
+    2. Injects code-only rules (DTE 8-13 penalty, probability-asymmetry penalty).
+    3. Does NOT re-seed items already handled by OTA-683 (chart state, earnings
+       Route-4, cushion penalty, stock extended post-scoring decomposition).
+    """
+    # ── 1. Flag dependency-owed rules ──────────────────────────────────
+    flagged = 0
+    for r in rules:
+        key = r["rule_key"]
+        flag = _DEPENDENCY_FLAGS.get(key)
+        if flag:
+            existing_intent = r.get("intent") or ""
+            if "DEPENDENCY:" not in existing_intent:
+                r["intent"] = f"{existing_intent} — {flag}" if existing_intent else flag
+                flagged += 1
+                log.info(f"  Flagged dependency: {key}")
+
+    # ── 2. Inject code-only rules ─────────────────────────────────────
+    # These exist in code but NOT in the workbook. They're injected as
+    # synthetic rules with full intent documentation.
+
+    code_only_rules = []
+    code_only_junctions = []
+
+    # 2a. DTE 8-13 penalty (-20 points)
+    # Source: evaluation_routes.py:634-638
+    # All strategies — universal adjustment for near-expiry trades
+    dte_penalty_rule = {
+        "owner_app_id": "OTA",
+        "rule_key": "adj_dte_8_13_penalty",
+        "phase": "adjustment",
+        "tier": "RAW",
+        "intent": (
+            "DTE 8-13 penalty: trades with 8-13 DTE receive a -20 point adjustment. "
+            "Covers the gap between the 7 DTE hard gate and normal scoring. "
+            "Code-only rule captured from evaluation_routes.py:634-638."
+        ),
+        "condition_expression": "dte >= 8 AND dte <= 13",
+        "formula_ref": None,
+        "referenced_named_values": ["dte"],
+        "parameter_schema": {
+            "dte_low": {"type": "number", "default": 8},
+            "dte_high": {"type": "number", "default": 13},
+            "penalty": {"type": "number", "default": -20},
+        },
+        "null_semantics": None,
+        "enabled": True,
+    }
+    code_only_rules.append(dte_penalty_rule)
+
+    # DTE penalty applies to all strategies
+    for strat_key in ["steady_paycheck", "weekly_grind", "trend_rider", "lottery_ticket"]:
+        code_only_junctions.append({
+            "rule_key": "adj_dte_8_13_penalty",
+            "strategy_key": strat_key,
+            "evaluation_order": 0,  # placeholder — OTA-684 sets proper ordering
+            "stop_if_fail": False,
+            "score_penalty": -20.0,
+            "weight": None,
+            "parameters": {"dte_low": 8, "dte_high": 13, "penalty": -20},
+            "enabled": True,
+        })
+
+    # 2b. Probability-asymmetry penalty (graduated: 0/8/15/25)
+    # Source: scoring_factors/asymmetry.py:16-41 (OTA-505)
+    # All strategies — graduated penalty based on loss/profit probability ratio
+    asym_penalty_rule = {
+        "owner_app_id": "OTA",
+        "rule_key": "adj_probability_asymmetry_penalty",
+        "phase": "adjustment",
+        "tier": "COMPUTED",
+        "intent": (
+            "Probability asymmetry penalty (OTA-505): graduated penalty based on "
+            "loss/profit probability ratio. ratio >= 2.0 → -25; >= 1.5 → -15; "
+            ">= 1.25 → -8; < 1.25 → 0. Null inputs → 0 (no penalty). "
+            "Code-only rule captured from scoring_factors/asymmetry.py:16-41."
+        ),
+        "condition_expression": "formula:probability_asymmetry_penalty",
+        "formula_ref": "formula:probability_asymmetry_penalty",
+        "referenced_named_values": ["p_max_loss", "p_max_profit"],
+        "parameter_schema": {
+            "band_severe": {"type": "number", "default": 2.0, "description": "ratio threshold for -25"},
+            "band_high": {"type": "number", "default": 1.5, "description": "ratio threshold for -15"},
+            "band_moderate": {"type": "number", "default": 1.25, "description": "ratio threshold for -8"},
+            "penalty_severe": {"type": "number", "default": -25},
+            "penalty_high": {"type": "number", "default": -15},
+            "penalty_moderate": {"type": "number", "default": -8},
+        },
+        "null_semantics": "FAIL_OPEN",
+        "enabled": True,
+    }
+    code_only_rules.append(asym_penalty_rule)
+
+    # Asymmetry penalty applies to all strategies
+    for strat_key in ["steady_paycheck", "weekly_grind", "trend_rider", "lottery_ticket"]:
+        code_only_junctions.append({
+            "rule_key": "adj_probability_asymmetry_penalty",
+            "strategy_key": strat_key,
+            "evaluation_order": 0,  # placeholder — OTA-684 sets proper ordering
+            "stop_if_fail": False,
+            "score_penalty": None,  # graduated — penalty comes from formula evaluation
+            "weight": None,
+            "parameters": {
+                "band_severe": 2.0, "band_high": 1.5, "band_moderate": 1.25,
+                "penalty_severe": -25, "penalty_high": -15, "penalty_moderate": -8,
+            },
+            "enabled": True,
+        })
+
+    # Append to main lists
+    rules.extend(code_only_rules)
+    junctions.extend(code_only_junctions)
+
+    log.info(f"OTA-688 backfill: {flagged} dependency flags, "
+             f"{len(code_only_rules)} code-only rules injected, "
+             f"{len(code_only_junctions)} junctions added")
+    return rules, junctions
+
+
 # ── Database write ───────────────────────────────────────────────────────
 
 def upsert_rules(cursor, rules: list[dict]) -> dict[str, int]:
@@ -1119,6 +1465,10 @@ def main():
     rules, junctions = decompose_compound_rules(rules, junctions)
 
     log.info(f"After decomposition: {len(rules)} rules, {len(junctions)} junctions")
+
+    # OTA-686: Fill in TBD scoring formula definitions + proxy flags
+    log.info("Enriching TBD scoring formulas (OTA-686)...")
+    rules = enrich_scoring_formulas(rules)
 
     if args.dry_run:
         log.info("DRY RUN — no database writes")
