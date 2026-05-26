@@ -1024,11 +1024,9 @@ _SCORING_FORMULA_DEFINITIONS = {
     "sma_alignment_score": {
         "condition_expression": "0.5",
         "intent": (
-            "SMA Alignment Score: PROXY — currently a 0.5 passthrough (no real formula). "
-            "PLANNED REPLACEMENT: classification(BULLISH/BEARISH/MIXED/NEUTRAL) → [0,1] "
-            "formula to be defined during tuning. SMA 8/21/50 and alignment classification "
-            "already computed in compute_sma_signal(). "
-            "NORMALIZATION OWED: 0–1 scale, multiply by 100 for [0,100]."
+            "SMA Alignment Score: PROXY — 0.5 passthrough (no real formula). "
+            "REPLACEMENT: classification(BULLISH/BEARISH/MIXED/NEUTRAL) → [0,1] "
+            "via compute_sma_signal(). NORMALIZATION OWED: 0–1 scale × 100."
         ),
         "referenced_named_values": ["sma_8", "sma_21", "sma_50", "sma_alignment_classification"],
         "parameter_schema": None,
