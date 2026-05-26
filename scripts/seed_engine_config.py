@@ -1279,6 +1279,211 @@ def backfill_missing_rules(rules, junctions):
     return rules, junctions
 
 
+# ── OTA-685: Reconcile sheet-vs-code divergences ────────────────────────
+
+# Each entry: (rule_key, field, note)
+# field = "intent" → append to rule intent; "rationale" → append to junction rationale
+_DIVERGENCE_NOTES = {
+    # --- MISSING in code ---
+    "underlying_price_floor": (
+        "intent",
+        "DIVERGENCE: sheet >= 20 (MISSING in code). No code enforces a stock price floor. "
+        "Sheet value seeded; revisit in tuning."
+    ),
+    # --- Liquidity floors ---
+    "per_leg_bid_ask_spread": (
+        "intent",
+        "DIVERGENCE: sheet 0.15 max; code long_call_engine 0.15 default but strategy_scorer "
+        "overrides to 0.50; vertical engine has no bid/ask filter. Sheet value seeded; "
+        "relaxed code values noted — revisit in tuning."
+    ),
+    "per_leg_open_interest_floor": (
+        "intent",
+        "DIVERGENCE: sheet >= 100; engine defaults 50; strategy_scorer relaxes to 10. "
+        "Relaxed for low-volume symbols. Sheet value seeded; revisit in tuning."
+    ),
+    "per_leg_volume_floor": (
+        "intent",
+        "DIVERGENCE: sheet >= 500; engine defaults 5; strategy_scorer relaxes to 1. "
+        "Largest single divergence in audit. Relaxed for low-volume symbols. Sheet value "
+        "seeded; revisit in tuning."
+    ),
+    # --- DTE boundaries ---
+    "minimum_dte": (
+        "intent",
+        "DIVERGENCE: sheet >= 7; code <= 7 -> PASS (off-by-one at exactly 7 DTE). "
+        "Sheet value seeded; boundary note for tuning."
+    ),
+    "maximum_dte": (
+        "intent",
+        "DIVERGENCE: sheet <= 60; chain-fetch uses 70; NakedOptionEngine allows 90. "
+        "Sheet value seeded; wider code values noted for tuning."
+    ),
+    # --- Cushion % of price ---
+    "cushion_of_price": (
+        "intent",
+        "DIVERGENCE: sheet defines as hard gate (SP >= 1%, WG >= 1.5%); code implements "
+        "as graduated penalty (1%/-20, 2%/-10) with no WG-specific threshold. Sheet gate "
+        "values seeded; code penalty captured separately in OTA-688 as layered adjustment "
+        "(intentional layering per sheet). Revisit in tuning."
+    ),
+    # --- Cushion vs ATR ---
+    "cushion_vs_atr": (
+        "intent",
+        "DIVERGENCE: sheet hard gate (SP 1-999, WG 1.5-999); code has TODO comment only. "
+        "ATR_14 has no producer yet (options-chain adapter, later feature). Sheet values "
+        "seeded; revisit when ATR_14 producer is built."
+    ),
+    # --- Data completeness gates ---
+    "data_completeness_iv_rank": (
+        "intent",
+        "DIVERGENCE: sheet gates on null IV rank; code substitutes ATM IV proxy "
+        "(atm_iv/0.60, default 0.5 when unavailable). True IV rank has NO PRODUCER yet "
+        "(options-chain adapter, later feature). Sheet gate seeded; code fallback noted."
+    ),
+    "data_completeness_delta": (
+        "intent",
+        "DIVERGENCE: sheet gates on null delta; code substitutes Black-Scholes fallback "
+        "for after-hours operation, or treats null as 0. Sheet gate seeded; B-S fallback "
+        "noted for tuning."
+    ),
+    "data_completeness_atr_14": (
+        "intent",
+        "DIVERGENCE: sheet gates on null ATR_14; ATR_14 has NO PRODUCER yet "
+        "(options-chain adapter, later feature). Sheet gate seeded; revisit when producer "
+        "is built."
+    ),
+    # --- Spread width tier compliance ---
+    "spread_width_tier_compliance": (
+        "intent",
+        "DIVERGENCE: sheet has 5-tier width table by price; code uses single hardcoded "
+        "max_spread_width = 10. Sheet references OTA-690 width_configuration lookup. "
+        "Code's single value noted for tuning."
+    ),
+    # --- Theta load fraction ---
+    "theta_load_fraction": (
+        "intent",
+        "DIVERGENCE: sheet LT gate theta_total/debit <= 0.5 (MISSING in code). "
+        "No code computes theta load fraction. Sheet value seeded; revisit in tuning."
+    ),
+    # --- Scoring criteria with proxy formulas ---
+    "iv_rank": (
+        "intent",
+        "DIVERGENCE: sheet says IV Rank (RAW); code uses ATM IV proxy (atm_iv/0.60). "
+        "True IV rank is percentile-based; code is a ratio. Sheet value seeded; "
+        "proxy noted for tuning."
+    ),
+    "theta_gamma_ratio": (
+        "intent",
+        "DIVERGENCE: sheet formula TBD; code proxy is identical to theta_margin_ratio "
+        "(abs(net_theta)/max_loss — no gamma involved). Sheet value seeded; proxy+flag "
+        "enriched by OTA-686."
+    ),
+    "sma_alignment_score": (
+        "intent",
+        "DIVERGENCE: sheet formula TBD; code uses client-supplied scalar (default 0.5). "
+        "When frontend doesn't send it, all candidates get 0.5 (no-op at 30% weight). "
+        "Sheet value seeded; proxy+flag enriched by OTA-686."
+    ),
+}
+
+# Junction-level rationale notes (strategy-specific divergences)
+_JUNCTION_DIVERGENCE_NOTES = {
+    # DTE window divergences per strategy
+    ("steady_paycheck", "dte_window"): (
+        "DIVERGENCE: sheet SP 21-45; code 14-45 (min is 14 in code, 21 in sheet). "
+        "Sheet value seeded; revisit in tuning."
+    ),
+    ("weekly_grind", "dte_window"): (
+        "DIVERGENCE: sheet WG 14-20; code 14-21 (max is 21 in code, 20 in sheet). "
+        "Sheet value seeded; revisit in tuning."
+    ),
+    ("trend_rider", "dte_window"): (
+        "DIVERGENCE: sheet TR 30-45; code 14-60 (both min and max differ). "
+        "Sheet value seeded; revisit in tuning."
+    ),
+    ("lottery_ticket", "dte_window"): (
+        "DIVERGENCE: sheet LT 30-60; code 7-60 (min is 7 in code, 30 in sheet). "
+        "Sheet value seeded; revisit in tuning."
+    ),
+    # Cushion per-strategy divergence
+    ("weekly_grind", "cushion_of_price"): (
+        "DIVERGENCE: sheet WG >= 1.5%; code uses same 1%/2% graduated penalty as SP "
+        "(no WG-specific threshold). Sheet value seeded; revisit in tuning."
+    ),
+}
+
+# Trade type structure divergences — junction rationale on structure gates
+_STRUCTURE_DIVERGENCE_NOTES = {
+    ("weekly_grind", "long_call"): (
+        "DIVERGENCE: sheet includes LONG_CALL for WG; code/business-rules.md = "
+        "credit-only. Sheet value seeded per OTA-687; differs from business-rules.md — "
+        "reconcile during tuning."
+    ),
+    ("weekly_grind", "long_put"): (
+        "DIVERGENCE: sheet includes LONG_PUT for WG; code/business-rules.md = "
+        "credit-only. Sheet value seeded per OTA-687; differs from business-rules.md — "
+        "reconcile during tuning."
+    ),
+    ("lottery_ticket", "iron_condor"): (
+        "DIVERGENCE: sheet includes IRON_CONDOR for LT; code has LONG_CALL + LONG_PUT, "
+        "no iron condor. Sheet value seeded per OTA-687; differs from code — "
+        "reconcile during tuning."
+    ),
+    ("lottery_ticket", "long_put"): (
+        "DIVERGENCE: sheet LT = LONG_PUT + IRON_CONDOR; code/business-rules.md = "
+        "LONG_CALL + LONG_PUT (adds LONG_CALL, omits IRON_CONDOR). Sheet structures "
+        "seeded per OTA-687; reconcile during tuning."
+    ),
+}
+
+
+def reconcile_divergences(rules, junctions):
+    """
+    OTA-685: Record sheet-vs-code divergences in rule intent and junction rationale.
+
+    Seeds the sheet value as captured; records each divergence as a one-line note.
+    No value-correctness decisions — deferred to tuning via rule-management screen.
+    """
+    noted_rules = 0
+    noted_junctions = 0
+
+    # Apply rule-level divergence notes
+    for r in rules:
+        key = r["rule_key"]
+        if key in _DIVERGENCE_NOTES:
+            field, note = _DIVERGENCE_NOTES[key]
+            existing = r.get("intent") or ""
+            if "DIVERGENCE:" not in existing:
+                r["intent"] = f"{existing} | {note}" if existing else note
+                noted_rules += 1
+
+    # Apply junction-level divergence notes
+    for j in junctions:
+        strat = j["strategy_key"]
+        rule = j["rule_key"]
+
+        # DTE window / cushion per-strategy notes
+        combo = (strat, rule)
+        if combo in _JUNCTION_DIVERGENCE_NOTES:
+            note = _JUNCTION_DIVERGENCE_NOTES[combo]
+            existing = j.get("rationale") or ""
+            if "DIVERGENCE:" not in existing:
+                j["rationale"] = f"{existing} | {note}" if existing else note
+                noted_junctions += 1
+
+        # Structure gate notes
+        if combo in _STRUCTURE_DIVERGENCE_NOTES:
+            note = _STRUCTURE_DIVERGENCE_NOTES[combo]
+            existing = j.get("rationale") or ""
+            if "DIVERGENCE:" not in existing:
+                j["rationale"] = f"{existing} | {note}" if existing else note
+                noted_junctions += 1
+
+    log.info(f"  Divergence notes: {noted_rules} rules, {noted_junctions} junctions annotated")
+    return rules, junctions
+
+
 # ── OTA-684: Gate mechanics (evaluation_order, stop_if_fail, score_penalty) ──
 
 # Gate ordering priority — cheapest/most-decisive first.
@@ -1672,6 +1877,10 @@ def main():
     rules, junctions = backfill_missing_rules(rules, junctions)
 
     log.info(f"After backfill: {len(rules)} rules, {len(junctions)} junctions")
+
+    # OTA-685: Record sheet-vs-code divergences in rationale/intent
+    log.info("Recording sheet-vs-code divergences (OTA-685)...")
+    rules, junctions = reconcile_divergences(rules, junctions)
 
     # OTA-684: Set gate mechanics (evaluation_order, stop_if_fail, score_penalty)
     log.info("Setting gate mechanics on junction rows (OTA-684)...")
