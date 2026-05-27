@@ -872,8 +872,25 @@ def decompose_compound_rules(rules, junctions):
             additions.append((old_key, atoms))
             log.info(f"  Decomposed '{old_key}' → {atom_keys}")
 
-    # Rebuild rules: remove compounds, add atomics + injections
-    new_rules = [r for r in rules if r["rule_key"] not in removals]
+    # Additional compounds whose atoms already exist (produced by a sibling decomposer)
+    # but that the decomposer doesn't catch directly. Remove from rules + junctions.
+    extra_retirements = {"debit_of_width"}
+    removals |= extra_retirements
+
+    # Rules to keep disabled (unbind junctions but preserve the rule row)
+    keep_disabled = {"days_until_next_earnings"}
+
+    # Rebuild rules: remove compounds (except keep_disabled), add atomics + injections
+    new_rules = []
+    for r in rules:
+        if r["rule_key"] in removals:
+            if r["rule_key"] in keep_disabled:
+                # Keep rule row but mark disabled — divergence record
+                r["enabled"] = False
+                new_rules.append(r)
+            # else: fully removed (atoms replace it)
+        else:
+            new_rules.append(r)
     for _, atoms in additions:
         for rule, _ in atoms:
             new_rules.append(rule)
@@ -904,7 +921,7 @@ def decompose_compound_rules(rules, junctions):
     total_atomic = sum(len(a) for _, a in additions) + len(injections)
     log.info(f"Decomposition complete: {len(removals)} compounds → "
              f"{total_atomic} atomic rules ({len(injections)} injected fresh)")
-    return new_rules, new_junctions
+    return new_rules, new_junctions, removals
 
 
 # Strategies that use cushion-based adjustments (credit spreads with a short strike)
@@ -1842,6 +1859,72 @@ def upsert_lookups(cursor, lookups: list[dict]):
     log.info(f"Lookups: {count} upserted")
 
 
+# ── OTA-683 follow-up: delete decomposed compounds from DB ───────────────
+
+def cleanup_decomposed_compounds(cursor, compound_rule_keys: set[str]):
+    """
+    Delete compound rules and their junction rows from the DB.
+
+    The decomposition logic removes compounds from the in-memory seed, but on
+    a re-run against an existing DB the old compound rows persist (upsert-only
+    model never deletes). This function explicitly removes them.
+
+    Also unbinds `days_until_next_earnings` (delete junctions, set enabled=0)
+    because the 4-route earnings tree supersedes it and they share an
+    evaluation_order slot.
+    """
+    # Rules to unbind (delete junctions) but keep as disabled rule rows
+    keep_disabled = {"days_until_next_earnings"}
+
+    # Additional compound rules whose atoms already exist but that the decomposer
+    # doesn't catch (debit_of_width is standalone, not found by credit/debit search)
+    extra_retirements = {"debit_of_width"}
+    all_keys = compound_rule_keys | extra_retirements
+
+    if not all_keys:
+        log.info("No compound rule_keys to clean up.")
+        return
+
+    # Delete junction rows for ALL compounds (including keep_disabled)
+    for rk in all_keys:
+        cursor.execute("""
+            DELETE j FROM dbo.engine_strategy_rule_junction j
+            JOIN dbo.engine_rules r ON r.rule_id = j.rule_id
+            WHERE r.owner_app_id = 'OTA' AND r.rule_key = ?
+        """, rk)
+        deleted = cursor.rowcount
+        if deleted:
+            log.info(f"  Deleted {deleted} junction row(s) for compound '{rk}'")
+
+    # Delete compound rule rows (except keep_disabled — those are upserted as enabled=0)
+    for rk in all_keys:
+        if rk in keep_disabled:
+            continue
+        cursor.execute("""
+            DELETE FROM dbo.engine_rules
+            WHERE owner_app_id = 'OTA' AND rule_key = ?
+        """, rk)
+        if cursor.rowcount:
+            log.info(f"  Deleted rule row: '{rk}'")
+
+    # Unbind days_until_next_earnings: delete any leftover junctions, ensure disabled
+    cursor.execute("""
+        DELETE j FROM dbo.engine_strategy_rule_junction j
+        JOIN dbo.engine_rules r ON r.rule_id = j.rule_id
+        WHERE r.owner_app_id = 'OTA' AND r.rule_key = 'days_until_next_earnings'
+    """)
+    dte_junctions_deleted = cursor.rowcount
+    if dte_junctions_deleted:
+        log.info(f"  Deleted {dte_junctions_deleted} leftover junction row(s) for 'days_until_next_earnings'")
+
+    cursor.execute("""
+        UPDATE dbo.engine_rules SET enabled = 0, updated_at = GETUTCDATE()
+        WHERE owner_app_id = 'OTA' AND rule_key = 'days_until_next_earnings'
+    """)
+    if cursor.rowcount:
+        log.info("  Disabled rule 'days_until_next_earnings' (kept for divergence record)")
+
+
 # ── Main ─────────────────────────────────────────────────────────────────
 
 def main():
@@ -1862,7 +1945,7 @@ def main():
 
     # OTA-683: Decompose compound rules into atomic rules
     log.info("Decomposing compound rules into atomic rules (OTA-683)...")
-    rules, junctions = decompose_compound_rules(rules, junctions)
+    rules, junctions, compound_removals = decompose_compound_rules(rules, junctions)
 
     log.info(f"After decomposition: {len(rules)} rules, {len(junctions)} junctions")
 
@@ -1917,6 +2000,10 @@ def main():
         strat_id_map = upsert_strategies(cursor, strategies)
         upsert_junctions(cursor, junctions, rule_id_map, strat_id_map)
         upsert_lookups(cursor, lookups)
+
+        # OTA-683 follow-up: remove decomposed compounds + unbind days_until_next_earnings
+        log.info("Cleaning up decomposed compound rules (OTA-683 follow-up)...")
+        cleanup_decomposed_compounds(cursor, compound_removals)
 
         conn.commit()
         log.info("Seed import committed successfully.")
