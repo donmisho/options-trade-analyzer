@@ -80,4 +80,46 @@ def evaluate(
     )
 
 
-__all__ = ["evaluate"]
+# ── Dataclass and enum exports (OTA-697) ─────────────────────────────────
+from app.insight_engine.models import (  # noqa: E402
+    Tier,
+    Phase,
+    VerdictSource,
+    NamedValue,
+    Rule,
+    Strategy,
+    JunctionRow,
+    RuleBinding,
+    RuleSet,
+    Candidate,
+    GateDecision,
+    ScoringBreakdown,
+    AdjustmentResult,
+    ResultRecord,
+    CandidateSnapshot,
+    EvaluationDecision,
+)
+
+__all__ = [
+    "evaluate",
+    # Enums
+    "Tier",
+    "Phase",
+    "VerdictSource",
+    # Config dataclasses
+    "NamedValue",
+    "Rule",
+    "Strategy",
+    "JunctionRow",
+    "RuleBinding",
+    "RuleSet",
+    # Candidate
+    "Candidate",
+    # Result dataclasses
+    "GateDecision",
+    "ScoringBreakdown",
+    "AdjustmentResult",
+    "ResultRecord",
+    "CandidateSnapshot",
+    "EvaluationDecision",
+]
