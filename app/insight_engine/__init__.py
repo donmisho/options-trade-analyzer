@@ -28,7 +28,7 @@ Extension points (added by downstream Stories)
 - Result-record builder (OTA-703) — SHIPPED
 - Bronze record contract (OTA-704) — SHIPPED
 - Persistence sink interface (OTA-705) — SHIPPED
-- source_app_id enforcement (OTA-706)
+- source_app_id enforcement (OTA-706) — SHIPPED
 """
 
 from app.insight_engine._guard import enforce_domain_boundary
@@ -77,9 +77,17 @@ def evaluate(
 
     Raises
     ------
+    ValueError
+        If source_app_id is missing or empty.
     KeyError
         If strategy_key is not in the loaded config.
     """
+    if not source_app_id or not isinstance(source_app_id, str) or not source_app_id.strip():
+        raise ValueError(
+            "source_app_id is required and must be a non-empty string "
+            "(e.g. 'OTA', 'FFL', 'STK'). The engine does not provide a default."
+        )
+
     from app.insight_engine.bronze_contract import build_bronze_batch as _bronze
     from app.insight_engine.pipeline import run_batch as _run_batch
     from app.insight_engine.registry import StubFormulaRegistry as _Stub
