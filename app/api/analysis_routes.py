@@ -33,6 +33,7 @@ from app.core.config import settings
 from app.providers.factory import ProviderRegistry
 from app.models.session import get_db
 from app.models.database import OptionChainSnapshot, AnalysisRun, AnalyzedTrade, TradeCandidate
+from app.ota_adapters.options_chain import OptionsChainAdapter
 from app.analysis.vertical_engine import (
     VerticalSpreadEngine, ScoringWeights, SpreadFilters
 )
@@ -163,54 +164,48 @@ class DirectionalRequest(BaseModel):
     strike_range_pct: float = Field(default=15.0)
 
 
-# ─── Helper: Fetch Chain ──────────────────────────────────────────
+# ─── Helper: Fetch Chain via Adapter ─────────────────────────────
 
-async def _fetch_chain(
+async def _adapter_fetch(
     symbol: str,
     user: dict,
     min_dte: int = 14,
     max_dte: int = 60,
     strike_range_pct: float = 10.0,
     option_type: Optional[str] = None,
-) -> tuple[list[dict], float, dict]:
+) -> OptionsChainAdapter:
     """
-    Fetch options chain and underlying price from the provider.
-    Returns (contracts, underlying_price, raw_chain_dict).
+    Fetch options chain via OptionsChainAdapter.
 
-    WHY this is a shared helper: All three endpoints need chain data.
-    Extracting it avoids duplicating the provider lookup + error handling.
-    The raw chain dict is returned so callers can persist it.
+    Returns the adapter instance; callers access adapter.contracts,
+    adapter.underlying_price, and adapter.chain_data for backward
+    compat with existing analysis engines.
     """
-    registry = _get_registry()
-    provider = registry.get_market_data(settings.default_market_data_provider, user_id=user.get("sub"))
-
+    adapter = OptionsChainAdapter()
     try:
-        api_sym = to_api_symbol_cached(symbol, "schwab")
-        chain_data = await provider.get_chain(
-            symbol=api_sym,
-            min_dte=min_dte,
-            max_dte=max_dte,
-            strike_range_pct=strike_range_pct,
-            option_type=option_type,
-        )
+        await adapter.produce_candidates({
+            "symbol": symbol,
+            "min_dte": min_dte,
+            "max_dte": max_dte,
+            "strike_range_pct": strike_range_pct,
+            "option_type": option_type,
+            "user_id": user.get("sub"),
+        })
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Provider error: {str(e)}")
 
-    contracts = chain_data.get("contracts", [])
-    underlying_price = chain_data.get("underlying_price", 0)
-
-    if not contracts:
+    if not adapter.contracts:
         raise HTTPException(
             status_code=404,
             detail=f"No options contracts found for {symbol.upper()}"
         )
-    if underlying_price <= 0:
+    if adapter.underlying_price <= 0:
         raise HTTPException(
             status_code=502,
             detail=f"Could not determine underlying price for {symbol.upper()}"
         )
 
-    return contracts, underlying_price, chain_data
+    return adapter
 
 
 async def _persist_chain_snapshot(
@@ -520,12 +515,15 @@ async def analyze_verticals(
     else:
         _env_min, _env_max = req.min_dte, req.max_dte
 
-    contracts, price, chain_data = await _fetch_chain(
+    adapter = await _adapter_fetch(
         req.symbol, user,
         min_dte=_env_min,
         max_dte=_env_max,
         strike_range_pct=req.strike_range_pct,
     )
+    contracts = adapter.contracts
+    price = adapter.underlying_price
+    chain_data = adapter.chain_data
 
     # Build weights (use overrides if provided, else defaults)
     weights = ScoringWeights()
@@ -690,13 +688,16 @@ async def analyze_long_calls(
     if len(req.option_types) == 1:
         chain_type = req.option_types[0]
 
-    contracts, price, chain_data = await _fetch_chain(
+    adapter = await _adapter_fetch(
         req.symbol, user,
         min_dte=req.min_dte,
         max_dte=req.max_dte,
         strike_range_pct=req.strike_range_pct,
         option_type=chain_type,
     )
+    contracts = adapter.contracts
+    price = adapter.underlying_price
+    chain_data = adapter.chain_data
 
     filters = LongCallFilters(
         max_premium=req.max_premium or 1500.0,
@@ -816,12 +817,14 @@ async def analyze_directional(
             detail="Direction must be 'bullish' or 'bearish'"
         )
 
-    contracts, price = await _fetch_chain(
+    adapter = await _adapter_fetch(
         req.symbol, user,
         min_dte=req.min_dte,
         max_dte=req.max_dte,
         strike_range_pct=req.strike_range_pct,
     )
+    contracts = adapter.contracts
+    price = adapter.underlying_price
 
     thesis = Thesis(
         symbol=canonicalize(req.symbol),
@@ -856,7 +859,7 @@ async def get_strategy_scorecard(
     IMPORTANT: exactly one chain fetch happens regardless of how many strategies are scored.
     """
     sym = canonicalize(req.symbol)
-    api_sym = to_api_symbol_cached(sym, "schwab")
+    api_sym = to_api_symbol_cached(sym, settings.default_market_data_provider)
     registry = _get_registry()
     provider = registry.get_market_data(settings.default_market_data_provider, user_id=user.get("sub"))
 
