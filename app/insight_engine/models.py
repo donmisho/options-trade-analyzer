@@ -152,10 +152,16 @@ class Candidate:
     """An opaque container of named values evaluated by the engine (§3.1).
 
     Mutable so the adapter can populate COMPUTED values between phases (§5.2).
+    Optional metadata fields (symbol, user_id, subject_type, subject_id) are
+    promoted to bronze columns for filtering; they are not evaluated by rules.
     """
     candidate_id: str
     candidate_type: str  # opaque: options_trade, position, directional, ...
     named_values: dict[str, Any] = field(default_factory=dict)
+    symbol: str | None = None
+    user_id: str | None = None
+    subject_type: str | None = None  # POSITION | TRADE_CANDIDATE | ...
+    subject_id: str | None = None
 
 
 # ── Result dataclasses ───────────────────────────────────────────────────
@@ -243,48 +249,65 @@ class ResultRecord:
 class CandidateSnapshot:
     """One per candidate per run — persistence stream 1 (§4.3).
 
-    Carries full named-value set + result-record summary, plus logical
-    provenance/identity fields. Provenance stamping is OTA-704; fields
-    exist here.
+    Promoted columns are direct attributes (used in WHERE/JOIN/GROUP BY).
+    Everything else (named values, result summary detail, verdict_source)
+    lives in ``payload_json``. Provenance is stamped on every record.
     """
+    # Correlation
     snapshot_id: str
     run_id: str
+
+    # Provenance (stamped on every record)
     source_app_id: str
     config_version: str
+    engine_version: str
     evaluated_at: datetime
+    payload_version: int
+
+    # Promoted columns (filter/group targets)
     candidate_type: str  # opaque
     strategy_key: str
     symbol: str | None
-
-    # Result summary
+    user_id: str | None
+    subject_type: str | None
+    subject_id: str | None
     final_score: float | None  # null if halted before scoring
     verdict: str | None  # null if halted before verdict
     terminal_phase: str
 
-    # Full named-value set
-    named_values: dict[str, Any]
-
-    # Payload versioning
-    payload_version: int
+    # Everything else — named values, raw_score, held_penalties,
+    # verdict_source, scoring breakdown, adjustment summary
+    payload_json: dict[str, Any]
 
 
 @dataclass
 class EvaluationDecision:
     """One per rule evaluation — persistence stream 2 (§4.3).
 
-    Correlation to its snapshot via snapshot_id and run_id.
+    Correlation to its snapshot via shared ``snapshot_id`` and ``run_id``.
+    Promoted columns are direct attributes; value_evaluated, parameters,
+    decision_reason, and formula trace live in ``payload_json``.
     """
+    # Correlation
     snapshot_id: str
     run_id: str
+
+    # Provenance (stamped on every record)
+    source_app_id: str
+    config_version: str
+    engine_version: str
+    evaluated_at: datetime
+    payload_version: int
+
+    # Promoted columns
     rule_key: str
-    phase: Phase
-    tier: Tier | None
+    phase: str  # denormalized string: "gate", "scoring", "adjustment"
+    tier: str | None  # "RAW", "DERIVED", "COMPUTED"
     evaluation_order: int
-    value_evaluated: Any
-    parameters_evaluated: dict[str, Any]
     passed: bool
     stop_if_fail: bool
     was_terminal: bool
     score_contribution: float | None
-    decision_reason: str
-    payload_version: int
+
+    # Everything else — value_evaluated, parameters, decision_reason, formula trace
+    payload_json: dict[str, Any]

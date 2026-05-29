@@ -26,7 +26,7 @@ Extension points (added by downstream Stories)
 - Pipeline orchestrator (OTA-701) — SHIPPED
 - COMPUTED callback (OTA-702) — SHIPPED
 - Result-record builder (OTA-703) — SHIPPED
-- Bronze record contract (OTA-704)
+- Bronze record contract (OTA-704) — SHIPPED
 - Persistence sink interface (OTA-705)
 - source_app_id enforcement (OTA-706)
 """
@@ -141,6 +141,14 @@ from app.insight_engine.result_builder import (  # noqa: E402
     build_result_records,
 )
 
+# ── Bronze record contract (OTA-704) ────────────────────────────────────
+from app.insight_engine.bronze_contract import (  # noqa: E402
+    DECISION_PAYLOAD_VERSION,
+    SNAPSHOT_PAYLOAD_VERSION,
+    build_bronze_batch,
+    build_bronze_streams,
+)
+
 # ── Startup validation (OTA-699) ─────────────────────────────────────────
 from app.insight_engine.validation import (  # noqa: E402
     ConfigValidationError,
@@ -192,6 +200,11 @@ __all__ = [
     "ENGINE_VERSION",
     "build_result_record",
     "build_result_records",
+    # Bronze record contract (OTA-704)
+    "SNAPSHOT_PAYLOAD_VERSION",
+    "DECISION_PAYLOAD_VERSION",
+    "build_bronze_streams",
+    "build_bronze_batch",
     # Expression library (OTA-700)
     "SUPPORTED_EXPRESSIONS",
     "UnsupportedExpressionError",
