@@ -78,3 +78,8 @@ def get_registry() -> DictFormulaRegistry:
     OTA-700's ``invoke_formula`` resolves through.
     """
     return _REGISTRY
+
+
+# ── Auto-register all formula modules ──────────────────────────────────
+# Importing scoring_formulas triggers @screening_formula decorators.
+import app.options_rules.screening.scoring_formulas as _scoring  # noqa: E402, F401

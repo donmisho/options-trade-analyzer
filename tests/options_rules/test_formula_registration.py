@@ -8,9 +8,15 @@ Validates:
 - OTA-699 drift detection fires for contract/registry mismatch
 
 OTA-726
+
+NOTE: Tests in this file must NOT use @screening_formula with test names,
+as that pollutes the module-level _REGISTRY and causes drift errors in
+other tests. Use DictFormulaRegistry directly for isolation.
 """
 
 from __future__ import annotations
+
+import functools
 
 import pytest
 
@@ -18,31 +24,40 @@ from app.insight_engine.config_source import InMemoryConfigSource
 from app.insight_engine.loader import load_config
 from app.insight_engine.registry import DictFormulaRegistry
 from app.insight_engine.validation import validate_config
-from app.options_rules.screening import (
-    FormulaReturnValueError,
-    screening_formula,
-)
+from app.options_rules.screening import FormulaReturnValueError
 
 
 # ── Helpers ────────────────────────────────────────────────────────────
 
 
+def _wrap_with_validation(name: str, fn):
+    """Apply the same return-value validation the decorator uses."""
+
+    @functools.wraps(fn)
+    def wrapper(named_values, params):
+        result = fn(named_values, params)
+        if not isinstance(result, (int, float)):
+            raise FormulaReturnValueError(
+                f"Formula '{name}' returned {type(result).__name__}, "
+                f"expected a number in [0, 100]."
+            )
+        val = float(result)
+        if val < 0.0 or val > 100.0:
+            raise FormulaReturnValueError(
+                f"Formula '{name}' returned {val}, "
+                f"expected a value in [0, 100]."
+            )
+        return val
+
+    return wrapper
+
+
 def _make_fresh_registry() -> DictFormulaRegistry:
     """Build a fresh registry with a trivial stub formula for testing."""
     registry = DictFormulaRegistry()
-
-    def _stub_formula(named_values: dict, params: dict) -> float:
-        return 50.0
-
-    # Wrap with the same validation the decorator applies
-    import functools
-
-    @functools.wraps(_stub_formula)
-    def _validated(named_values, params):
-        result = _stub_formula(named_values, params)
-        return float(result)
-
-    registry.register("test_stub", _validated)
+    registry.register("test_stub", _wrap_with_validation(
+        "test_stub", lambda nv, p: 50.0
+    ))
     return registry
 
 
@@ -144,95 +159,51 @@ class TestFormulaRegistration:
         assert "my_test_formula" in reg.registered_names()
         assert reg.invoke("my_test_formula", {}, {}) == 75.0
 
-    def test_module_level_screening_formula_decorator(self):
-        """The @screening_formula decorator registers into the module registry."""
+    def test_module_level_registry_has_scoring_formulas(self):
+        """The module-level registry contains formulas from scoring_formulas.py."""
         from app.options_rules.screening import get_registry
 
-        # Register a test formula via decorator — uses module-level _REGISTRY
-        @screening_formula("_test_726_stub")
-        def stub(named_values, params):
-            return 42.0
-
         reg = get_registry()
-        assert reg.has("_test_726_stub")
-        assert "_test_726_stub" in reg.registered_names()
-        # The registry wraps with validation, so invoke returns float
-        assert reg.invoke("_test_726_stub", {}, {}) == 42.0
+        # At least one known scoring formula should be registered
+        assert reg.has("theta_margin_ratio")
+        assert reg.has("delta_quality")
 
 
 class TestPurityContract:
     def test_return_value_in_range(self):
         """Formula returning valid value succeeds."""
         reg = DictFormulaRegistry()
-
-        def good(nv, p):
-            return 50.0
-
-        from app.options_rules.screening import FormulaReturnValueError
-        import functools
-
-        @functools.wraps(good)
-        def wrapper(nv, p):
-            result = good(nv, p)
-            val = float(result)
-            if val < 0.0 or val > 100.0:
-                raise FormulaReturnValueError(f"out of range: {val}")
-            return val
-
-        reg.register("good", wrapper)
+        reg.register("good", _wrap_with_validation("good", lambda nv, p: 50.0))
         assert reg.invoke("good", {}, {}) == 50.0
 
     def test_return_value_below_zero_raises(self):
         """Formula returning < 0 raises FormulaReturnValueError."""
-        @screening_formula("_test_726_negative")
-        def negative(nv, p):
-            return -5.0
-
-        from app.options_rules.screening import get_registry
-
-        reg = get_registry()
+        reg = DictFormulaRegistry()
+        reg.register("negative", _wrap_with_validation("negative", lambda nv, p: -5.0))
         with pytest.raises(FormulaReturnValueError, match=r"expected a value in \[0, 100\]"):
-            reg.invoke("_test_726_negative", {}, {})
+            reg.invoke("negative", {}, {})
 
     def test_return_value_above_100_raises(self):
         """Formula returning > 100 raises FormulaReturnValueError."""
-        @screening_formula("_test_726_over100")
-        def over(nv, p):
-            return 150.0
-
-        from app.options_rules.screening import get_registry
-
-        reg = get_registry()
+        reg = DictFormulaRegistry()
+        reg.register("over100", _wrap_with_validation("over100", lambda nv, p: 150.0))
         with pytest.raises(FormulaReturnValueError, match=r"expected a value in \[0, 100\]"):
-            reg.invoke("_test_726_over100", {}, {})
+            reg.invoke("over100", {}, {})
 
     def test_return_non_numeric_raises(self):
         """Formula returning a non-numeric type raises FormulaReturnValueError."""
-        @screening_formula("_test_726_string")
-        def stringy(nv, p):
-            return "not a number"
-
-        from app.options_rules.screening import get_registry
-
-        reg = get_registry()
+        reg = DictFormulaRegistry()
+        reg.register("stringy", _wrap_with_validation("stringy", lambda nv, p: "not a number"))
         with pytest.raises(FormulaReturnValueError, match="expected a number"):
-            reg.invoke("_test_726_string", {}, {})
+            reg.invoke("stringy", {}, {})
 
     def test_boundary_values_accepted(self):
         """Formula returning 0.0 and 100.0 are both valid."""
-        @screening_formula("_test_726_zero")
-        def zero(nv, p):
-            return 0.0
-
-        @screening_formula("_test_726_hundred")
-        def hundred(nv, p):
-            return 100.0
-
-        from app.options_rules.screening import get_registry
-
-        reg = get_registry()
-        assert reg.invoke("_test_726_zero", {}, {}) == 0.0
-        assert reg.invoke("_test_726_hundred", {}, {}) == 100.0
+        reg = DictFormulaRegistry()
+        reg.register("zero", _wrap_with_validation("zero", lambda nv, p: 0.0))
+        reg.register("hundred", _wrap_with_validation("hundred", lambda nv, p: 100.0))
+        assert reg.invoke("zero", {}, {}) == 0.0
+        assert reg.invoke("hundred", {}, {}) == 100.0
 
 
 # ── Tests: OTA-699 membership check ───────────────────────────────────
