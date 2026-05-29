@@ -27,7 +27,7 @@ Extension points (added by downstream Stories)
 - COMPUTED callback (OTA-702) — SHIPPED
 - Result-record builder (OTA-703) — SHIPPED
 - Bronze record contract (OTA-704) — SHIPPED
-- Persistence sink interface (OTA-705)
+- Persistence sink interface (OTA-705) — SHIPPED
 - source_app_id enforcement (OTA-706)
 """
 
@@ -66,8 +66,9 @@ def evaluate(
         Live formula registry. Uses StubFormulaRegistry if not provided.
     adapter : ComputedAdapter, optional
         COMPUTED-value callback adapter (OTA-702).
-    sink : optional
-        Persistence sink (OTA-705 seam).
+    sink : PersistenceSink, optional
+        Persistence sink (OTA-705). When provided, the engine drives it
+        after each run with the bronze record streams.
 
     Returns
     -------
@@ -79,21 +80,33 @@ def evaluate(
     KeyError
         If strategy_key is not in the loaded config.
     """
+    from app.insight_engine.bronze_contract import build_bronze_batch as _bronze
     from app.insight_engine.pipeline import run_batch as _run_batch
     from app.insight_engine.registry import StubFormulaRegistry as _Stub
     from app.insight_engine.result_builder import build_result_records as _build
 
     reg = registry or _Stub()
+    candidate_list = list(candidates)
     rule_set = config.rule_sets[strategy_key]
 
-    pipeline_results = _run_batch(list(candidates), rule_set, reg, adapter)
+    pipeline_results = _run_batch(candidate_list, rule_set, reg, adapter)
 
-    return _build(
+    result_records = _build(
         pipeline_results,
         source_app_id=source_app_id,
         strategy_key=strategy_key,
         config_version=config.config_version,
     )
+
+    # Drive the injected sink with bronze record streams (OTA-705)
+    if sink is not None:
+        snapshots, decisions = _bronze(
+            result_records, candidate_list, run_id=None,
+        )
+        sink.write_snapshots(snapshots)
+        sink.write_decisions(decisions)
+
+    return result_records
 
 
 # ── Config loader exports (OTA-698) ──────────────────────────────────────
@@ -147,6 +160,12 @@ from app.insight_engine.bronze_contract import (  # noqa: E402
     SNAPSHOT_PAYLOAD_VERSION,
     build_bronze_batch,
     build_bronze_streams,
+)
+
+# ── Persistence sink (OTA-705) ───────────────────────────────────────────
+from app.insight_engine.sink import (  # noqa: E402
+    InMemorySink,
+    PersistenceSink,
 )
 
 # ── Startup validation (OTA-699) ─────────────────────────────────────────
@@ -205,6 +224,9 @@ __all__ = [
     "DECISION_PAYLOAD_VERSION",
     "build_bronze_streams",
     "build_bronze_batch",
+    # Persistence sink (OTA-705)
+    "PersistenceSink",
+    "InMemorySink",
     # Expression library (OTA-700)
     "SUPPORTED_EXPRESSIONS",
     "UnsupportedExpressionError",
