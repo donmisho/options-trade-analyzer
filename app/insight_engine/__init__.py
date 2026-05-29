@@ -91,6 +91,21 @@ from app.insight_engine.loader import (  # noqa: E402
     load_config,
 )
 
+# ── Formula registry (OTA-699) ───────────────────────────────────────────
+from app.insight_engine.registry import (  # noqa: E402
+    FormulaRegistry,
+    StubFormulaRegistry,
+)
+
+# ── Startup validation (OTA-699) ─────────────────────────────────────────
+from app.insight_engine.validation import (  # noqa: E402
+    ConfigValidationError,
+    ValidationError,
+    ValidationReport,
+    validate_and_raise,
+    validate_config,
+)
+
 # ── Dataclass and enum exports (OTA-697) ─────────────────────────────────
 from app.insight_engine.models import (  # noqa: E402
     Tier,
@@ -119,6 +134,15 @@ __all__ = [
     "EngineConfig",
     "LookupEntry",
     "load_config",
+    # Formula registry (OTA-699)
+    "FormulaRegistry",
+    "StubFormulaRegistry",
+    # Startup validation (OTA-699)
+    "ConfigValidationError",
+    "ValidationError",
+    "ValidationReport",
+    "validate_and_raise",
+    "validate_config",
     # Enums
     "Tier",
     "Phase",
