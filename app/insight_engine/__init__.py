@@ -15,8 +15,7 @@ See ``insight_engine.md`` for the full specification.
 Public API
 ----------
 evaluate(...)
-    Single public entry point for running the pipeline. Stub — implemented
-    in OTA-701 (pipeline orchestrator).
+    Single public entry point for running the pipeline (OTA-701).
 
 Extension points (added by downstream Stories)
 ----------------------------------------------
@@ -24,7 +23,7 @@ Extension points (added by downstream Stories)
 - Config loader (OTA-698)
 - Startup validation (OTA-699)
 - Expression library (OTA-700)
-- Pipeline orchestrator (OTA-701)
+- Pipeline orchestrator (OTA-701) — SHIPPED
 - COMPUTED callback (OTA-702)
 - Result-record builder (OTA-703)
 - Bronze record contract (OTA-704)
@@ -45,39 +44,53 @@ def evaluate(
     candidates,
     strategy_key: str,
     source_app_id: str,
-    adapter,
-    sink,
+    config,
+    registry=None,
+    adapter=None,
+    sink=None,
 ):
     """Run the engine pipeline on a stream of candidates.
 
     Parameters
     ----------
     candidates : iterable
-        Stream of candidate records produced by the consumer's input adapter.
+        Stream of Candidate records produced by the consumer's input adapter.
     strategy_key : str
         The strategy to evaluate against (looked up from engine_strategies).
     source_app_id : str
         Consuming application identifier (e.g. 'OTA', 'STK', 'FFL').
         Stamped on every emitted record.
-    adapter
-        Consumer-specific input adapter implementing the §5 contract.
-    sink
-        Persistence sink implementing write_snapshots / write_decisions.
+    config : EngineConfig
+        Loaded and validated engine configuration.
+    registry : FormulaRegistry, optional
+        Live formula registry. Uses StubFormulaRegistry if not provided.
+    adapter : ComputedAdapter, optional
+        COMPUTED-value callback adapter (OTA-702 seam).
+    sink : optional
+        Persistence sink (OTA-705 seam).
 
     Returns
     -------
-    list
-        Per-candidate result records.
+    list[PipelineResult]
+        Per-candidate pipeline results.
 
     Raises
     ------
-    NotImplementedError
-        Until OTA-701 (pipeline orchestrator) ships.
+    KeyError
+        If strategy_key is not in the loaded config.
     """
-    raise NotImplementedError(
-        "evaluate() is a stub. Implementation arrives with OTA-701 "
-        "(pipeline orchestrator)."
-    )
+    from app.insight_engine.pipeline import run_pipeline as _run_pipeline
+    from app.insight_engine.registry import StubFormulaRegistry as _Stub
+
+    reg = registry or _Stub()
+    rule_set = config.rule_sets[strategy_key]
+
+    results = []
+    for candidate in candidates:
+        result = _run_pipeline(candidate, rule_set, reg, adapter)
+        results.append(result)
+
+    return results
 
 
 # ── Config loader exports (OTA-698) ──────────────────────────────────────
@@ -108,6 +121,13 @@ from app.insight_engine.expressions import (  # noqa: E402
     invoke_formula,
     is_formula_ref,
     validate_expression,
+)
+
+# ── Pipeline orchestrator (OTA-701) ──────────────────────────────────────
+from app.insight_engine.pipeline import (  # noqa: E402
+    ComputedAdapter,
+    PipelineResult,
+    run_pipeline,
 )
 
 # ── Startup validation (OTA-699) ─────────────────────────────────────────
@@ -152,6 +172,10 @@ __all__ = [
     "FormulaRegistry",
     "StubFormulaRegistry",
     "DictFormulaRegistry",
+    # Pipeline orchestrator (OTA-701)
+    "ComputedAdapter",
+    "PipelineResult",
+    "run_pipeline",
     # Expression library (OTA-700)
     "SUPPORTED_EXPRESSIONS",
     "UnsupportedExpressionError",

@@ -35,17 +35,9 @@ class TestCleanPackage:
     def test_import_succeeds(self):
         import app.insight_engine  # noqa: F401
 
-    def test_evaluate_stub_raises(self):
+    def test_evaluate_callable(self):
         from app.insight_engine import evaluate
-
-        with pytest.raises(NotImplementedError, match="OTA-701"):
-            evaluate(
-                candidates=[],
-                strategy_key="test",
-                source_app_id="TEST",
-                adapter=None,
-                sink=None,
-            )
+        assert callable(evaluate)
 
 
 class TestInjectedLeaks:
