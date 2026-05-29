@@ -24,7 +24,7 @@ Extension points (added by downstream Stories)
 - Startup validation (OTA-699)
 - Expression library (OTA-700)
 - Pipeline orchestrator (OTA-701) — SHIPPED
-- COMPUTED callback (OTA-702)
+- COMPUTED callback (OTA-702) — SHIPPED
 - Result-record builder (OTA-703)
 - Bronze record contract (OTA-704)
 - Persistence sink interface (OTA-705)
@@ -79,18 +79,13 @@ def evaluate(
     KeyError
         If strategy_key is not in the loaded config.
     """
-    from app.insight_engine.pipeline import run_pipeline as _run_pipeline
+    from app.insight_engine.pipeline import run_batch as _run_batch
     from app.insight_engine.registry import StubFormulaRegistry as _Stub
 
     reg = registry or _Stub()
     rule_set = config.rule_sets[strategy_key]
 
-    results = []
-    for candidate in candidates:
-        result = _run_pipeline(candidate, rule_set, reg, adapter)
-        results.append(result)
-
-    return results
+    return _run_batch(list(candidates), rule_set, reg, adapter)
 
 
 # ── Config loader exports (OTA-698) ──────────────────────────────────────
@@ -127,6 +122,7 @@ from app.insight_engine.expressions import (  # noqa: E402
 from app.insight_engine.pipeline import (  # noqa: E402
     ComputedAdapter,
     PipelineResult,
+    run_batch,
     run_pipeline,
 )
 
@@ -175,6 +171,7 @@ __all__ = [
     # Pipeline orchestrator (OTA-701)
     "ComputedAdapter",
     "PipelineResult",
+    "run_batch",
     "run_pipeline",
     # Expression library (OTA-700)
     "SUPPORTED_EXPRESSIONS",

@@ -4,7 +4,7 @@
 Fixed phase order (insight_engine.md §4):
     1. Gates (RAW)
     2. Gates (DERIVED)
-       [adapter COMPUTED callback seam — OTA-702]
+       [adapter COMPUTED callback — OTA-702]
     3. Gates (COMPUTED)
     4. Scoring (weighted sum)
     5. Apply held gate penalties
@@ -15,7 +15,12 @@ Gate mechanics driven entirely by junction fields:
     stop_if_fail=true  + fail → halt, record terminal decision
     stop_if_fail=false + fail → record, hold score_penalty, continue
 
-OTA-701
+COMPUTED callback (OTA-702): fires exactly once per batch between
+Phase 2 (DERIVED gates) and Phase 3 (COMPUTED gates), with only
+surviving candidates. The adapter populates COMPUTED named values
+needed by remaining active rules (COMPUTED gates, scoring, adjustments).
+
+OTA-701, OTA-702
 """
 
 from __future__ import annotations
@@ -42,14 +47,21 @@ from app.insight_engine.models import (
 from app.insight_engine.registry import FormulaRegistry
 
 
-# ── Adapter callback seam (OTA-702 owns the contract) ──────────────────
+# ── Adapter callback contract (OTA-702) ──────────────────────────────
 
 
 class ComputedAdapter(Protocol):
-    """Seam for the COMPUTED-value callback between Phase 2 and Phase 3.
+    """COMPUTED-value callback between Phase 2 and Phase 3.
 
-    OTA-702 defines the full contract. The orchestrator calls this
-    between DERIVED and COMPUTED gate phases.
+    The engine calls ``populate_computed`` exactly once per batch run,
+    passing only candidates that survived RAW and DERIVED gates, and
+    the set of COMPUTED named-value names referenced by remaining
+    active rules (COMPUTED gates, scoring criteria, adjustments).
+
+    The adapter mutates candidates in-place, populating the requested
+    COMPUTED values in each candidate's ``named_values`` dict.
+
+    The engine defines this contract; it implements no COMPUTED math.
     """
 
     def populate_computed(
@@ -97,6 +109,120 @@ class PipelineResult:
 # ── Public API ──────────────────────────────────────────────────────────
 
 
+def run_batch(
+    candidates: list[Candidate],
+    rule_set: RuleSet,
+    registry: FormulaRegistry,
+    adapter: ComputedAdapter | None = None,
+) -> list[PipelineResult]:
+    """Evaluate a batch of candidates with once-only COMPUTED callback.
+
+    This is the primary entry point for batch evaluation. The COMPUTED
+    adapter callback fires exactly once between Phase 2 (DERIVED gates)
+    and Phase 3 (COMPUTED gates), with only surviving candidates.
+
+    Parameters
+    ----------
+    candidates : list[Candidate]
+        Candidates to evaluate.
+    rule_set : RuleSet
+        The resolved strategy + bound rules (from OTA-698 loader).
+    registry : FormulaRegistry
+        Live formula registry for formula-based rules.
+    adapter : ComputedAdapter | None
+        COMPUTED-value callback adapter. When provided, the engine
+        calls it once with survivors and the needed COMPUTED names.
+    """
+    # Partition bindings by phase and tier
+    raw_derived_gates: list[RuleBinding] = []
+    computed_gates: list[RuleBinding] = []
+    scoring_bindings: list[RuleBinding] = []
+    adjustment_bindings: list[RuleBinding] = []
+
+    for binding in rule_set.bindings:
+        if not binding.junction.enabled:
+            continue
+        phase = binding.rule.phase
+        if phase == Phase.GATE:
+            if binding.rule.tier == Tier.COMPUTED:
+                computed_gates.append(binding)
+            else:
+                raw_derived_gates.append(binding)
+        elif phase == Phase.SCORING:
+            scoring_bindings.append(binding)
+        elif phase == Phase.ADJUSTMENT:
+            adjustment_bindings.append(binding)
+
+    # ── Phases 1–2: RAW + DERIVED gates ──────────────────────────────
+    survivors: list[tuple[Candidate, PipelineResult, list[float]]] = []
+    all_results: list[PipelineResult] = []
+
+    for candidate in candidates:
+        result = PipelineResult(
+            candidate_id=candidate.candidate_id,
+            candidate_type=candidate.candidate_type,
+        )
+        held_penalties: list[float] = []
+        halted = _run_gate_list(
+            candidate, raw_derived_gates, registry, result, held_penalties
+        )
+        if halted:
+            all_results.append(result)
+        else:
+            survivors.append((candidate, result, held_penalties))
+
+    # ── COMPUTED callback — fires exactly once with survivors only ────
+    if adapter is not None and survivors:
+        needed = _collect_all_needed_computed_names(
+            computed_gates, scoring_bindings, adjustment_bindings
+        )
+        if needed:
+            survivor_candidates = [c for c, _, _ in survivors]
+            adapter.populate_computed(survivor_candidates, needed)
+
+    # ── Phases 3–7 on survivors ──────────────────────────────────────
+    for candidate, result, held_penalties in survivors:
+        # Phase 3: COMPUTED gates
+        halted = _run_gate_list(
+            candidate, computed_gates, registry, result, held_penalties
+        )
+        if halted:
+            all_results.append(result)
+            continue
+
+        # Phase 4: Scoring (weighted sum)
+        raw_score = _run_scoring(candidate, scoring_bindings, registry, result)
+        result.raw_score = raw_score
+
+        # Phase 5: Apply held gate penalties
+        score = raw_score
+        total_penalty = sum(held_penalties)
+        if total_penalty != 0:
+            score -= total_penalty
+            score = max(0.0, min(100.0, score))
+        result.held_penalties_applied = (
+            total_penalty if total_penalty != 0 else None
+        )
+
+        # Phase 6: Adjustments
+        score = _run_adjustments(
+            candidate, adjustment_bindings, registry, result, score
+        )
+        result.final_score = score
+
+        # Phase 7: Verdict band lookup
+        verdict = _lookup_verdict_band(
+            score, rule_set.strategy.verdict_band_set
+        )
+        result.verdict = verdict
+        result.verdict_source = VerdictSource.BAND_LOOKUP
+        result.terminal_phase = "verdict"
+
+        all_results.append(result)
+
+    return all_results
+
+
 def run_pipeline(
     candidate: Candidate,
     rule_set: RuleSet,
@@ -104,6 +230,8 @@ def run_pipeline(
     adapter: ComputedAdapter | None = None,
 ) -> PipelineResult:
     """Evaluate a single candidate through the 7-phase pipeline.
+
+    Delegates to ``run_batch`` for proper COMPUTED callback semantics.
 
     Parameters
     ----------
@@ -114,97 +242,31 @@ def run_pipeline(
     registry : FormulaRegistry
         Live formula registry for formula-based rules.
     adapter : ComputedAdapter | None
-        COMPUTED-value callback adapter. Seam only — OTA-702 owns
-        the full contract.
+        COMPUTED-value callback adapter.
     """
-    result = PipelineResult(
-        candidate_id=candidate.candidate_id,
-        candidate_type=candidate.candidate_type,
-    )
-
-    # Partition bindings by phase
-    gate_bindings: list[RuleBinding] = []
-    scoring_bindings: list[RuleBinding] = []
-    adjustment_bindings: list[RuleBinding] = []
-
-    for binding in rule_set.bindings:
-        if not binding.junction.enabled:
-            continue
-        phase = binding.rule.phase
-        if phase == Phase.GATE:
-            gate_bindings.append(binding)
-        elif phase == Phase.SCORING:
-            scoring_bindings.append(binding)
-        elif phase == Phase.ADJUSTMENT:
-            adjustment_bindings.append(binding)
-
-    # ── Phases 1–3: Gates (RAW → DERIVED → [callback] → COMPUTED) ────
-    held_penalties: list[float] = []
-    halted = _run_gates(
-        candidate, gate_bindings, registry, adapter, result, held_penalties
-    )
-    if halted:
-        return result
-
-    # ── Phase 4: Scoring (weighted sum) ──────────────────────────────
-    raw_score = _run_scoring(candidate, scoring_bindings, registry, result)
-    result.raw_score = raw_score
-
-    # ── Phase 5: Apply held gate penalties ───────────────────────────
-    score = raw_score
-    total_penalty = sum(held_penalties)
-    if total_penalty != 0:
-        score -= total_penalty
-        score = max(0.0, min(100.0, score))
-    result.held_penalties_applied = total_penalty if total_penalty != 0 else None
-
-    # ── Phase 6: Adjustments ─────────────────────────────────────────
-    score = _run_adjustments(candidate, adjustment_bindings, registry, result, score)
-    result.final_score = score
-
-    # ── Phase 7: Verdict band lookup ─────────────────────────────────
-    verdict = _lookup_verdict_band(score, rule_set.strategy.verdict_band_set)
-    result.verdict = verdict
-    result.verdict_source = VerdictSource.BAND_LOOKUP
-    result.terminal_phase = "verdict"
-
-    return result
+    results = run_batch([candidate], rule_set, registry, adapter)
+    return results[0]
 
 
 # ── Gate execution (Phases 1–3) ─────────────────────────────────────────
 
 
-def _run_gates(
+def _run_gate_list(
     candidate: Candidate,
     gate_bindings: list[RuleBinding],
     registry: FormulaRegistry,
-    adapter: ComputedAdapter | None,
     result: PipelineResult,
     held_penalties: list[float],
 ) -> bool:
-    """Run gate phases. Returns True if candidate was halted."""
-    callback_fired = False
-
+    """Run a list of gate bindings. Returns True if candidate was halted."""
     for binding in gate_bindings:
-        tier = binding.rule.tier
-
-        # COMPUTED callback seam: fire once between DERIVED and COMPUTED
-        if (
-            not callback_fired
-            and tier == Tier.COMPUTED
-            and adapter is not None
-        ):
-            callback_fired = True
-            needed = _collect_needed_computed_names(gate_bindings, binding)
-            adapter.populate_computed([candidate], needed)
-
         # Evaluate the gate
         passed = _evaluate_rule(candidate, binding, registry)
 
         decision = GateDecision(
             rule_key=binding.rule.rule_key,
             phase=binding.rule.phase,
-            tier=tier,
+            tier=binding.rule.tier,
             evaluation_order=binding.junction.evaluation_order,
             value_evaluated=_get_evaluated_value(candidate, binding),
             parameters_evaluated=binding.junction.parameters,
@@ -254,17 +316,28 @@ def _run_gates(
     return False  # not halted
 
 
-def _collect_needed_computed_names(
-    gate_bindings: list[RuleBinding],
-    from_binding: RuleBinding,
+def _collect_all_needed_computed_names(
+    computed_gates: list[RuleBinding],
+    scoring_bindings: list[RuleBinding],
+    adjustment_bindings: list[RuleBinding],
 ) -> set[str]:
-    """Collect COMPUTED named values needed by remaining rules."""
+    """Collect COMPUTED named-value names referenced by remaining active rules.
+
+    Includes names from:
+    - COMPUTED-tier gate bindings (Phase 3)
+    - Scoring criteria with tier=COMPUTED
+    - Adjustments with tier=COMPUTED
+    """
     needed: set[str] = set()
-    found = False
-    for binding in gate_bindings:
-        if binding is from_binding:
-            found = True
-        if found and binding.rule.tier == Tier.COMPUTED:
+    for binding in computed_gates:
+        for nv in binding.rule.referenced_named_values:
+            needed.add(nv)
+    for binding in scoring_bindings:
+        if binding.rule.tier == Tier.COMPUTED:
+            for nv in binding.rule.referenced_named_values:
+                needed.add(nv)
+    for binding in adjustment_bindings:
+        if binding.rule.tier == Tier.COMPUTED:
             for nv in binding.rule.referenced_named_values:
                 needed.add(nv)
     return needed

@@ -1,8 +1,9 @@
 """
 Pipeline orchestrator tests — 7-phase execution, gate mechanics,
-halt-verdict path, scoring, adjustments, and band lookup.
+halt-verdict path, scoring, adjustments, band lookup, and
+COMPUTED callback.
 
-OTA-701
+OTA-701, OTA-702
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ import pytest
 from app.insight_engine.config_source import InMemoryConfigSource
 from app.insight_engine.loader import load_config
 from app.insight_engine.models import Candidate, Phase, Tier, VerdictSource
-from app.insight_engine.pipeline import PipelineResult, run_pipeline
+from app.insight_engine.pipeline import PipelineResult, run_batch, run_pipeline
 from app.insight_engine.registry import DictFormulaRegistry
 
 
@@ -610,6 +611,207 @@ class TestGateTierOrdering:
 
 
 # ── Test: domain boundary ──────────────────────────────────────────────
+
+
+class TestComputedCallback:
+    """OTA-702: COMPUTED-value adapter callback between DERIVED and COMPUTED gates."""
+
+    def _computed_config(self, *, include_computed_scoring=False):
+        """Build a config with RAW gate, DERIVED gate, COMPUTED gate, and scoring."""
+        rules = [
+            {
+                "rule_id": 1, "owner_app_id": "SHARED", "rule_key": "raw_gate",
+                "phase": "gate", "tier": "RAW", "intent": None,
+                "condition_expression": ">=", "formula_ref": None,
+                "referenced_named_values": ["price"],
+                "parameter_schema": {"min": {"type": "number"}},
+                "null_semantics": None, "enabled": True,
+            },
+            {
+                "rule_id": 2, "owner_app_id": "SHARED", "rule_key": "derived_gate",
+                "phase": "gate", "tier": "DERIVED", "intent": None,
+                "condition_expression": ">=", "formula_ref": None,
+                "referenced_named_values": ["net_debit"],
+                "parameter_schema": {"min": {"type": "number"}},
+                "null_semantics": None, "enabled": True,
+            },
+            {
+                "rule_id": 3, "owner_app_id": "SHARED", "rule_key": "computed_gate",
+                "phase": "gate", "tier": "COMPUTED", "intent": None,
+                "condition_expression": ">=", "formula_ref": None,
+                "referenced_named_values": ["prob_profit"],
+                "parameter_schema": {"min": {"type": "number"}},
+                "null_semantics": None, "enabled": True,
+            },
+            {
+                "rule_id": 4, "owner_app_id": "SHARED", "rule_key": "score1",
+                "phase": "scoring", "tier": "COMPUTED" if include_computed_scoring else None,
+                "intent": None,
+                "condition_expression": None, "formula_ref": "formula:score_fn",
+                "referenced_named_values": ["ev_ratio"] if include_computed_scoring else ["price"],
+                "parameter_schema": {}, "null_semantics": None, "enabled": True,
+            },
+        ]
+        junction = [
+            {
+                "junction_id": 1, "strategy_id": 1, "rule_id": 1,
+                "evaluation_order": 1, "stop_if_fail": True,
+                "score_penalty": None, "weight": None,
+                "parameters": {"min": 5.0}, "terminal_verdict": None,
+                "rationale": None, "enabled": True,
+            },
+            {
+                "junction_id": 2, "strategy_id": 1, "rule_id": 2,
+                "evaluation_order": 1, "stop_if_fail": True,
+                "score_penalty": None, "weight": None,
+                "parameters": {"min": 0.5}, "terminal_verdict": None,
+                "rationale": None, "enabled": True,
+            },
+            {
+                "junction_id": 3, "strategy_id": 1, "rule_id": 3,
+                "evaluation_order": 1, "stop_if_fail": True,
+                "score_penalty": None, "weight": None,
+                "parameters": {"min": 0.6}, "terminal_verdict": None,
+                "rationale": None, "enabled": True,
+            },
+            {
+                "junction_id": 4, "strategy_id": 1, "rule_id": 4,
+                "evaluation_order": 1, "stop_if_fail": False,
+                "score_penalty": None, "weight": 1.0,
+                "parameters": {}, "terminal_verdict": None,
+                "rationale": None, "enabled": True,
+            },
+        ]
+        return _build_config(rules, junction)
+
+    def _recording_adapter(self):
+        """Return a synthetic adapter that records its populate_computed inputs."""
+        calls = []
+
+        class RecordingAdapter:
+            def populate_computed(self, candidates, needed):
+                calls.append({
+                    "candidate_ids": [c.candidate_id for c in candidates],
+                    "needed": set(needed),
+                })
+                # Populate the COMPUTED values synthetically
+                for c in candidates:
+                    if "prob_profit" in needed:
+                        c.named_values["prob_profit"] = 0.75
+                    if "ev_ratio" in needed:
+                        c.named_values["ev_ratio"] = 80.0
+
+        return RecordingAdapter(), calls
+
+    def test_callback_fires_once_with_survivors(self):
+        """Callback fires exactly once, with only surviving candidates."""
+        config = self._computed_config()
+        adapter, calls = self._recording_adapter()
+        registry = DictFormulaRegistry({"score_fn": lambda nv, p: nv.get("price", 0)})
+
+        candidates = [
+            Candidate("c1", "test", {"price": 10.0, "net_debit": 1.0}),  # survives
+            Candidate("c2", "test", {"price": 20.0, "net_debit": 2.0}),  # survives
+            Candidate("c3", "test", {"price": 3.0, "net_debit": 1.0}),   # halted at RAW gate
+        ]
+
+        results = run_batch(candidates, config.rule_sets["test_strat"], registry, adapter)
+
+        # Callback fired exactly once
+        assert len(calls) == 1
+        # Only survivors passed to adapter (c3 halted at RAW gate)
+        assert sorted(calls[0]["candidate_ids"]) == ["c1", "c2"]
+        # Needed set contains exactly the COMPUTED gate's referenced names
+        assert calls[0]["needed"] == {"prob_profit"}
+
+    def test_halted_at_derived_gate_excluded_from_survivors(self):
+        """A candidate halted at a DERIVED gate is absent from the adapter call."""
+        config = self._computed_config()
+        adapter, calls = self._recording_adapter()
+        registry = DictFormulaRegistry({"score_fn": lambda nv, p: nv.get("price", 0)})
+
+        candidates = [
+            Candidate("c1", "test", {"price": 10.0, "net_debit": 1.0}),  # survives
+            Candidate("c2", "test", {"price": 10.0, "net_debit": 0.1}),  # halted at DERIVED gate
+        ]
+
+        results = run_batch(candidates, config.rule_sets["test_strat"], registry, adapter)
+
+        assert len(calls) == 1
+        assert calls[0]["candidate_ids"] == ["c1"]
+
+        # c2 was halted
+        c2_result = [r for r in results if r.candidate_id == "c2"][0]
+        assert c2_result.terminal_phase == "gate"
+        assert c2_result.final_score is None
+
+    def test_needed_includes_computed_scoring_names(self):
+        """needed set includes COMPUTED names from scoring criteria, not just gates."""
+        config = self._computed_config(include_computed_scoring=True)
+        adapter, calls = self._recording_adapter()
+        registry = DictFormulaRegistry({"score_fn": lambda nv, p: nv.get("ev_ratio", 0)})
+
+        candidates = [
+            Candidate("c1", "test", {"price": 10.0, "net_debit": 1.0}),
+        ]
+
+        results = run_batch(candidates, config.rule_sets["test_strat"], registry, adapter)
+
+        assert len(calls) == 1
+        # Both COMPUTED gate name AND COMPUTED scoring name should be in needed
+        assert calls[0]["needed"] == {"prob_profit", "ev_ratio"}
+
+    def test_no_callback_when_adapter_is_none(self):
+        """Pipeline works without an adapter — no COMPUTED callback."""
+        config = self._computed_config()
+        registry = DictFormulaRegistry({"score_fn": lambda nv, p: nv.get("price", 0)})
+
+        candidate = Candidate("c1", "test", {
+            "price": 10.0, "net_debit": 1.0, "prob_profit": 0.8,
+        })
+
+        result = run_pipeline(candidate, config.rule_sets["test_strat"], registry)
+        assert result.verdict is not None
+        assert result.terminal_phase == "verdict"
+
+    def test_no_callback_when_all_halted(self):
+        """Callback does not fire when all candidates are halted before COMPUTED."""
+        config = self._computed_config()
+        adapter, calls = self._recording_adapter()
+        registry = DictFormulaRegistry({"score_fn": lambda nv, p: 50.0})
+
+        candidates = [
+            Candidate("c1", "test", {"price": 1.0, "net_debit": 1.0}),  # halted at RAW
+            Candidate("c2", "test", {"price": 2.0, "net_debit": 0.1}),  # halted at RAW
+        ]
+
+        results = run_batch(candidates, config.rule_sets["test_strat"], registry, adapter)
+
+        assert len(calls) == 0
+        assert all(r.terminal_phase == "gate" for r in results)
+
+    def test_computed_gate_halts_after_callback(self):
+        """A candidate can pass DERIVED but fail COMPUTED gate after callback."""
+        config = self._computed_config()
+        registry = DictFormulaRegistry({"score_fn": lambda nv, p: 50.0})
+
+        # Adapter populates prob_profit below threshold (0.6)
+        class LowProbAdapter:
+            def populate_computed(self, candidates, needed):
+                for c in candidates:
+                    c.named_values["prob_profit"] = 0.3  # fails >= 0.6
+
+        candidate = Candidate("c1", "test", {"price": 10.0, "net_debit": 1.0})
+        result = run_pipeline(
+            candidate, config.rule_sets["test_strat"], registry, LowProbAdapter()
+        )
+
+        assert result.terminal_phase == "gate"
+        assert result.final_score is None
+        # The COMPUTED gate decision should be recorded
+        computed_decisions = [d for d in result.gate_decisions if d.tier == Tier.COMPUTED]
+        assert len(computed_decisions) == 1
+        assert computed_decisions[0].passed is False
 
 
 class TestDomainBoundary:
