@@ -25,7 +25,7 @@ Extension points (added by downstream Stories)
 - Expression library (OTA-700)
 - Pipeline orchestrator (OTA-701) — SHIPPED
 - COMPUTED callback (OTA-702) — SHIPPED
-- Result-record builder (OTA-703)
+- Result-record builder (OTA-703) — SHIPPED
 - Bronze record contract (OTA-704)
 - Persistence sink interface (OTA-705)
 - source_app_id enforcement (OTA-706)
@@ -65,14 +65,14 @@ def evaluate(
     registry : FormulaRegistry, optional
         Live formula registry. Uses StubFormulaRegistry if not provided.
     adapter : ComputedAdapter, optional
-        COMPUTED-value callback adapter (OTA-702 seam).
+        COMPUTED-value callback adapter (OTA-702).
     sink : optional
         Persistence sink (OTA-705 seam).
 
     Returns
     -------
-    list[PipelineResult]
-        Per-candidate pipeline results.
+    list[ResultRecord]
+        Per-candidate result records with full per-rule trace and provenance.
 
     Raises
     ------
@@ -81,11 +81,19 @@ def evaluate(
     """
     from app.insight_engine.pipeline import run_batch as _run_batch
     from app.insight_engine.registry import StubFormulaRegistry as _Stub
+    from app.insight_engine.result_builder import build_result_records as _build
 
     reg = registry or _Stub()
     rule_set = config.rule_sets[strategy_key]
 
-    return _run_batch(list(candidates), rule_set, reg, adapter)
+    pipeline_results = _run_batch(list(candidates), rule_set, reg, adapter)
+
+    return _build(
+        pipeline_results,
+        source_app_id=source_app_id,
+        strategy_key=strategy_key,
+        config_version=config.config_version,
+    )
 
 
 # ── Config loader exports (OTA-698) ──────────────────────────────────────
@@ -124,6 +132,13 @@ from app.insight_engine.pipeline import (  # noqa: E402
     PipelineResult,
     run_batch,
     run_pipeline,
+)
+
+# ── Result-record builder (OTA-703) ──────────────────────────────────────
+from app.insight_engine.result_builder import (  # noqa: E402
+    ENGINE_VERSION,
+    build_result_record,
+    build_result_records,
 )
 
 # ── Startup validation (OTA-699) ─────────────────────────────────────────
@@ -173,6 +188,10 @@ __all__ = [
     "PipelineResult",
     "run_batch",
     "run_pipeline",
+    # Result-record builder (OTA-703)
+    "ENGINE_VERSION",
+    "build_result_record",
+    "build_result_records",
     # Expression library (OTA-700)
     "SUPPORTED_EXPRESSIONS",
     "UnsupportedExpressionError",

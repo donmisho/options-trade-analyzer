@@ -1,9 +1,9 @@
 """
 Pipeline orchestrator tests — 7-phase execution, gate mechanics,
-halt-verdict path, scoring, adjustments, band lookup, and
-COMPUTED callback.
+halt-verdict path, scoring, adjustments, band lookup,
+COMPUTED callback, and result-record builder.
 
-OTA-701, OTA-702
+OTA-701, OTA-702, OTA-703
 """
 
 from __future__ import annotations
@@ -812,6 +812,333 @@ class TestComputedCallback:
         computed_decisions = [d for d in result.gate_decisions if d.tier == Tier.COMPUTED]
         assert len(computed_decisions) == 1
         assert computed_decisions[0].passed is False
+
+
+class TestResultRecordBuilder:
+    """OTA-703: result-record builder with mandatory full per-rule trace."""
+
+    def test_completed_candidate_band_lookup(self):
+        """Completed candidate: verdict_source=BAND_LOOKUP, final_score non-null, full trace."""
+        from app.insight_engine import evaluate
+        from app.insight_engine.models import ResultRecord
+
+        rules = [
+            {
+                "rule_id": 1, "owner_app_id": "SHARED", "rule_key": "g1",
+                "phase": "gate", "tier": "RAW", "intent": None,
+                "condition_expression": ">=", "formula_ref": None,
+                "referenced_named_values": ["price"],
+                "parameter_schema": {"min": {"type": "number"}},
+                "null_semantics": None, "enabled": True,
+            },
+            {
+                "rule_id": 2, "owner_app_id": "SHARED", "rule_key": "s1",
+                "phase": "scoring", "tier": None, "intent": None,
+                "condition_expression": None, "formula_ref": "formula:f1",
+                "referenced_named_values": ["quality"],
+                "parameter_schema": {}, "null_semantics": None, "enabled": True,
+            },
+            {
+                "rule_id": 3, "owner_app_id": "SHARED", "rule_key": "adj1",
+                "phase": "adjustment", "tier": None, "intent": None,
+                "condition_expression": None, "formula_ref": "formula:adj",
+                "referenced_named_values": [],
+                "parameter_schema": {}, "null_semantics": None, "enabled": True,
+            },
+        ]
+        junction = [
+            {
+                "junction_id": 1, "strategy_id": 1, "rule_id": 1,
+                "evaluation_order": 1, "stop_if_fail": True,
+                "score_penalty": None, "weight": None,
+                "parameters": {"min": 5.0}, "terminal_verdict": None,
+                "rationale": None, "enabled": True,
+            },
+            {
+                "junction_id": 2, "strategy_id": 1, "rule_id": 2,
+                "evaluation_order": 1, "stop_if_fail": False,
+                "score_penalty": None, "weight": 1.0,
+                "parameters": {}, "terminal_verdict": None,
+                "rationale": None, "enabled": True,
+            },
+            {
+                "junction_id": 3, "strategy_id": 1, "rule_id": 3,
+                "evaluation_order": 1, "stop_if_fail": False,
+                "score_penalty": None, "weight": None,
+                "parameters": {}, "terminal_verdict": None,
+                "rationale": None, "enabled": True,
+            },
+        ]
+        config = _build_config(rules, junction)
+        registry = DictFormulaRegistry({
+            "f1": lambda nv, p: nv.get("quality", 0),
+            "adj": lambda nv, p: -5.0,
+        })
+        candidate = _make_candidate(price=10.0, quality=80.0)
+
+        results = evaluate(
+            candidates=[candidate],
+            strategy_key="test_strat",
+            source_app_id="OTA",
+            config=config,
+            registry=registry,
+        )
+
+        assert len(results) == 1
+        r = results[0]
+        assert isinstance(r, ResultRecord)
+
+        # Verdict path
+        assert r.verdict_source == VerdictSource.BAND_LOOKUP
+        assert r.final_score is not None
+        assert r.verdict == "EXECUTE"
+        assert r.terminal_phase == "verdict"
+
+        # Full per-rule trace
+        assert len(r.gate_decisions) == 1
+        assert r.gate_decisions[0].rule_key == "g1"
+        assert r.gate_decisions[0].passed is True
+        assert len(r.scoring_breakdown) == 1
+        assert r.scoring_breakdown[0].rule_key == "s1"
+        assert len(r.adjustment_results) == 1
+        assert r.adjustment_results[0].rule_key == "adj1"
+
+        # Provenance
+        assert r.source_app_id == "OTA"
+        assert r.strategy_key == "test_strat"
+        assert r.engine_version is not None
+        assert r.config_version is not None
+        assert r.run_timestamp is not None
+
+    def test_halt_with_terminal_verdict(self):
+        """Stopping gate + terminal_verdict: HALT_TERMINAL_VERDICT, final_score null."""
+        from app.insight_engine import evaluate
+        from app.insight_engine.models import ResultRecord
+
+        rules = [{
+            "rule_id": 1, "owner_app_id": "SHARED", "rule_key": "earnings_gate",
+            "phase": "gate", "tier": "RAW", "intent": None,
+            "condition_expression": ">=", "formula_ref": None,
+            "referenced_named_values": ["dte"],
+            "parameter_schema": {"min": {"type": "number"}},
+            "null_semantics": None, "enabled": True,
+        }]
+        junction = [{
+            "junction_id": 1, "strategy_id": 1, "rule_id": 1,
+            "evaluation_order": 1, "stop_if_fail": True,
+            "score_penalty": None, "weight": None,
+            "parameters": {"min": 14},
+            "terminal_verdict": "WAIT_FOR_EARNINGS",
+            "rationale": None, "enabled": True,
+        }]
+        config = _build_config(rules, junction)
+
+        results = evaluate(
+            candidates=[_make_candidate(dte=7)],
+            strategy_key="test_strat",
+            source_app_id="OTA",
+            config=config,
+        )
+
+        r = results[0]
+        assert isinstance(r, ResultRecord)
+        assert r.verdict_source == VerdictSource.HALT_TERMINAL_VERDICT
+        assert r.verdict == "WAIT_FOR_EARNINGS"
+        assert r.final_score is None
+        assert r.terminal_phase == "gate"
+        assert r.source_app_id == "OTA"
+
+    def test_halt_without_terminal_verdict(self):
+        """Stopping gate + no terminal_verdict: HALT_NO_VERDICT, verdict null."""
+        from app.insight_engine import evaluate
+        from app.insight_engine.models import ResultRecord
+
+        rules = [{
+            "rule_id": 1, "owner_app_id": "SHARED", "rule_key": "g1",
+            "phase": "gate", "tier": "RAW", "intent": None,
+            "condition_expression": ">=", "formula_ref": None,
+            "referenced_named_values": ["val"],
+            "parameter_schema": {"min": {"type": "number"}},
+            "null_semantics": None, "enabled": True,
+        }]
+        junction = [{
+            "junction_id": 1, "strategy_id": 1, "rule_id": 1,
+            "evaluation_order": 1, "stop_if_fail": True,
+            "score_penalty": None, "weight": None,
+            "parameters": {"min": 10},
+            "terminal_verdict": None,
+            "rationale": None, "enabled": True,
+        }]
+        config = _build_config(rules, junction)
+
+        results = evaluate(
+            candidates=[_make_candidate(val=5)],
+            strategy_key="test_strat",
+            source_app_id="OTA",
+            config=config,
+        )
+
+        r = results[0]
+        assert isinstance(r, ResultRecord)
+        assert r.verdict_source == VerdictSource.HALT_NO_VERDICT
+        assert r.verdict is None
+        assert r.final_score is None
+
+    def test_non_stopping_failure_in_trace_still_reaches_verdict(self):
+        """Non-stopping gate failure appears in trace AND candidate reaches verdict."""
+        from app.insight_engine import evaluate
+
+        rules = [
+            {
+                "rule_id": 1, "owner_app_id": "SHARED", "rule_key": "soft_gate",
+                "phase": "gate", "tier": "RAW", "intent": None,
+                "condition_expression": ">=", "formula_ref": None,
+                "referenced_named_values": ["val"],
+                "parameter_schema": {"min": {"type": "number"}},
+                "null_semantics": None, "enabled": True,
+            },
+            {
+                "rule_id": 2, "owner_app_id": "SHARED", "rule_key": "sc1",
+                "phase": "scoring", "tier": None, "intent": None,
+                "condition_expression": None, "formula_ref": "formula:f1",
+                "referenced_named_values": [],
+                "parameter_schema": {}, "null_semantics": None, "enabled": True,
+            },
+        ]
+        junction = [
+            {
+                "junction_id": 1, "strategy_id": 1, "rule_id": 1,
+                "evaluation_order": 1, "stop_if_fail": False,
+                "score_penalty": 10.0, "weight": None,
+                "parameters": {"min": 100},
+                "terminal_verdict": None,
+                "rationale": None, "enabled": True,
+            },
+            {
+                "junction_id": 2, "strategy_id": 1, "rule_id": 2,
+                "evaluation_order": 1, "stop_if_fail": False,
+                "score_penalty": None, "weight": 1.0,
+                "parameters": {}, "terminal_verdict": None,
+                "rationale": None, "enabled": True,
+            },
+        ]
+        config = _build_config(rules, junction)
+        registry = DictFormulaRegistry({"f1": lambda nv, p: 80.0})
+
+        results = evaluate(
+            candidates=[_make_candidate(val=5)],
+            strategy_key="test_strat",
+            source_app_id="OTA",
+            config=config,
+            registry=registry,
+        )
+
+        r = results[0]
+        # Gate failure is in the trace
+        assert len(r.gate_decisions) == 1
+        assert r.gate_decisions[0].passed is False
+        assert r.gate_decisions[0].was_terminal is False
+        # Candidate still reached verdict
+        assert r.verdict_source == VerdictSource.BAND_LOOKUP
+        assert r.verdict is not None
+        assert r.final_score is not None
+
+    def test_was_terminal_true_only_on_halting_decision(self):
+        """was_terminal is true on exactly the halting decision, false elsewhere."""
+        from app.insight_engine import evaluate
+
+        rules = [
+            {
+                "rule_id": 1, "owner_app_id": "SHARED", "rule_key": "g1_pass",
+                "phase": "gate", "tier": "RAW", "intent": None,
+                "condition_expression": ">=", "formula_ref": None,
+                "referenced_named_values": ["a"],
+                "parameter_schema": {"min": {"type": "number"}},
+                "null_semantics": None, "enabled": True,
+            },
+            {
+                "rule_id": 2, "owner_app_id": "SHARED", "rule_key": "g2_halt",
+                "phase": "gate", "tier": "RAW", "intent": None,
+                "condition_expression": ">=", "formula_ref": None,
+                "referenced_named_values": ["b"],
+                "parameter_schema": {"min": {"type": "number"}},
+                "null_semantics": None, "enabled": True,
+            },
+        ]
+        junction = [
+            {
+                "junction_id": 1, "strategy_id": 1, "rule_id": 1,
+                "evaluation_order": 1, "stop_if_fail": True,
+                "score_penalty": None, "weight": None,
+                "parameters": {"min": 0},
+                "terminal_verdict": None,
+                "rationale": None, "enabled": True,
+            },
+            {
+                "junction_id": 2, "strategy_id": 1, "rule_id": 2,
+                "evaluation_order": 2, "stop_if_fail": True,
+                "score_penalty": None, "weight": None,
+                "parameters": {"min": 100},
+                "terminal_verdict": "FAIL",
+                "rationale": None, "enabled": True,
+            },
+        ]
+        config = _build_config(rules, junction)
+
+        results = evaluate(
+            candidates=[_make_candidate(a=5, b=1)],
+            strategy_key="test_strat",
+            source_app_id="OTA",
+            config=config,
+        )
+
+        r = results[0]
+        assert len(r.gate_decisions) == 2
+        # First gate passed, not terminal
+        assert r.gate_decisions[0].rule_key == "g1_pass"
+        assert r.gate_decisions[0].passed is True
+        assert r.gate_decisions[0].was_terminal is False
+        # Second gate failed, is terminal
+        assert r.gate_decisions[1].rule_key == "g2_halt"
+        assert r.gate_decisions[1].passed is False
+        assert r.gate_decisions[1].was_terminal is True
+
+    def test_provenance_stamped(self):
+        """Engine metadata is present on every record."""
+        from app.insight_engine import evaluate
+        from app.insight_engine.result_builder import ENGINE_VERSION
+
+        rules = [{
+            "rule_id": 1, "owner_app_id": "SHARED", "rule_key": "s1",
+            "phase": "scoring", "tier": None, "intent": None,
+            "condition_expression": None, "formula_ref": "formula:f1",
+            "referenced_named_values": [],
+            "parameter_schema": {}, "null_semantics": None, "enabled": True,
+        }]
+        junction = [{
+            "junction_id": 1, "strategy_id": 1, "rule_id": 1,
+            "evaluation_order": 1, "stop_if_fail": False,
+            "score_penalty": None, "weight": 1.0,
+            "parameters": {}, "terminal_verdict": None,
+            "rationale": None, "enabled": True,
+        }]
+        config = _build_config(rules, junction)
+        registry = DictFormulaRegistry({"f1": lambda nv, p: 75.0})
+
+        results = evaluate(
+            candidates=[_make_candidate()],
+            strategy_key="test_strat",
+            source_app_id="TEST_APP",
+            config=config,
+            registry=registry,
+        )
+
+        r = results[0]
+        assert r.source_app_id == "TEST_APP"
+        assert r.strategy_key == "test_strat"
+        assert r.engine_version == ENGINE_VERSION
+        assert r.config_version == config.config_version
+        assert r.run_timestamp is not None
 
 
 class TestDomainBoundary:
