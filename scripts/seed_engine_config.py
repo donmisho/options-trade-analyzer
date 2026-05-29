@@ -403,13 +403,34 @@ def parse_workbook(xlsx_path: Path):
             "sort_order": i,
         })
 
-    # Verdict domains (OTA — screening verdicts)
+    # Verdict domains (OTA — screening verdicts: band verdicts)
     for i, v in enumerate(verdict_bands, 1):
         lookups.append({
             "owner_app_id": "OTA",
             "lookup_set": "screening_verdicts",
             "lookup_key": v["verdict"],
             "payload": {"min_score": v["min_score"], "max_score": v["max_score"]},
+            "sort_order": i,
+        })
+
+    # OTA-711: Halt verdicts (bypass band lookup; emitted by terminal_verdict on junction)
+    halt_verdicts = [
+        {
+            "lookup_key": "WAIT_FOR_EARNINGS",
+            "payload": {
+                "label": "Wait for Earnings",
+                "kind": "HALT_VERDICT",
+                "description": "Halt emitted by the earnings gate when an earnings "
+                               "announcement falls inside the trade window.",
+            },
+        },
+    ]
+    for i, hv in enumerate(halt_verdicts, len(verdict_bands) + 1):
+        lookups.append({
+            "owner_app_id": "OTA",
+            "lookup_set": "screening_verdicts",
+            "lookup_key": hv["lookup_key"],
+            "payload": hv["payload"],
             "sort_order": i,
         })
 
@@ -718,7 +739,7 @@ def _decompose_earnings(rules):
             formula_ref="formula:earnings_route1_no_viable_window",
             ref_values=["next_earnings_date", "entry_date", "expiry_date",
                         "dte_before_earnings", "dte_after_earnings"],
-        ), {"stop_if_fail": True, "score_penalty": None}),
+        ), {"stop_if_fail": True, "score_penalty": None, "terminal_verdict": "PASS"}),
 
         (_make_atomic(
             compound,
@@ -727,7 +748,7 @@ def _decompose_earnings(rules):
             formula_ref="formula:earnings_route2_wait_post_window",
             ref_values=["next_earnings_date", "entry_date", "expiry_date",
                         "dte_before_earnings", "dte_after_earnings"],
-        ), {"stop_if_fail": True, "score_penalty": None}),
+        ), {"stop_if_fail": True, "score_penalty": None, "terminal_verdict": "WAIT_FOR_EARNINGS"}),
 
         (_make_atomic(
             compound,
@@ -736,7 +757,7 @@ def _decompose_earnings(rules):
             formula_ref="formula:earnings_route3_post_entry_better",
             ref_values=["next_earnings_date", "entry_date", "expiry_date",
                         "dte_before_earnings", "dte_after_earnings"],
-        ), {"stop_if_fail": True, "score_penalty": None}),
+        ), {"stop_if_fail": True, "score_penalty": None, "terminal_verdict": "WAIT_FOR_EARNINGS"}),
 
         (_make_atomic(
             compound,
@@ -1139,10 +1160,12 @@ def enrich_scoring_formulas(rules):
 #   - Narrative-grounding validator: app-layer post-Claude quality gate, NOT an
 #     engine rule. Lives in evaluation_routes.py:917-1024. The engine evaluates
 #     deterministic math; Claude narrative validation is a separate concern.
-#   - WAIT_FOR_EARNINGS: NOT a 4th verdict band. It is the earnings-gate halt
-#     outcome — a candidate stopped by the earnings gate (stop_if_fail=true)
-#     exits at that terminal_phase; the app labels it WAIT_FOR_EARNINGS. The
-#     sheet's 3 verdict bands (EXECUTE >= 70, WAIT 50-69, PASS < 50) stand.
+#   - WAIT_FOR_EARNINGS: NOT a 4th verdict band. It is a halt verdict emitted
+#     via terminal_verdict on junction rows for earnings routes 2 & 3 (OTA-711).
+#     Route 1 emits PASS (trade dead). Route 4 is non-stopping. The 3 band
+#     verdicts (EXECUTE >= 70, WAIT 50-69, PASS < 50) are unaffected.
+#     WAIT_FOR_EARNINGS is registered in engine_lookups(screening_verdicts)
+#     with kind=HALT_VERDICT so OTA-699 startup validation passes.
 #   - VerticalSpreadEngine internal weights (EV35/RR25/Prob20/Liq15/Theta5) and
 #     NakedOptionEngine internal weights (Delta30/Theta25/IV20/RR15/Liq10): a
 #     legacy second scoring system SUPERSEDED by the strategy junction weights
@@ -1633,6 +1656,14 @@ def set_gate_mechanics(rules, junctions):
                     f"{existing} | {_LONG_DTE_RATIONALE}" if existing
                     else _LONG_DTE_RATIONALE
                 )
+
+    # OTA-711: Clear terminal_verdict on LT earnings routes.
+    # LT's long-dated profile means earnings is informational, not a hard halt
+    # verdict. LT's stop_if_fail=true with terminal_verdict=NULL is a known gap
+    # flagged for follow-up under OTA-680.
+    for j in junctions:
+        if j["strategy_key"] == "lottery_ticket" and j["rule_key"].startswith("earnings_route"):
+            j["terminal_verdict"] = None
 
     # Verify no duplicates
     order_check = defaultdict(list)

@@ -1,6 +1,6 @@
 # business-rules.md
 
-**Last Updated:** 2026-05-18 UTC
+**Last Updated:** 2026-05-28 UTC
 **Instigating Ticket:** OTA-495 (v1 Create — Extract business rules from architecture-plan.md and CLAUDE.md)
 **Status:** Cost Guardrails section populated. Strategy Scoring → Strategy-Structure Compatibility subsection populated (canonical compatibility map established). Remaining subsections (Strategy Scoring formula and weights, Hard Gates, PoP Computation, Health Grade Computation, Position Lifecycle, Signal Freshness / TTL Windows, Display Formatting Rules, Validation Baseline) are placeholders. Full extraction of remaining content is the body of OTA-495 implementation work.
 
@@ -25,6 +25,7 @@ For auth flows, sessions, and security, read `auth-process.md`.
 - [Technicals Classification](#technicals-classification)
 - [Regime Classification](#regime-classification)
 - [Hard Gates (P0 Pipeline)](#hard-gates-p0-pipeline)
+- [Halt Verdicts](#halt-verdicts)
 - [Probability of Profit (PoP) Computation](#probability-of-profit-pop-computation)
 - [Health Grade Computation](#health-grade-computation)
 - [Position Lifecycle](#position-lifecycle)
@@ -164,6 +165,44 @@ Rendered as `<signed_pct>% (<direction>)` with one decimal.
 
 ---
 
+## Halt Verdicts
+
+A halt verdict is a `terminal_verdict` string set on a junction row where `stop_if_fail = true`. When the engine halts a candidate at that gate, the verdict is taken directly from the junction row, bypassing the Phase-7 band lookup (`insight_engine.md` §3.8). A junction row with `stop_if_fail = true` and `terminal_verdict = NULL` halts the candidate with no surfaced verdict.
+
+**`WAIT` (band verdict) and `WAIT_FOR_EARNINGS` (halt verdict) are distinct strings.** `WAIT` is the Phase-7 band verdict for scores 50–69.99. `WAIT_FOR_EARNINGS` is emitted by the earnings gate's `terminal_verdict` column and never passes through band lookup. They must not be conflated in UI rendering, filtering, or analytics.
+
+### Earnings-gate halt verdicts (SCREENING consumer surface)
+
+The earnings gate is decomposed into a 4-route decision tree (OTA-683). Only stopping routes carry a `terminal_verdict`; the non-stopping route scores normally with a penalty.
+
+| Route | Rule Key | stop_if_fail | terminal_verdict | Semantic |
+|---|---|---|---|---|
+| 1 | `earnings_route1_no_viable_window` | true | `PASS` | Neither pre- nor post-earnings window is viable (dte_before ≤ 7, dte_after < 14). Trade is definitively unworkable. |
+| 2 | `earnings_route2_wait_post_window` | true | `WAIT_FOR_EARNINGS` | Pre-earnings window too short, but post-earnings window is viable (dte_before ≤ 7, dte_after ≥ 14). Re-evaluate after earnings. |
+| 3 | `earnings_route3_post_entry_better` | true | `WAIT_FOR_EARNINGS` | Both windows viable, but post-earnings entry is likely better (dte_before ≥ 8, dte_after ≥ 21). Delay entry. |
+| 4 | `earnings_route4_pre_momentum_play` | false | NULL | Pre-earnings momentum play viable (dte_before ≥ 8, dte_after < 21). Scored normally with −15 point penalty. |
+
+**Strategy bindings:**
+- **SP, WG, TR:** All four routes bound with the verdicts above.
+- **LT (Lottery Ticket):** All four routes bound with `terminal_verdict = NULL`. LT's earnings routes are `stop_if_fail = true` but carry no surfaced verdict — a known gap flagged for follow-up under OTA-680.
+
+### Halt-verdict domain registration
+
+Every non-null `terminal_verdict` value must exist in the `engine_lookups` verdict-domain set for the strategy's `consumer_surface`. For SCREENING:
+
+| lookup_key | kind | Registered by |
+|---|---|---|
+| `EXECUTE` | BAND_VERDICT | OTA-682 (seed) |
+| `WAIT` | BAND_VERDICT | OTA-682 (seed) |
+| `PASS` | BAND_VERDICT | OTA-682 (seed) |
+| `WAIT_FOR_EARNINGS` | HALT_VERDICT | OTA-711 |
+
+### Other stopping gates
+
+All other `stop_if_fail = true` junction rows (underlying price floor, liquidity gates, DTE range, data completeness, EV, structure gates) carry `terminal_verdict = NULL`. Their halts are recorded in the per-rule trace but surface no special verdict. This is intentional — these are structural disqualifications, not actionable user signals.
+
+---
+
 ## Probability of Profit (PoP) Computation
 
 *Content pending — document the canonical PoP formula. Key established rule: long-leg delta is used (not `1 - short_delta`). Document why, the source-of-truth code path (`app/analysis/`), and any per-strategy variation.*
@@ -257,6 +296,7 @@ The UI implementation pattern that enforces the confirmation requirement (`Refre
 
 | Date | Ticket | Change |
 |---|---|---|
+| 2026-05-28 UTC | OTA-711 | Halt Verdicts section added. Documents terminal_verdict per (strategy, rule) binding for the earnings-gate 4-route tree: Route 1 → PASS, Routes 2–3 → WAIT_FOR_EARNINGS, Route 4 → NULL (non-stopping). WAIT vs WAIT_FOR_EARNINGS distinction documented. Halt-verdict domain registration table added. LT silent-halt gap flagged. |
 | 2026-05-18 UTC | OTA-656 | Validation Baseline: added D6 narrative drift assertion documentation with fallback-text filter rule. Pairs where either narrative matches the placeholder "Narrative unavailable this cycle" are skipped rather than warned. Threshold (0.85) unchanged. |
 | 2026-05-12 UTC | OTA-640 | Regime Classification subsection added: VIX x IVR 9-cell grid, 5-day trend classification rule, VIX 52w percentile computation, distance-from-50d SMA for SPY/QQQ. All rules deterministic (no Claude call). |
 | 2026-05-11 UTC | OTA-641 | Technicals Classification subsection added under Strategy Scoring: SMA alignment narrative rules (bullish/bearish/clustered/mixed), distance-from-50d label thresholds, computation inputs (SMA, ATR, source). |
