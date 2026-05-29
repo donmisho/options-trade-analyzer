@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.insight_engine.config_source import ConfigSource, RawRow
+from app.insight_engine.expressions import UnsupportedExpressionError, validate_expression
 from app.insight_engine.models import (
     JunctionRow,
     Phase,
@@ -255,6 +256,11 @@ def load_config(
         junction = _row_to_junction(row, strat_key, r_key)
         bindings_by_strategy[strat_key].append(RuleBinding(rule=rule, junction=junction))
 
+    # ── Validate expressions + decompose BETWEEN at load ─────────────
+    for strat_key, bindings in bindings_by_strategy.items():
+        _validate_expressions(bindings)
+        bindings_by_strategy[strat_key] = _decompose_between(bindings)
+
     # ── Resolve RuleSets ──────────────────────────────────────────────
     rule_sets: dict[str, RuleSet] = {}
     for strat_key, bindings in bindings_by_strategy.items():
@@ -299,6 +305,103 @@ def load_config(
         apps=loaded_apps,
         config_version=config_version,
     )
+
+
+def _validate_expressions(bindings: list[RuleBinding]) -> None:
+    """Reject any rule whose expression is not in the closed set (§6.3)."""
+    for binding in bindings:
+        validate_expression(
+            binding.rule.condition_expression,
+            binding.rule.formula_ref,
+        )
+
+
+def _decompose_between(bindings: list[RuleBinding]) -> list[RuleBinding]:
+    """Replace BETWEEN bindings with two atomic comparison bindings (§6.3).
+
+    A BETWEEN rule with two parameters becomes:
+    - rule_key__gte with '>=' and the lower-valued parameter
+    - rule_key__lte with '<=' and the higher-valued parameter
+
+    The runtime evaluator never sees BETWEEN.
+    """
+    result: list[RuleBinding] = []
+    for binding in bindings:
+        if binding.rule.condition_expression != "BETWEEN":
+            result.append(binding)
+            continue
+
+        params = binding.junction.parameters
+        schema = binding.rule.parameter_schema
+        if len(params) < 2:
+            raise ValueError(
+                f"BETWEEN rule '{binding.rule.rule_key}' requires exactly 2 "
+                f"parameters, got {len(params)}: {list(params.keys())}"
+            )
+
+        # Sort parameter entries by value to identify low/high
+        sorted_params = sorted(params.items(), key=lambda kv: kv[1])
+        low_key, low_val = sorted_params[0]
+        high_key, high_val = sorted_params[1]
+
+        # Split schema entries
+        low_schema = {low_key: schema.get(low_key, {})} if schema else {}
+        high_schema = {high_key: schema.get(high_key, {})} if schema else {}
+
+        # Create >= rule (lower bound)
+        gte_rule = Rule(
+            rule_key=f"{binding.rule.rule_key}__gte",
+            phase=binding.rule.phase,
+            tier=binding.rule.tier,
+            intent=f"{binding.rule.intent} (lower bound)" if binding.rule.intent else None,
+            condition_expression=">=",
+            formula_ref=None,
+            referenced_named_values=binding.rule.referenced_named_values,
+            parameter_schema=low_schema,
+            null_semantics=binding.rule.null_semantics,
+        )
+        gte_junction = JunctionRow(
+            strategy_key=binding.junction.strategy_key,
+            rule_key=gte_rule.rule_key,
+            evaluation_order=binding.junction.evaluation_order,
+            stop_if_fail=binding.junction.stop_if_fail,
+            score_penalty=binding.junction.score_penalty,
+            weight=binding.junction.weight,
+            parameters={low_key: low_val},
+            rationale=binding.junction.rationale,
+            enabled=binding.junction.enabled,
+            terminal_verdict=binding.junction.terminal_verdict,
+        )
+
+        # Create <= rule (upper bound)
+        lte_rule = Rule(
+            rule_key=f"{binding.rule.rule_key}__lte",
+            phase=binding.rule.phase,
+            tier=binding.rule.tier,
+            intent=f"{binding.rule.intent} (upper bound)" if binding.rule.intent else None,
+            condition_expression="<=",
+            formula_ref=None,
+            referenced_named_values=binding.rule.referenced_named_values,
+            parameter_schema=high_schema,
+            null_semantics=binding.rule.null_semantics,
+        )
+        lte_junction = JunctionRow(
+            strategy_key=binding.junction.strategy_key,
+            rule_key=lte_rule.rule_key,
+            evaluation_order=binding.junction.evaluation_order + 1,
+            stop_if_fail=binding.junction.stop_if_fail,
+            score_penalty=binding.junction.score_penalty,
+            weight=binding.junction.weight,
+            parameters={high_key: high_val},
+            rationale=binding.junction.rationale,
+            enabled=binding.junction.enabled,
+            terminal_verdict=binding.junction.terminal_verdict,
+        )
+
+        result.append(RuleBinding(rule=gte_rule, junction=gte_junction))
+        result.append(RuleBinding(rule=lte_rule, junction=lte_junction))
+
+    return result
 
 
 def _is_enabled(row: RawRow) -> bool:

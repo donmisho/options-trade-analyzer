@@ -91,10 +91,23 @@ from app.insight_engine.loader import (  # noqa: E402
     load_config,
 )
 
-# ── Formula registry (OTA-699) ───────────────────────────────────────────
+# ── Formula registry (OTA-699, OTA-700) ──────────────────────────────────
 from app.insight_engine.registry import (  # noqa: E402
+    DictFormulaRegistry,
+    FormulaFn,
     FormulaRegistry,
     StubFormulaRegistry,
+)
+
+# ── Expression library (OTA-700) ─────────────────────────────────────────
+from app.insight_engine.expressions import (  # noqa: E402
+    SUPPORTED_EXPRESSIONS,
+    UnsupportedExpressionError,
+    evaluate_expression,
+    extract_formula_name,
+    invoke_formula,
+    is_formula_ref,
+    validate_expression,
 )
 
 # ── Startup validation (OTA-699) ─────────────────────────────────────────
@@ -134,9 +147,19 @@ __all__ = [
     "EngineConfig",
     "LookupEntry",
     "load_config",
-    # Formula registry (OTA-699)
+    # Formula registry (OTA-699, OTA-700)
+    "FormulaFn",
     "FormulaRegistry",
     "StubFormulaRegistry",
+    "DictFormulaRegistry",
+    # Expression library (OTA-700)
+    "SUPPORTED_EXPRESSIONS",
+    "UnsupportedExpressionError",
+    "evaluate_expression",
+    "extract_formula_name",
+    "invoke_formula",
+    "is_formula_ref",
+    "validate_expression",
     # Startup validation (OTA-699)
     "ConfigValidationError",
     "ValidationError",
