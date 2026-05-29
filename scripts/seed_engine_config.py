@@ -1697,28 +1697,194 @@ def build_formula_registry(rules: list[dict]) -> list[dict]:
     correct as OTA-686/OTA-688 add formula names. The engine's startup
     validation (§6.6) checks that every formula_ref in engine_rules has a
     matching entry in this registry.
+
+    OTA-689 re-open: enriched payloads carry intent, inputs, output_type, and
+    notes extracted from the rule data. This is one half of the dual-validation
+    contract (the other half is the live rule-library registry in Wave-3).
     """
-    seen = {}  # formula_name → rule_key (first rule that references it)
+    seen = {}  # formula_name → rule dict (first rule that references it)
     for r in rules:
         ref = r.get("formula_ref")
         if not ref:
             continue
-        # Normalise: strip 'formula:' prefix if present
         name = ref.removeprefix("formula:")
         if name not in seen:
-            seen[name] = r["rule_key"]
+            seen[name] = r
+
+    # Per-formula enrichment: intent, inputs, output_type, notes.
+    # Extracted from rule data; hand-curated where the rule's intent is sparse.
+    _ENRICHMENTS = {
+        # ── Gate formulas ──
+        "chart_state_matches_direction": {
+            "intent": "Chart state alignment must match trade direction (bullish for bull, bearish for bear).",
+            "inputs": ["chart_state", "trade_direction"],
+            "output_type": "bool",
+        },
+        "earnings_route1_no_viable_window": {
+            "intent": "Earnings Route 1: no viable window — dte_before <= 7 and dte_after < 14. Halt verdict: PASS.",
+            "inputs": ["next_earnings_date", "entry_date", "expiry_date", "dte_before_earnings", "dte_after_earnings"],
+            "output_type": "bool",
+        },
+        "earnings_route2_wait_post_window": {
+            "intent": "Earnings Route 2: pre-earnings window too short, post-earnings window viable — dte_before <= 7 and dte_after >= 14. Halt verdict: WAIT_FOR_EARNINGS.",
+            "inputs": ["next_earnings_date", "entry_date", "expiry_date", "dte_before_earnings", "dte_after_earnings"],
+            "output_type": "bool",
+        },
+        "earnings_route3_post_entry_better": {
+            "intent": "Earnings Route 3: post-earnings entry likely better — dte_before >= 8 and dte_after >= 21. Halt verdict: WAIT_FOR_EARNINGS.",
+            "inputs": ["next_earnings_date", "entry_date", "expiry_date", "dte_before_earnings", "dte_after_earnings"],
+            "output_type": "bool",
+        },
+        "earnings_route4_pre_momentum_play": {
+            "intent": "Earnings Route 4: pre-earnings momentum play — dte_before >= 8 and dte_after < 21. Score with -15 penalty, effective DTE = dte_before - 1.",
+            "inputs": ["next_earnings_date", "entry_date", "expiry_date", "dte_before_earnings", "dte_after_earnings"],
+            "output_type": "bool",
+        },
+        # ── Scoring formulas ──
+        "bid_ask_tightness": {
+            "intent": "Inverse of bid-ask spread percentage. Tighter spreads score higher.",
+            "inputs": ["bid_ask_spread_pct"],
+            "output_type": "score_0_1",
+            "notes": "Normalization owed: 0-1 scale, multiply by 100 for [0,100].",
+        },
+        "credit_width": {
+            "intent": "Net credit received as percentage of spread width.",
+            "inputs": ["net_debit", "spread_width"],
+            "output_type": "score_0_100",
+        },
+        "delta_otm_score": {
+            "intent": "How far out-of-the-money the option is. 0.25 delta maps to 0; 0 delta maps to 1.",
+            "inputs": ["delta"],
+            "output_type": "score_0_1",
+            "notes": "Normalization owed: 0-1 scale, multiply by 100 for [0,100].",
+        },
+        "delta_quality": {
+            "intent": "Gaussian-like peak around a target delta range. Parameterised by delta_center and delta_half_range.",
+            "inputs": ["delta"],
+            "output_type": "score_0_1",
+            "notes": "Junction parameters: delta_center, delta_half_range.",
+        },
+        "expected_value": {
+            "intent": "Expected value of the trade: (probability of profit * max gain) - (probability of loss * max loss).",
+            "inputs": ["p_max_profit", "max_profit", "p_max_loss", "max_loss"],
+            "output_type": "decimal",
+            "notes": "COMPUTED tier — requires Black-Scholes probability matrix.",
+        },
+        "iv_percentile_cost": {
+            "intent": "Linear inversion of raw IV. Penalises high IV.",
+            "inputs": ["iv"],
+            "output_type": "score_0_100",
+            "notes": "PROXY: true IV percentile requires historical-IV producer (adapter feature, later). Current formula penalises high IV linearly.",
+        },
+        "iv_rank": {
+            "intent": "IV rank as a percentile of historical IV range.",
+            "inputs": ["iv_rank"],
+            "output_type": "score_0_100",
+            "notes": "PROXY: code uses ATM IV / 0.60 as proxy. True IV rank is percentile-based; current implementation is a ratio.",
+        },
+        "liquidity": {
+            "intent": "Combined liquidity from both legs' volume and open interest.",
+            "inputs": ["long_volume", "short_volume", "long_oi", "short_oi"],
+            "output_type": "decimal",
+            "notes": "Normalization owed: raw sum, not yet on [0,100] scale.",
+        },
+        "open_interest": {
+            "intent": "Raw open interest value as a scoring signal.",
+            "inputs": ["open_interest"],
+            "output_type": "decimal",
+            "notes": "PROXY: normalization to [0,100] to be defined during tuning (e.g. log-scale or percentile rank).",
+        },
+        "payout_ratio": {
+            "intent": "Expected 10% move payout relative to premium paid.",
+            "inputs": ["delta", "underlying_price", "premium_dollars"],
+            "output_type": "decimal",
+            "notes": "Normalization owed: raw ratio, not yet on [0,100] scale.",
+        },
+        "probability_of_profit": {
+            "intent": "Probability that the trade expires profitable, derived from option delta.",
+            "inputs": ["long_delta", "short_delta"],
+            "output_type": "score_0_100",
+            "notes": "COMPUTED tier — uses long-leg delta (not 1 - short_delta). See business-rules.md.",
+        },
+        "reward_risk": {
+            "intent": "Ratio of maximum reward to maximum risk for the trade.",
+            "inputs": ["max_profit", "max_loss"],
+            "output_type": "decimal",
+        },
+        "runway_score": {
+            "intent": "How many days of theta the premium can sustain (premium / daily_theta).",
+            "inputs": ["theta_runway_days"],
+            "output_type": "decimal",
+            "notes": "PROXY: normalization to [0,100] to be defined during tuning (e.g. sigmoid or min-max).",
+        },
+        "sma_alignment_score": {
+            "intent": "Score from SMA alignment classification (BULLISH/BEARISH/MIXED/NEUTRAL).",
+            "inputs": ["sma_8", "sma_21", "sma_50", "sma_alignment_classification"],
+            "output_type": "score_0_1",
+            "notes": "PROXY: 0.5 passthrough. Planned replacement: classification-to-score via compute_sma_signal().",
+        },
+        "theta_gamma_ratio": {
+            "intent": "Ratio of theta decay to gamma risk.",
+            "inputs": ["net_theta", "max_loss"],
+            "output_type": "decimal",
+            "notes": "PROXY: currently identical to theta_margin_ratio (abs(net_theta) / max_loss). True theta/gamma requires per-leg gamma propagation.",
+        },
+        "theta_margin_ratio": {
+            "intent": "Daily theta decay as a fraction of maximum loss (margin at risk).",
+            "inputs": ["net_theta", "max_loss"],
+            "output_type": "decimal",
+        },
+        # ── Adjustment formulas ──
+        "cushion_penalty_moderate": {
+            "intent": "Moderate proximity penalty: cushion >= 1.0% and < 2.0% of underlying price → -10 points.",
+            "inputs": ["stock_price", "short_strike"],
+            "output_type": "decimal",
+        },
+        "extension_matches_trade_direction": {
+            "intent": "Check if stock extension direction matches trade direction (above SMA for bull, below for bear).",
+            "inputs": ["stock_price", "sma_50", "trade_direction"],
+            "output_type": "bool",
+        },
+        "probability_asymmetry_penalty": {
+            "intent": "Graduated penalty based on loss/profit probability ratio. ratio >= 2.0 → -25; >= 1.5 → -15; >= 1.25 → -8; < 1.25 → 0.",
+            "inputs": ["p_max_loss", "p_max_profit"],
+            "output_type": "decimal",
+            "notes": "Junction parameters: band_severe (2.0), band_high (1.5), band_moderate (1.25), penalty_severe (-25), penalty_high (-15), penalty_moderate (-8).",
+        },
+    }
 
     lookups = []
     for i, name in enumerate(sorted(seen), 1):
+        rule = seen[name]
+        enrichment = _ENRICHMENTS.get(name, {})
+
+        # Fall back to rule data if no enrichment entry
+        intent = enrichment.get("intent", rule.get("intent", ""))
+        inputs = enrichment.get("inputs")
+        if inputs is None:
+            ref_vals = rule.get("referenced_named_values")
+            if isinstance(ref_vals, list):
+                inputs = [v.get("name", str(v)) if isinstance(v, dict) else str(v) for v in ref_vals]
+            else:
+                inputs = []
+        output_type = enrichment.get("output_type", "decimal")
+        notes = enrichment.get("notes")
+
+        payload = {
+            "status": "pending",
+            "intent": intent,
+            "inputs": inputs,
+            "output_type": output_type,
+            "first_referenced_by": rule["rule_key"],
+        }
+        if notes:
+            payload["notes"] = notes
+
         lookups.append({
             "owner_app_id": "SHARED",
             "lookup_set": "formula_registry",
             "lookup_key": name,
-            "payload": {
-                "status": "pending",
-                "description": f"Formula implementation required for rule library. "
-                               f"First referenced by rule '{seen[name]}'.",
-            },
+            "payload": payload,
             "sort_order": i,
         })
 
