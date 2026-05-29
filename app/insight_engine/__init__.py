@@ -80,6 +80,17 @@ def evaluate(
     )
 
 
+# ── Config loader exports (OTA-698) ──────────────────────────────────────
+from app.insight_engine.config_source import (  # noqa: E402
+    ConfigSource,
+    InMemoryConfigSource,
+)
+from app.insight_engine.loader import (  # noqa: E402
+    EngineConfig,
+    LookupEntry,
+    load_config,
+)
+
 # ── Dataclass and enum exports (OTA-697) ─────────────────────────────────
 from app.insight_engine.models import (  # noqa: E402
     Tier,
@@ -102,6 +113,12 @@ from app.insight_engine.models import (  # noqa: E402
 
 __all__ = [
     "evaluate",
+    # Config loader (OTA-698)
+    "ConfigSource",
+    "InMemoryConfigSource",
+    "EngineConfig",
+    "LookupEntry",
+    "load_config",
     # Enums
     "Tier",
     "Phase",
