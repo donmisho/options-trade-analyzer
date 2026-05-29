@@ -280,6 +280,7 @@ def parse_workbook(xlsx_path: Path):
                 "score_penalty": score_penalty,
                 "weight": weight,
                 "parameters": params if params else None,
+                "terminal_verdict": None,
                 "enabled": True,
             }
             junctions.append(junction)
@@ -943,6 +944,7 @@ def _inject_junctions(junctions, injections):
                 "score_penalty": (overrides or {}).get("score_penalty"),
                 "weight": None,
                 "parameters": None,
+                "terminal_verdict": None,
                 "enabled": True,
             }
             junctions.append(j)
@@ -1235,6 +1237,7 @@ def backfill_missing_rules(rules, junctions):
             "score_penalty": -20.0,
             "weight": None,
             "parameters": {"dte_low": 8, "dte_high": 13, "penalty": -20},
+            "terminal_verdict": None,
             "enabled": True,
         })
 
@@ -1281,6 +1284,7 @@ def backfill_missing_rules(rules, junctions):
                 "band_severe": 2.0, "band_high": 1.5, "band_moderate": 1.25,
                 "penalty_severe": -25, "penalty_high": -15, "penalty_moderate": -8,
             },
+            "terminal_verdict": None,
             "enabled": True,
         })
 
@@ -1796,6 +1800,18 @@ def upsert_junctions(cursor, junctions: list[dict], rule_id_map: dict, strat_id_
 
         params = validate_json(j["parameters"], f"junction {j['strategy_key']}×{j['rule_key']} parameters")
 
+        # terminal_verdict: nullable varchar(32) — validate type + length
+        tv = j.get("terminal_verdict")
+        if tv is not None:
+            tv = str(tv).strip()
+            if len(tv) == 0 or len(tv) > 32:
+                raise ValueError(
+                    f"terminal_verdict must be a non-empty string of length ≤ 32 or null — "
+                    f"got {tv!r} (len={len(tv)}) on ({j['strategy_key']}, {j['rule_key']})"
+                )
+        else:
+            tv = None
+
         cursor.execute(
             "SELECT junction_id FROM dbo.engine_strategy_rule_junction WHERE strategy_id = ? AND rule_id = ?",
             strat_id, rule_id,
@@ -1807,21 +1823,22 @@ def upsert_junctions(cursor, junctions: list[dict], rule_id_map: dict, strat_id_
             cursor.execute("""
                 UPDATE dbo.engine_strategy_rule_junction SET
                     evaluation_order = ?, stop_if_fail = ?, score_penalty = ?,
-                    weight = ?, parameters = ?, enabled = ?, updated_at = GETUTCDATE()
+                    weight = ?, parameters = ?, terminal_verdict = ?,
+                    enabled = ?, updated_at = GETUTCDATE()
                 WHERE junction_id = ?
             """, j["evaluation_order"], 1 if j["stop_if_fail"] else 0,
-                j["score_penalty"], j["weight"], params,
+                j["score_penalty"], j["weight"], params, tv,
                 1 if j["enabled"] else 0, jid)
             log.debug(f"  Updated junction: {j['strategy_key']}×{j['rule_key']}")
         else:
             cursor.execute("""
                 INSERT INTO dbo.engine_strategy_rule_junction
                     (strategy_id, rule_id, evaluation_order, stop_if_fail,
-                     score_penalty, weight, parameters, enabled)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                     score_penalty, weight, parameters, terminal_verdict, enabled)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, strat_id, rule_id, j["evaluation_order"],
                 1 if j["stop_if_fail"] else 0, j["score_penalty"],
-                j["weight"], params, 1 if j["enabled"] else 0)
+                j["weight"], params, tv, 1 if j["enabled"] else 0)
             log.debug(f"  Inserted junction: {j['strategy_key']}×{j['rule_key']}")
         count += 1
 
