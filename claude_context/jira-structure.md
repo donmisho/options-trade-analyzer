@@ -1,7 +1,7 @@
 # Jira Structure (Profile)
 
 **Scope:** Profile level — applies to all of Don's projects under this profile (currently OTA, future TMTC projects).
-**Last Updated:** 2026-05-06 UTC
+**Last Updated:** 2026-05-19 UTC
 **Governing Story:** OTA-569 (Documentation Governance — Profile)
 **Creation Subtask:** OTA-589
 
@@ -73,6 +73,20 @@ If a planned hierarchy violates any of these (e.g., a Subtask under another Subt
 - `XXX-###` is permitted only as a placeholder in template documents that demonstrate format
 
 This rule prevents the "we thought it would be 549 but Jira gave it 551" cleanup cycle.
+
+---
+
+## Title conventions
+
+Titles describe the **work**, not the **execution order**. Phase numbers, sprint numbers, "Step N — " prefixes, and similar sequencing metadata belong in descriptions, commit messages, or prompt files — never in titles. Execution order is a property of the queue, not the work item; a Subtask's parent and the prompts/artifacts that drove it carry the sequencing context. Titles that survive across reorderings and audit revisions are titles that don't embed sequencing.
+
+Examples:
+
+- ❌ `Phase 3b.1 — ORM model alignment` → ✅ `ORM model alignment`
+- ❌ `Sprint 7 — User onboarding flow` → ✅ `User onboarding flow`
+- ❌ `Step 2 of cutover — symbol normalization` → ✅ `Symbol normalization`
+
+This rule is universal across all projects on this profile. Project-level `CLAUDE.md` files may restate it for visibility but cannot override it.
 
 ---
 
@@ -148,4 +162,5 @@ When creating, transitioning, or modifying issues via the Atlassian MCP or the J
 
 | Date | Subtask | Change |
 |---|---|---|
+| 2026-05-19 UTC | OTA-674 | Added "Title conventions" section. Codifies the universal rule: titles describe the work, not the execution order. Phase numbers, sprint numbers, and step prefixes belong in descriptions, commit messages, or prompt files — never in titles. Applies to all projects on this profile; project-level overrides are not permitted. |
 | 2026-05-06 UTC | OTA-589 | Initial creation. Replaces a workaround where Jira hierarchy and parenting rules were duplicated inside each project's `CLAUDE.md`. Codifies the no-Feature decision driven by license tier — explicit "if you see Feature anywhere, it's wrong, ignore it" guidance included. Documents the transition-name quirk ("To Do" transition → Schedule status). Captures API lessons learned: parent must be direct named param, prefer markdown contentFormat, use transition IDs not names. |

@@ -1,7 +1,7 @@
 # CLAUDE.md
 
-**Last Updated:** 2026-05-06 UTC
-**Governing Story:** *(to be filed under the project Documentation Governance Epic)*
+**Last Updated:** 2026-05-19 UTC
+**Governing Story:** OTA-573 (Documentation Governance — Project (OTA))
 
 ---
 
@@ -112,7 +112,8 @@ The OTA project uses a 6-stage workflow plus one terminal cancellation state. Th
 | Write Prompt | Any | Write Prompt | 41 |
 | Done | Any | Code & Test Complete | 51 |
 | Claude Code Build | Write Prompt | Code & Test Complete | 6 |
-| Override | Code & Test Complete | Production Deployed | 9 |
+| Deployed to Prod | Code & Test Complete | Production Deployed | 5 |
+| Override | Code & Test Complete | Production Deployed | 10 |
 | Cancel (from Idea) | Idea | Cancelled | 12 |
 | Cancel (from Schedule) | Schedule | Cancelled | TBD — confirm in workflow editor; add if missing |
 | Cancel (from Write Prompt or Write Story) | Write Prompt / Write Story | Cancelled | 14 |
@@ -153,6 +154,18 @@ This is a license-imposed compromise; if the license tier changes, this section 
 ### Issue numbering
 
 Never invent or pre-assign OTA numbers. Jira assigns the key (e.g., `OTA-561`) when the issue is created; use the Jira-returned key in all references, commit messages, branch names, prompt files, and change-log entries. If a ticket reference is needed before creation, create the ticket first and then use the assigned key. `OTA-XXX` placeholders are permitted only in template documents that demonstrate format.
+
+### Issue title conventions
+
+Titles describe the **work**, not the **execution order**. Phase numbers, sprint numbers, "Step N — " prefixes, and similar sequencing metadata belong in descriptions, commit messages, or prompt files — never in titles. Execution order is a property of the queue, not the work item; a Subtask's parent and the prompts/artifacts that drove it carry the sequencing context. Titles that survive across reorderings and audit revisions are titles that don't embed sequencing.
+
+Examples:
+
+- ❌ `Phase 3b.1 — ORM model alignment` → ✅ `ORM model alignment`
+- ❌ `Sprint 7 — User onboarding flow` → ✅ `User onboarding flow`
+- ❌ `Step 2 of cutover — symbol normalization` → ✅ `Symbol normalization`
+
+This rule is the OTA-specific surface of the profile-level convention in `jira-structure.md` § Title conventions. Project overrides are not permitted.
 
 ### Before creating any ticket via API
 
@@ -377,6 +390,7 @@ A multi-stream architecture cleanup is in flight under the Architecture Optimiza
 
 | Date | Ticket | Change |
 |---|---|---|
+| 2026-05-19 UTC | OTA-673 | Added "Issue title conventions" subsection under Jira Issue Hierarchy. Titles describe the work, not the execution order; phase numbers, sprint numbers, and step prefixes belong in descriptions, commit messages, or prompt files. Cross-references `jira-structure.md` § Title conventions for the profile-level rule. Backfilled the Governing Story field to OTA-573 (no longer a placeholder). Also corrected the Transition ID table: Override is transition `10` (not `9` as previously listed); added the `Deployed to Prod` transition (id `5`) which also targets Production Deployed. Both corrections caught during the same day's transition work on OTA-673 / OTA-674. |
 | 2026-05-06 UTC | TBD (Documentation Governance Epic) | Major restructure. (1) Removed all references to Feature issue type — OTA Jira license does not include Feature; hierarchy is now Epic → Story → Subtask, with Bug as sibling to Story (or as Subtask). (2) Extracted Prompt Writing Convention to profile-level `prompt-style.md`; replaced with per-domain required-reading table. (3) Extracted Parallel Session Strategy to profile-level `build-execution.md` (renamed and broadened to cover future subagent orchestration). (4) Extracted Product Roadmap (OTAR Categories) to project-level `product-roadmap.md`. (5) Extracted Development Environment to project-level `development-environment.md` (includes zombie-process warning). (6) Extracted Deployment Workflow to project-level `deployment-workflow.md`. (7) Removed "Common Epic parents" list — Don/Claude Web supplies parent in practice. (8) Removed Claude Code's "review Jira plan?" prompt at session start — that context belongs to Claude Web during planning. (9) Added Document Governance Rules section codifying: Claude Code does not modify SoT docs unsolicited; material changes filed as Subtasks under governing Stories; pre-commit verification of Workflow Phases, Transitions, and Hierarchy required. (10) Added Profile-Level Conventions subsection naming `jira-structure.md`, `prompt-style.md`, `build-execution.md`. (11) Added Last Reviewed date to Post-Build QA Gate with 60-day review cadence. (12) Active Cleanup Items section now carries an explicit valid-until date and points to OTA-535 as the live source. |
 | 2026-05-06 05:00 UTC | OTA-555 / 556 | Added bugfix.md to SoT inventory; added Bug Fix Sessions reference under Working Patterns. |
 | 2026-04-30 23:55 UTC | OTA-535 | Added Prompt Writing Convention section (now extracted to `prompt-style.md`). |

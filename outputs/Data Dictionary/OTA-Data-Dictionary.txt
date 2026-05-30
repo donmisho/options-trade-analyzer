@@ -1,0 +1,1093 @@
+==========================================================================================
+  OTA DATABASE DATA DICTIONARY
+  Generated: 2026-05-22 02:48:16 UTC
+  Database:  options-analyzer-db
+  Server:    options-analyzer-sql-cus.database.windows.net,1433
+==========================================================================================
+
+==========================================================================================
+  SECTION 1: TABLE RECORD COUNTS
+==========================================================================================
+
+  Total Tables: 29    Total Rows: 46532
+
+  Schema         Table                                      Row Count
+  -------------------------------------------------------------------
+  dbo            agent_run_log                                    687
+  dbo            alembic_version                                    1
+  dbo            analysis_runs                                    701
+  dbo            analyzed_trades                                11751
+  dbo            audit_log                                         18
+  dbo            dashboard_layouts                                  0
+  dbo            dashboard_media                                    0
+  dbo            deploy_log                                        22
+  dbo            insights                                           0
+  dbo            option_chain_snapshots                           701
+  dbo            options_chain_snapshots                            0
+  dbo            position_assessments                             128
+  dbo            positions                                         90
+  dbo            schwab_tokens                                      0
+  dbo            symbol_context                                   633
+  dbo            symbol_quotes                                  22805
+  dbo            symbol_reference                                8102
+  dbo            sysdiagrams                                        0
+  dbo            trade_candidates                                 710
+  dbo            trade_log                                          0
+  dbo            trade_recommendations                             25
+  dbo            user_configs                                       2
+  dbo            user_favorites                                     2
+  dbo            user_sessions                                      1
+  dbo            user_watchlist                                    37
+  dbo            users                                              3
+  dbo            validation_assessments                            35
+  dbo            watchlist_symbols                                 71
+  dbo            watchlists                                         7
+
+==========================================================================================
+  SECTION 2: COLUMN DETAILS BY TABLE
+==========================================================================================
+
+  ────────────────────────────────────────────────────────────────────────────
+  TABLE: dbo.agent_run_log  (687 rows)
+  ────────────────────────────────────────────────────────────────────────────
+  #   Column                             Type                     Null  Key   Ident   References / Default
+  ------------------------------------------------------------------------------------------------------------------
+  1   id                                 int                      NO    PK    YES     
+  2   run_id                             varchar(36)              NO                  
+  3   agent_name                         varchar(100)             NO                  
+  4   stage                              varchar(50)              NO                  
+  5   trade_key                          varchar(255)             YES                 
+  6   symbol                             varchar(20)              YES   FK            -> symbol_reference.symbol
+  7   user_id                            varchar(36)              YES   FK            -> users.id
+  8   prompt_system                      varchar(MAX)             YES                 
+  9   prompt_user                        varchar(MAX)             YES                 
+  10  prompt_version                     varchar(50)              YES                 
+  11  market_snapshot                    nvarchar(MAX)            YES                 
+  12  trade_snapshot                     nvarchar(MAX)            YES                 
+  13  model_response_raw                 varchar(MAX)             YES                 
+  14  verdict                            varchar(20)              YES                 
+  15  verdict_summary                    varchar(MAX)             YES                 
+  16  otel_trace_id                      varchar(64)              YES                 
+  17  input_tokens                       int                      YES                 
+  18  output_tokens                      int                      YES                 
+  19  latency_ms                         int                      YES                 
+  20  model_name                         varchar(100)             YES                 
+  21  created_at                         datetime                 YES                 
+
+
+  ────────────────────────────────────────────────────────────────────────────
+  TABLE: dbo.alembic_version  (1 rows)
+  ────────────────────────────────────────────────────────────────────────────
+  #   Column                             Type                     Null  Key   Ident   References / Default
+  ------------------------------------------------------------------------------------------------------------------
+  1   version_num                        varchar(32)              NO    PK            
+
+
+  ────────────────────────────────────────────────────────────────────────────
+  TABLE: dbo.analysis_runs  (701 rows)
+  ────────────────────────────────────────────────────────────────────────────
+  #   Column                             Type                     Null  Key   Ident   References / Default
+  ------------------------------------------------------------------------------------------------------------------
+  1   id                                 int                      NO    PK    YES     
+  2   user_id                            varchar(36)              NO    FK            -> users.id
+  3   symbol                             varchar(20)              NO    FK            -> symbol_reference.symbol
+  4   analysis_type                      varchar(20)              NO                  
+  5   underlying_price                   float                    YES                 
+  6   provider                           varchar(50)              YES                 
+  7   chain_snapshot_id                  int                      YES   FK            -> option_chain_snapshots.id
+  8   scoring_weights                    nvarchar(MAX)            NO                  
+  9   filter_params                      nvarchar(MAX)            NO                  
+  10  result_count                       int                      YES                 
+  11  total_valid                        int                      YES                 
+  12  ran_at                             datetime                 NO                  
+
+
+  ────────────────────────────────────────────────────────────────────────────
+  TABLE: dbo.analyzed_trades  (11751 rows)
+  ────────────────────────────────────────────────────────────────────────────
+  #   Column                             Type                     Null  Key   Ident   References / Default
+  ------------------------------------------------------------------------------------------------------------------
+  1   id                                 int                      NO    PK    YES     
+  2   run_id                             int                      NO    FK            -> analysis_runs.id
+  3   user_id                            varchar(36)              NO    FK            -> users.id
+  4   symbol                             varchar(20)              NO    FK            -> symbol_reference.symbol
+  5   analysis_type                      varchar(20)              NO                  
+  6   spread_type                        varchar(20)              YES                 
+  7   long_strike                        float                    YES                 
+  8   short_strike                       float                    YES                 
+  9   option_type                        varchar(10)              YES                 
+  10  expiration                         varchar(20)              YES                 
+  11  dte                                int                      YES                 
+  12  underlying_price                   float                    YES                 
+  13  net_debit                          float                    YES                 
+  14  max_profit                         float                    YES                 
+  15  max_loss                           float                    YES                 
+  16  breakeven                          float                    YES                 
+  17  rr_ratio                           float                    YES                 
+  18  prob_of_profit                     float                    YES                 
+  19  ev_raw                             float                    YES                 
+  20  premium_dollars                    float                    YES                 
+  21  delta                              float                    YES                 
+  22  theta_per_day                      float                    YES                 
+  23  iv                                 float                    YES                 
+  24  long_volume                        int                      YES                 
+  25  short_volume                       int                      YES                 
+  26  long_oi                            int                      YES                 
+  27  short_oi                           int                      YES                 
+  28  composite_score                    float                    NO                  
+  29  score_breakdown                    nvarchar(MAX)            NO                  
+  30  scoring_weights                    nvarchar(MAX)            NO                  
+  31  captured_at                        datetime                 NO                  
+
+
+  ────────────────────────────────────────────────────────────────────────────
+  TABLE: dbo.audit_log  (18 rows)
+  ────────────────────────────────────────────────────────────────────────────
+  #   Column                             Type                     Null  Key   Ident   References / Default
+  ------------------------------------------------------------------------------------------------------------------
+  1   id                                 int                      NO    PK    YES     
+  2   user_id                            varchar(36)              YES   FK            -> users.id
+  3   event_type                         varchar(50)              NO                  
+  4   detail                             nvarchar(MAX)            YES                 
+  5   ip_address                         varchar(45)              YES                 
+  6   session_id                         varchar(100)             YES                 
+  7   created_at                         datetime                 YES                 
+
+
+  ────────────────────────────────────────────────────────────────────────────
+  TABLE: dbo.dashboard_layouts  (0 rows)
+  ────────────────────────────────────────────────────────────────────────────
+  #   Column                             Type                     Null  Key   Ident   References / Default
+  ------------------------------------------------------------------------------------------------------------------
+  1   id                                 int                      NO    PK    YES     
+  2   user_id                            varchar(36)              NO    FK            -> users.id
+  3   layout_json                        varchar(MAX)             NO                  
+  4   widgets_json                       varchar(MAX)             NO                  
+  5   created_at                         datetime                 YES                 
+  6   updated_at                         datetime                 YES                 
+
+
+  ────────────────────────────────────────────────────────────────────────────
+  TABLE: dbo.dashboard_media  (0 rows)
+  ────────────────────────────────────────────────────────────────────────────
+  #   Column                             Type                     Null  Key   Ident   References / Default
+  ------------------------------------------------------------------------------------------------------------------
+  1   id                                 int                      NO    PK    YES     
+  2   widget_id                          varchar(100)             NO                  
+  3   blob_name                          varchar(500)             NO                  
+  4   caption                            varchar(200)             YES                 
+  5   sort_order                         int                      NO                  
+  6   created_at                         datetime                 YES                 
+
+
+  ────────────────────────────────────────────────────────────────────────────
+  TABLE: dbo.deploy_log  (22 rows)
+  ────────────────────────────────────────────────────────────────────────────
+  #   Column                             Type                     Null  Key   Ident   References / Default
+  ------------------------------------------------------------------------------------------------------------------
+  1   id                                 int                      NO    PK    YES     
+  2   build_id                           varchar(64)              NO                  
+  3   environment                        varchar(16)              NO                  
+  4   deployed_at                        datetime                 NO                  
+  5   commit_sha                         varchar(40)              NO                  
+  6   ticket_keys                        varchar(500)             NO                  
+  7   notes                              varchar(500)             YES                 
+  8   created_at                         datetime                 NO                  DEFAULT (getdate())
+
+
+  ────────────────────────────────────────────────────────────────────────────
+  TABLE: dbo.insights  (0 rows)
+  ────────────────────────────────────────────────────────────────────────────
+  #   Column                             Type                     Null  Key   Ident   References / Default
+  ------------------------------------------------------------------------------------------------------------------
+  1   insight_id                         varchar(36)              NO    PK            
+  2   domain                             varchar(50)              NO                  
+  3   entity_id                          varchar(100)             NO                  
+  4   entity_label                       varchar(200)             NO                  
+  5   observation                        varchar(MAX)             NO                  
+  6   baseline                           varchar(MAX)             NO                  
+  7   deviation_score                    int                      NO                  
+  8   deviation_type                     varchar(50)              NO                  
+  9   title                              varchar(200)             NO                  
+  10  body                               varchar(1000)            NO                  
+  11  severity                           varchar(20)              NO                  
+  12  recommended_actions                varchar(MAX)             YES                 
+  13  status                             varchar(20)              YES                 
+  14  source_signals                     varchar(MAX)             YES                 
+  15  agent_run_id                       varchar(36)              YES                 
+  16  created_at                         datetime                 YES                 
+  17  dismissed_at                       datetime                 YES                 
+  18  acted_on_at                        datetime                 YES                 
+  19  user_id                            varchar(36)              YES   FK            -> users.id
+  20  source_position_id                 varchar(36)              YES   FK            -> positions.position_id
+
+
+  ────────────────────────────────────────────────────────────────────────────
+  TABLE: dbo.option_chain_snapshots  (701 rows)
+  ────────────────────────────────────────────────────────────────────────────
+  #   Column                             Type                     Null  Key   Ident   References / Default
+  ------------------------------------------------------------------------------------------------------------------
+  1   id                                 int                      NO    PK    YES     
+  2   user_id                            varchar(36)              NO    FK            -> users.id
+  3   symbol                             varchar(20)              NO    FK            -> symbol_reference.symbol
+  4   underlying_price                   float                    YES                 
+  5   provider                           varchar(50)              YES                 
+  6   contract_count                     int                      YES                 
+  7   chain_data                         nvarchar(MAX)            NO                  
+  8   captured_at                        datetime                 NO                  
+
+
+  ────────────────────────────────────────────────────────────────────────────
+  TABLE: dbo.options_chain_snapshots  (0 rows)
+  ────────────────────────────────────────────────────────────────────────────
+  #   Column                             Type                     Null  Key   Ident   References / Default
+  ------------------------------------------------------------------------------------------------------------------
+  1   snapshot_id                        varchar(36)              NO    PK            
+  2   symbol                             varchar(20)              NO                  
+  3   snapshot_date                      date                     NO                  
+  4   captured_at                        datetime                 NO                  
+  5   underlying_price                   float                    NO                  
+  6   chain_json                         varchar(MAX)             NO                  
+  7   contract_count                     int                      NO                  
+  8   dte_min                            int                      YES                 
+  9   dte_max                            int                      YES                 
+  10  provider                           varchar(50)              NO                  
+
+
+  ────────────────────────────────────────────────────────────────────────────
+  TABLE: dbo.position_assessments  (128 rows)
+  ────────────────────────────────────────────────────────────────────────────
+  #   Column                             Type                     Null  Key   Ident   References / Default
+  ------------------------------------------------------------------------------------------------------------------
+  1   assessment_id                      varchar(36)              NO    PK            
+  2   position_id                        varchar(36)              NO    FK            -> positions.position_id
+  3   version_number                     int                      NO                  
+  4   assessment_type                    varchar(20)              NO                  
+  5   verdict                            varchar(20)              NO                  
+  6   score                              int                      NO                  
+  7   synopsis                           varchar(200)             YES                 
+  8   claude_read                        varchar(MAX)             NO                  
+  9   exit_levels                        varchar(MAX)             YES                 
+  10  market_snapshot                    varchar(MAX)             YES                 
+  11  agent_run_id                       varchar(36)              YES                 
+  12  created_at                         datetime                 YES                 
+
+
+  ────────────────────────────────────────────────────────────────────────────
+  TABLE: dbo.positions  (90 rows)
+  ────────────────────────────────────────────────────────────────────────────
+  #   Column                             Type                     Null  Key   Ident   References / Default
+  ------------------------------------------------------------------------------------------------------------------
+  1   position_id                        varchar(36)              NO    PK            
+  2   user_id                            varchar(36)              NO    FK            -> users.id
+  3   symbol                             varchar(20)              NO    FK            -> symbol_reference.symbol
+  4   strategy_key                       varchar(50)              NO                  
+  5   trade_structure                    varchar(MAX)             NO                  
+  6   source                             varchar(10)              NO                  
+  7   status                             varchar(20)              NO                  
+  8   entry_price                        numeric(10,4)            YES                 
+  9   entry_date                         datetime                 NO                  
+  10  entry_greeks                       varchar(MAX)             YES                 
+  11  entry_iv_rank                      numeric(5,2)             YES                 
+  12  entry_sma_alignment                varchar(MAX)             YES                 
+  13  entry_underlying_price             numeric(10,4)            YES                 
+  14  claude_probability_matrix          varchar(MAX)             YES                 
+  15  claude_exit_levels                 varchar(MAX)             YES                 
+  16  claude_verdict                     varchar(MAX)             YES                 
+  17  claude_score                       int                      YES                 
+  18  health_grade                       varchar(2)               YES                 
+  19  current_price                      numeric(10,4)            YES                 
+  20  current_pnl                        numeric(10,4)            YES                 
+  21  last_monitored_at                  datetime                 YES                 
+  22  exit_price                         numeric(10,4)            YES                 
+  23  exit_date                          datetime                 YES                 
+  24  exit_reason                        varchar(50)              YES                 
+  25  outcome_pnl                        numeric(10,4)            YES                 
+  26  created_at                         datetime                 YES                 
+  27  updated_at                         datetime                 YES                 
+
+
+  ────────────────────────────────────────────────────────────────────────────
+  TABLE: dbo.schwab_tokens  (0 rows)
+  ────────────────────────────────────────────────────────────────────────────
+  #   Column                             Type                     Null  Key   Ident   References / Default
+  ------------------------------------------------------------------------------------------------------------------
+  1   id                                 int                      NO    PK    YES     
+  2   user_id                            varchar(36)              NO    FK            -> users.id
+  3   access_token                       varchar(MAX)             NO                  
+  4   refresh_token                      varchar(MAX)             NO                  
+  5   token_expires_at                   datetime                 NO                  
+  6   refresh_expires_at                 datetime                 NO                  
+  7   created_at                         datetime                 YES                 
+  8   updated_at                         datetime                 YES                 
+
+
+  ────────────────────────────────────────────────────────────────────────────
+  TABLE: dbo.symbol_context  (633 rows)
+  ────────────────────────────────────────────────────────────────────────────
+  #   Column                             Type                     Null  Key   Ident   References / Default
+  ------------------------------------------------------------------------------------------------------------------
+  1   context_id                         varchar(36)              NO    PK            
+  2   symbol                             varchar(20)              NO    FK            -> symbol_reference.symbol
+  3   source_id                          varchar(50)              NO                  
+  4   signal_type                        varchar(50)              NO                  
+  5   signal_value                       varchar(MAX)             NO                  
+  6   captured_at                        datetime                 YES                 
+  7   expires_at                         datetime                 NO                  
+
+
+  ────────────────────────────────────────────────────────────────────────────
+  TABLE: dbo.symbol_quotes  (22805 rows)
+  ────────────────────────────────────────────────────────────────────────────
+  #   Column                             Type                     Null  Key   Ident   References / Default
+  ------------------------------------------------------------------------------------------------------------------
+  1   id                                 int                      NO    PK    YES     
+  2   user_id                            varchar(36)              NO    FK            -> users.id
+  3   symbol                             varchar(20)              NO    FK            -> symbol_reference.symbol
+  4   price                              float                    YES                 
+  5   bid                                float                    YES                 
+  6   ask                                float                    YES                 
+  7   change                             float                    YES                 
+  8   change_pct                         float                    YES                 
+  9   volume                             int                      YES                 
+  10  provider                           varchar(50)              YES                 
+  11  captured_at                        datetime                 NO                  
+
+
+  ────────────────────────────────────────────────────────────────────────────
+  TABLE: dbo.symbol_reference  (8102 rows)
+  ────────────────────────────────────────────────────────────────────────────
+  #   Column                             Type                     Null  Key   Ident   References / Default
+  ------------------------------------------------------------------------------------------------------------------
+  1   symbol                             varchar(20)              NO    PK            
+  2   name                               nvarchar(200)            NO                  
+  3   exchange                           nvarchar(20)             YES                 
+  4   sector                             nvarchar(50)             YES                 
+  5   sub_industry                       nvarchar(100)            YES                 
+  6   asset_type                         nvarchar(20)             YES                 
+  7   last_updated                       datetime2                YES                 DEFAULT (getutcdate())
+  8   api_symbol                         varchar(20)              YES                 
+
+
+  ────────────────────────────────────────────────────────────────────────────
+  TABLE: dbo.sysdiagrams  (0 rows)
+  ────────────────────────────────────────────────────────────────────────────
+  #   Column                             Type                     Null  Key   Ident   References / Default
+  ------------------------------------------------------------------------------------------------------------------
+  1   name                               sysname                  NO                  
+  2   principal_id                       int                      NO                  
+  3   diagram_id                         int                      NO    PK    YES     
+  4   version                            int                      YES                 
+  5   definition                         varbinary(MAX)           YES                 
+
+
+  ────────────────────────────────────────────────────────────────────────────
+  TABLE: dbo.trade_candidates  (710 rows)
+  ────────────────────────────────────────────────────────────────────────────
+  #   Column                             Type                     Null  Key   Ident   References / Default
+  ------------------------------------------------------------------------------------------------------------------
+  1   trade_key                          varchar(36)              NO    PK            
+  2   user_id                            varchar(36)              NO    FK            -> users.id
+  3   symbol                             varchar(20)              NO    FK            -> symbol_reference.symbol
+  4   structure                          varchar(MAX)             NO                  
+  5   leg_count                          int                      NO                  
+  6   legs                               varchar(MAX)             YES                 
+  7   net_metrics                        varchar(MAX)             YES                 
+  8   underlying_spot                    numeric(10,4)            NO                  
+  9   pipeline_score                     numeric(10,4)            YES                 
+  10  pipeline_components                varchar(MAX)             YES                 
+  11  scan_source                        varchar(MAX)             NO                  
+  12  scan_strategy_key                  varchar(MAX)             YES                 
+  13  scanned_at                         datetime                 NO                  DEFAULT (getutcdate())
+  14  claude_evaluation                  varchar(MAX)             YES                 
+
+
+  ────────────────────────────────────────────────────────────────────────────
+  TABLE: dbo.trade_log  (0 rows)
+  ────────────────────────────────────────────────────────────────────────────
+  #   Column                             Type                     Null  Key   Ident   References / Default
+  ------------------------------------------------------------------------------------------------------------------
+  1   id                                 int                      NO    PK    YES     
+  2   user_id                            varchar(36)              NO    FK            -> users.id
+  3   symbol                             varchar(20)              NO    FK            -> symbol_reference.symbol
+  4   strategy                           varchar(50)              NO                  
+  5   legs                               nvarchar(MAX)            NO                  
+  6   quantity                           int                      YES                 
+  7   underlying_price                   float                    YES                 
+  8   net_debit                          float                    YES                 
+  9   max_profit                         float                    YES                 
+  10  max_loss                           float                    YES                 
+  11  breakeven                          float                    YES                 
+  12  status                             varchar(20)              NO                  
+  13  broker_order_id                    varchar(100)             YES                 
+  14  fill_price                         float                    YES                 
+  15  mfa_challenge_used                 bit                      YES                 
+  16  session_id                         varchar(100)             YES                 
+  17  ip_address                         varchar(45)              YES                 
+  18  created_at                         datetime                 YES                 
+
+
+  ────────────────────────────────────────────────────────────────────────────
+  TABLE: dbo.trade_recommendations  (25 rows)
+  ────────────────────────────────────────────────────────────────────────────
+  #   Column                             Type                     Null  Key   Ident   References / Default
+  ------------------------------------------------------------------------------------------------------------------
+  1   id                                 int                      NO    PK    YES     
+  2   trade_key                          varchar(255)             NO                  
+  3   symbol                             varchar(20)              NO    FK            -> symbol_reference.symbol
+  4   spread_label                       varchar(100)             NO                  
+  5   expiration                         varchar(20)              NO                  
+  6   verdict                            varchar(20)              NO                  
+  7   rank                               varchar(20)              YES                 
+  8   verdict_summary                    varchar(MAX)             NO                  
+  9   market_snapshot                    nvarchar(MAX)            NO                  
+  10  trade_snapshot                     nvarchar(MAX)            NO                  
+  11  run_id                             varchar(36)              YES                 
+  12  prompt_version                     varchar(50)              YES                 
+  13  evaluated_at                       datetime                 YES                 
+  14  updated_at                         datetime                 YES                 
+  15  user_id                            varchar(36)              YES   FK            -> users.id
+
+
+  ────────────────────────────────────────────────────────────────────────────
+  TABLE: dbo.user_configs  (2 rows)
+  ────────────────────────────────────────────────────────────────────────────
+  #   Column                             Type                     Null  Key   Ident   References / Default
+  ------------------------------------------------------------------------------------------------------------------
+  1   id                                 int                      NO    PK    YES     
+  2   user_id                            varchar(36)              NO    FK            -> users.id
+  3   default_symbol                     varchar(20)              YES                 
+  4   min_dte                            int                      YES                 
+  5   max_dte                            int                      YES                 
+  6   strike_range_pct                   float                    YES                 
+  7   min_open_interest                  int                      YES                 
+  8   min_volume                         int                      YES                 
+  9   min_spread_width                   float                    YES                 
+  10  max_spread_width                   float                    YES                 
+  11  weight_expected_value              float                    YES                 
+  12  weight_reward_risk                 float                    YES                 
+  13  weight_probability                 float                    YES                 
+  14  weight_liquidity                   float                    YES                 
+  15  max_risk_per_trade                 float                    YES                 
+  16  profit_target_pct                  float                    YES                 
+  17  stop_loss_pct                      float                    YES                 
+  18  extra_settings                     nvarchar(MAX)            YES                 
+  19  updated_at                         datetime                 YES                 
+
+
+  ────────────────────────────────────────────────────────────────────────────
+  TABLE: dbo.user_favorites  (2 rows)
+  ────────────────────────────────────────────────────────────────────────────
+  #   Column                             Type                     Null  Key   Ident   References / Default
+  ------------------------------------------------------------------------------------------------------------------
+  1   id                                 int                      NO    PK    YES     
+  2   user_id                            varchar(36)              NO    FK            -> users.id
+  3   trade_id                           varchar(300)             NO                  
+  4   symbol                             varchar(20)              NO    FK            -> symbol_reference.symbol
+  5   label                              varchar(300)             YES                 
+  6   strategy                           varchar(50)              YES                 
+  7   trade_data                         nvarchar(MAX)            NO                  
+  8   saved_at                           datetime                 YES                 
+
+
+  ────────────────────────────────────────────────────────────────────────────
+  TABLE: dbo.user_sessions  (1 rows)
+  ────────────────────────────────────────────────────────────────────────────
+  #   Column                             Type                     Null  Key   Ident   References / Default
+  ------------------------------------------------------------------------------------------------------------------
+  1   id                                 varchar(36)              NO    PK            
+  2   session_id                         varchar(128)             NO                  
+  3   user_id                            varchar(36)              NO    FK            -> users.id
+  4   provider                           varchar(50)              NO                  
+  5   email                              varchar(255)             YES                 
+  6   display_name                       varchar(255)             YES                 
+  7   access_token_encrypted             varchar(MAX)             YES                 
+  8   refresh_token_encrypted            varchar(MAX)             YES                 
+  9   id_token                           varchar(MAX)             YES                 
+  10  token_expires_at                   datetime                 YES                 
+  11  csrf_token                         varchar(128)             NO                  
+  12  created_at                         datetime                 YES                 
+  13  expires_at                         datetime                 NO                  
+  14  last_active_at                     datetime                 YES                 
+
+
+  ────────────────────────────────────────────────────────────────────────────
+  TABLE: dbo.user_watchlist  (37 rows)
+  ────────────────────────────────────────────────────────────────────────────
+  #   Column                             Type                     Null  Key   Ident   References / Default
+  ------------------------------------------------------------------------------------------------------------------
+  1   id                                 int                      NO    PK    YES     
+  2   user_id                            varchar(36)              NO                  
+  3   symbol                             varchar(10)              NO                  
+  4   name                               varchar(100)             YES                 
+  5   position                           int                      NO                  
+  6   created_at                         datetime                 YES                 
+
+
+  ────────────────────────────────────────────────────────────────────────────
+  TABLE: dbo.users  (3 rows)
+  ────────────────────────────────────────────────────────────────────────────
+  #   Column                             Type                     Null  Key   Ident   References / Default
+  ------------------------------------------------------------------------------------------------------------------
+  1   id                                 varchar(36)              NO    PK            
+  2   username                           varchar(50)              NO                  
+  3   email                              varchar(255)             NO                  
+  4   password_hash                      nvarchar(255)            YES                 
+  5   role                               varchar(20)              NO                  
+  6   is_active                          bit                      YES                 
+  7   mfa_enabled                        bit                      YES                 
+  8   mfa_verified                       bit                      YES                 
+  9   market_data_provider               varchar(50)              YES                 
+  10  account_provider                   varchar(50)              YES                 
+  11  trading_provider                   varchar(50)              YES                 
+  12  trading_enabled                    bit                      YES                 
+  13  created_at                         datetime                 YES                 
+  14  updated_at                         datetime                 YES                 
+
+
+  ────────────────────────────────────────────────────────────────────────────
+  TABLE: dbo.validation_assessments  (35 rows)
+  ────────────────────────────────────────────────────────────────────────────
+  #   Column                             Type                     Null  Key   Ident   References / Default
+  ------------------------------------------------------------------------------------------------------------------
+  1   assessment_id                      varchar(36)              NO    PK            
+  2   assessment_date                    datetime                 NO                  
+  3   jira_ticket                        varchar(20)              NO                  
+  4   symbol                             varchar(20)              NO    FK            -> symbol_reference.symbol
+  5   tab                                varchar(20)              NO                  
+  6   strike                             varchar(20)              NO                  
+  7   expiration                         varchar(20)              NO                  
+  8   score                              numeric(5,2)             NO                  
+  9   verdict                            varchar(20)              NO                  
+  10  agreement                          bit                      NO                  
+  11  notes                              varchar(500)             YES                 
+  12  created_at                         datetime                 YES                 
+
+
+  ────────────────────────────────────────────────────────────────────────────
+  TABLE: dbo.watchlist_symbols  (71 rows)
+  ────────────────────────────────────────────────────────────────────────────
+  #   Column                             Type                     Null  Key   Ident   References / Default
+  ------------------------------------------------------------------------------------------------------------------
+  1   id                                 varchar(36)              NO    PK            
+  2   watchlist_id                       varchar(36)              NO    FK            -> watchlists.id
+  3   symbol                             varchar(20)              NO    FK            -> symbol_reference.symbol
+  4   added_at                           datetime                 YES                 
+
+
+  ────────────────────────────────────────────────────────────────────────────
+  TABLE: dbo.watchlists  (7 rows)
+  ────────────────────────────────────────────────────────────────────────────
+  #   Column                             Type                     Null  Key   Ident   References / Default
+  ------------------------------------------------------------------------------------------------------------------
+  1   id                                 varchar(36)              NO    PK            
+  2   name                               varchar(100)             NO                  
+  3   user_id                            varchar(36)              NO    FK            -> users.id
+  4   is_default                         bit                      NO                  
+  5   created_at                         datetime                 YES                 
+  6   updated_at                         datetime                 YES                 
+
+
+==========================================================================================
+  SECTION 3: PRIMARY KEYS
+==========================================================================================
+
+  Table                                   PK Name                                           Columns
+  ----------------------------------------------------------------------------------------------------------------------------------
+  dbo.agent_run_log                       PK__agent_ru__3213E83F3F92D311                    id
+  dbo.alembic_version                     alembic_version_pkc                               version_num
+  dbo.analysis_runs                       PK__analysis__3213E83F03497298                    id
+  dbo.analyzed_trades                     PK__analyzed__3213E83F07DFA1F7                    id
+  dbo.audit_log                           PK__audit_lo__3213E83F2DBFF21C                    id
+  dbo.dashboard_layouts                   PK__dashboar__3213E83F208104DD                    id
+  dbo.dashboard_media                     PK__dashboar__3213E83FB35E8F92                    id
+  dbo.deploy_log                          PK__deploy_l__3213E83FDC554282                    id
+  dbo.insights                            PK__insights__253700E9875F25E5                    insight_id
+  dbo.option_chain_snapshots              PK__option_c__3213E83F0275BA7D                    id
+  dbo.options_chain_snapshots             PK__options___C27CFBF7B1EAB2FC                    snapshot_id
+  dbo.position_assessments                PK__position__00B98C26B259D8DD                    assessment_id
+  dbo.positions                           PK__position__99A0E7A456B0C7D9                    position_id
+  dbo.schwab_tokens                       PK__schwab_t__3213E83FBF2CAE35                    id
+  dbo.symbol_context                      PK__symbol_c__80D46EC1D6053487                    context_id
+  dbo.symbol_quotes                       PK__symbol_q__3213E83FB59321D9                    id
+  dbo.symbol_reference                    PK_symbol_reference                               symbol
+  dbo.sysdiagrams                         PK__sysdiagr__C2B05B61D982F6E5                    diagram_id
+  dbo.trade_candidates                    PK__trade_ca__2CF982D2E81E7322                    trade_key
+  dbo.trade_log                           PK__trade_lo__3213E83F521766AF                    id
+  dbo.trade_recommendations               PK__trade_re__3213E83F64DB7240                    id
+  dbo.user_configs                        PK__user_con__3213E83F19ECD9DF                    id
+  dbo.user_favorites                      PK__user_fav__3213E83F1916B829                    id
+  dbo.user_sessions                       PK__user_ses__3213E83FA76A91F8                    id
+  dbo.user_watchlist                      PK__user_wat__3213E83FA2C4710B                    id
+  dbo.users                               PK__users__3213E83F32E86C99                       id
+  dbo.validation_assessments              PK__validati__00B98C26ADF9A26F                    assessment_id
+  dbo.watchlist_symbols                   PK__watchlis__3213E83F230C85B6                    id
+  dbo.watchlists                          PK__watchlis__3213E83F7619B4BF                    id
+
+
+==========================================================================================
+  SECTION 4: FOREIGN KEYS
+==========================================================================================
+
+  FK:     FK__agent_run__user___282DF8C2
+  Child:  dbo.agent_run_log (user_id)
+  Parent: dbo.users (id)
+  Action: ON DELETE NO_ACTION  |  ON UPDATE NO_ACTION
+
+  FK:     fk_agent_run_log_symbol_symbol_reference
+  Child:  dbo.agent_run_log (symbol)
+  Parent: dbo.symbol_reference (symbol)
+  Action: ON DELETE SET_NULL  |  ON UPDATE NO_ACTION
+
+  FK:     FK__analysis___chain__2CF2ADDF
+  Child:  dbo.analysis_runs (chain_snapshot_id)
+  Parent: dbo.option_chain_snapshots (id)
+  Action: ON DELETE NO_ACTION  |  ON UPDATE NO_ACTION
+
+  FK:     FK__analysis___user___2DE6D218
+  Child:  dbo.analysis_runs (user_id)
+  Parent: dbo.users (id)
+  Action: ON DELETE NO_ACTION  |  ON UPDATE NO_ACTION
+
+  FK:     fk_analysis_runs_symbol_symbol_reference
+  Child:  dbo.analysis_runs (symbol)
+  Parent: dbo.symbol_reference (symbol)
+  Action: ON DELETE NO_ACTION  |  ON UPDATE NO_ACTION
+
+  FK:     FK__analyzed___run_i__2A164134
+  Child:  dbo.analyzed_trades (run_id)
+  Parent: dbo.analysis_runs (id)
+  Action: ON DELETE NO_ACTION  |  ON UPDATE NO_ACTION
+
+  FK:     FK__analyzed___user___2B0A656D
+  Child:  dbo.analyzed_trades (user_id)
+  Parent: dbo.users (id)
+  Action: ON DELETE NO_ACTION  |  ON UPDATE NO_ACTION
+
+  FK:     fk_analyzed_trades_symbol_symbol_reference
+  Child:  dbo.analyzed_trades (symbol)
+  Parent: dbo.symbol_reference (symbol)
+  Action: ON DELETE NO_ACTION  |  ON UPDATE NO_ACTION
+
+  FK:     fk_audit_log_user_id_users
+  Child:  dbo.audit_log (user_id)
+  Parent: dbo.users (id)
+  Action: ON DELETE SET_NULL  |  ON UPDATE NO_ACTION
+
+  FK:     fk_dashboard_layouts_user_id_users
+  Child:  dbo.dashboard_layouts (user_id)
+  Parent: dbo.users (id)
+  Action: ON DELETE CASCADE  |  ON UPDATE NO_ACTION
+
+  FK:     fk_insights_source_position_id_positions
+  Child:  dbo.insights (source_position_id)
+  Parent: dbo.positions (position_id)
+  Action: ON DELETE SET_NULL  |  ON UPDATE NO_ACTION
+
+  FK:     fk_insights_user_id_users
+  Child:  dbo.insights (user_id)
+  Parent: dbo.users (id)
+  Action: ON DELETE NO_ACTION  |  ON UPDATE NO_ACTION
+
+  FK:     FK__option_ch__user___2FCF1A8A
+  Child:  dbo.option_chain_snapshots (user_id)
+  Parent: dbo.users (id)
+  Action: ON DELETE NO_ACTION  |  ON UPDATE NO_ACTION
+
+  FK:     fk_option_chain_snapshots_symbol_symbol_reference
+  Child:  dbo.option_chain_snapshots (symbol)
+  Parent: dbo.symbol_reference (symbol)
+  Action: ON DELETE NO_ACTION  |  ON UPDATE NO_ACTION
+
+  FK:     FK__position___posit__30C33EC3
+  Child:  dbo.position_assessments (position_id)
+  Parent: dbo.positions (position_id)
+  Action: ON DELETE NO_ACTION  |  ON UPDATE NO_ACTION
+
+  FK:     fk_positions_symbol_symbol_reference
+  Child:  dbo.positions (symbol)
+  Parent: dbo.symbol_reference (symbol)
+  Action: ON DELETE NO_ACTION  |  ON UPDATE NO_ACTION
+
+  FK:     fk_positions_user_id_users
+  Child:  dbo.positions (user_id)
+  Parent: dbo.users (id)
+  Action: ON DELETE NO_ACTION  |  ON UPDATE NO_ACTION
+
+  FK:     FK__schwab_to__user___31B762FC
+  Child:  dbo.schwab_tokens (user_id)
+  Parent: dbo.users (id)
+  Action: ON DELETE NO_ACTION  |  ON UPDATE NO_ACTION
+
+  FK:     fk_symbol_context_symbol_symbol_reference
+  Child:  dbo.symbol_context (symbol)
+  Parent: dbo.symbol_reference (symbol)
+  Action: ON DELETE NO_ACTION  |  ON UPDATE NO_ACTION
+
+  FK:     FK__symbol_qu__user___2EDAF651
+  Child:  dbo.symbol_quotes (user_id)
+  Parent: dbo.users (id)
+  Action: ON DELETE NO_ACTION  |  ON UPDATE NO_ACTION
+
+  FK:     fk_symbol_quotes_symbol_symbol_reference
+  Child:  dbo.symbol_quotes (symbol)
+  Parent: dbo.symbol_reference (symbol)
+  Action: ON DELETE NO_ACTION  |  ON UPDATE NO_ACTION
+
+  FK:     fk_trade_candidates_symbol_symbol_reference
+  Child:  dbo.trade_candidates (symbol)
+  Parent: dbo.symbol_reference (symbol)
+  Action: ON DELETE NO_ACTION  |  ON UPDATE NO_ACTION
+
+  FK:     fk_trade_candidates_user_id_users
+  Child:  dbo.trade_candidates (user_id)
+  Parent: dbo.users (id)
+  Action: ON DELETE NO_ACTION  |  ON UPDATE NO_ACTION
+
+  FK:     FK__trade_log__user___2BFE89A6
+  Child:  dbo.trade_log (user_id)
+  Parent: dbo.users (id)
+  Action: ON DELETE NO_ACTION  |  ON UPDATE NO_ACTION
+
+  FK:     fk_trade_log_symbol_symbol_reference
+  Child:  dbo.trade_log (symbol)
+  Parent: dbo.symbol_reference (symbol)
+  Action: ON DELETE NO_ACTION  |  ON UPDATE NO_ACTION
+
+  FK:     fk_trade_recommendations_symbol_symbol_reference
+  Child:  dbo.trade_recommendations (symbol)
+  Parent: dbo.symbol_reference (symbol)
+  Action: ON DELETE NO_ACTION  |  ON UPDATE NO_ACTION
+
+  FK:     fk_trade_recommendations_user_id_users
+  Child:  dbo.trade_recommendations (user_id)
+  Parent: dbo.users (id)
+  Action: ON DELETE NO_ACTION  |  ON UPDATE NO_ACTION
+
+  FK:     fk_user_configs_user_id_users
+  Child:  dbo.user_configs (user_id)
+  Parent: dbo.users (id)
+  Action: ON DELETE CASCADE  |  ON UPDATE NO_ACTION
+
+  FK:     fk_user_favorites_symbol_symbol_reference
+  Child:  dbo.user_favorites (symbol)
+  Parent: dbo.symbol_reference (symbol)
+  Action: ON DELETE NO_ACTION  |  ON UPDATE NO_ACTION
+
+  FK:     fk_user_favorites_user_id_users
+  Child:  dbo.user_favorites (user_id)
+  Parent: dbo.users (id)
+  Action: ON DELETE CASCADE  |  ON UPDATE NO_ACTION
+
+  FK:     fk_user_sessions_user_id_users
+  Child:  dbo.user_sessions (user_id)
+  Parent: dbo.users (id)
+  Action: ON DELETE CASCADE  |  ON UPDATE NO_ACTION
+
+  FK:     fk_validation_assessments_symbol_symbol_reference
+  Child:  dbo.validation_assessments (symbol)
+  Parent: dbo.symbol_reference (symbol)
+  Action: ON DELETE NO_ACTION  |  ON UPDATE NO_ACTION
+
+  FK:     FK__watchlist__watch__32AB8735
+  Child:  dbo.watchlist_symbols (watchlist_id)
+  Parent: dbo.watchlists (id)
+  Action: ON DELETE CASCADE  |  ON UPDATE NO_ACTION
+
+  FK:     fk_watchlist_symbols_symbol_symbol_reference
+  Child:  dbo.watchlist_symbols (symbol)
+  Parent: dbo.symbol_reference (symbol)
+  Action: ON DELETE NO_ACTION  |  ON UPDATE NO_ACTION
+
+  FK:     fk_watchlists_user_id_users
+  Child:  dbo.watchlists (user_id)
+  Parent: dbo.users (id)
+  Action: ON DELETE CASCADE  |  ON UPDATE NO_ACTION
+
+
+==========================================================================================
+  SECTION 5: INDEXES
+==========================================================================================
+
+  --- dbo.agent_run_log ---
+    PK__agent_ru__3213E83F3F92D311  [PK] [CLUSTERED]
+      Key: id
+    ix_agent_run_log_otel_trace_id  [NONCLUSTERED]
+      Key: otel_trace_id
+    ix_agent_run_log_run_id  [NONCLUSTERED]
+      Key: run_id
+    ix_agent_run_log_symbol  [NONCLUSTERED]
+      Key: symbol
+    ix_agent_run_log_trade_key  [NONCLUSTERED]
+      Key: trade_key
+    ix_agent_run_log_user  [NONCLUSTERED]
+      Key: user_id
+    ix_agent_run_log_user_id__created_at  [NONCLUSTERED]
+      Key: user_id, created_at DESC
+
+  --- dbo.alembic_version ---
+    alembic_version_pkc  [PK] [CLUSTERED]
+      Key: version_num
+
+  --- dbo.analysis_runs ---
+    PK__analysis__3213E83F03497298  [PK] [CLUSTERED]
+      Key: id
+    ix_analysis_runs_symbol_time  [NONCLUSTERED]
+      Key: symbol, ran_at
+    ix_analysis_runs_user_id  [NONCLUSTERED]
+      Key: user_id
+    ix_analysis_runs_user_symbol  [NONCLUSTERED]
+      Key: user_id, symbol, ran_at
+
+  --- dbo.analyzed_trades ---
+    PK__analyzed__3213E83F07DFA1F7  [PK] [CLUSTERED]
+      Key: id
+    ix_analyzed_trades_run  [NONCLUSTERED]
+      Key: run_id
+    ix_analyzed_trades_run_id  [NONCLUSTERED]
+      Key: run_id
+    ix_analyzed_trades_run_id__composite_score  [NONCLUSTERED]
+      Key: run_id, composite_score DESC
+    ix_analyzed_trades_symbol_expiry  [NONCLUSTERED]
+      Key: symbol, expiration
+    ix_analyzed_trades_user_id  [NONCLUSTERED]
+      Key: user_id
+    ix_analyzed_trades_user_symbol  [NONCLUSTERED]
+      Key: user_id, symbol, captured_at
+
+  --- dbo.audit_log ---
+    PK__audit_lo__3213E83F2DBFF21C  [PK] [CLUSTERED]
+      Key: id
+    ix_audit_log_created  [NONCLUSTERED]
+      Key: created_at
+    ix_audit_log_user_event  [NONCLUSTERED]
+      Key: user_id, event_type
+
+  --- dbo.dashboard_layouts ---
+    PK__dashboar__3213E83F208104DD  [PK] [CLUSTERED]
+      Key: id
+    ix_dashboard_layouts_user_id  [UNIQUE] [NONCLUSTERED]
+      Key: user_id
+
+  --- dbo.dashboard_media ---
+    PK__dashboar__3213E83FB35E8F92  [PK] [CLUSTERED]
+      Key: id
+    ix_dashboard_media_widget  [NONCLUSTERED]
+      Key: widget_id, sort_order
+    ix_dashboard_media_widget_id  [NONCLUSTERED]
+      Key: widget_id
+
+  --- dbo.deploy_log ---
+    PK__deploy_l__3213E83FDC554282  [PK] [CLUSTERED]
+      Key: id
+    ix_deploy_log_deployed_at  [NONCLUSTERED]
+      Key: deployed_at
+
+  --- dbo.insights ---
+    PK__insights__253700E9875F25E5  [PK] [CLUSTERED]
+      Key: insight_id
+    ix_insights_created  [NONCLUSTERED]
+      Key: created_at
+    ix_insights_domain_entity  [NONCLUSTERED]
+      Key: domain, entity_id, status
+    ix_insights_source_position_id  [NONCLUSTERED]
+      Key: source_position_id
+    ix_insights_user_id__domain__created_at  [NONCLUSTERED]
+      Key: user_id, domain, created_at DESC
+
+  --- dbo.option_chain_snapshots ---
+    PK__option_c__3213E83F0275BA7D  [PK] [CLUSTERED]
+      Key: id
+    ix_option_chain_snapshots_symbol__captured_at  [NONCLUSTERED]
+      Key: symbol, captured_at DESC
+    ix_option_chain_snapshots_symbol_time  [NONCLUSTERED]
+      Key: symbol, captured_at
+    ix_option_chain_snapshots_user_id  [NONCLUSTERED]
+      Key: user_id
+    ix_option_chain_snapshots_user_id__symbol__captured_at  [NONCLUSTERED]
+      Key: user_id, symbol, captured_at DESC
+    ix_option_chain_snapshots_user_symbol  [NONCLUSTERED]
+      Key: user_id, symbol, captured_at
+
+  --- dbo.options_chain_snapshots ---
+    PK__options___C27CFBF7B1EAB2FC  [PK] [CLUSTERED]
+      Key: snapshot_id
+    ix_options_chain_snapshots_snapshot_date  [NONCLUSTERED]
+      Key: snapshot_date
+    ix_options_chain_snapshots_symbol  [NONCLUSTERED]
+      Key: symbol
+    uq_chain_snapshot_symbol_date  [UNIQUE] [NONCLUSTERED]
+      Key: symbol, snapshot_date
+
+  --- dbo.position_assessments ---
+    PK__position__00B98C26B259D8DD  [PK] [CLUSTERED]
+      Key: assessment_id
+    ix_position_assessments_position  [NONCLUSTERED]
+      Key: position_id, created_at
+
+  --- dbo.positions ---
+    PK__position__99A0E7A456B0C7D9  [PK] [CLUSTERED]
+      Key: position_id
+    ix_positions_symbol  [NONCLUSTERED]
+      Key: symbol
+    ix_positions_user_id__status__last_monitored_at  [NONCLUSTERED]
+      Key: user_id, status, last_monitored_at
+    ix_positions_user_status  [NONCLUSTERED]
+      Key: user_id, status
+    ix_positions_user_symbol  [NONCLUSTERED]
+      Key: user_id, symbol
+
+  --- dbo.schwab_tokens ---
+    PK__schwab_t__3213E83FBF2CAE35  [PK] [CLUSTERED]
+      Key: id
+    ix_schwab_tokens_user  [NONCLUSTERED]
+      Key: user_id
+    ix_schwab_tokens_user_id  [UNIQUE] [NONCLUSTERED]
+      Key: user_id
+
+  --- dbo.symbol_context ---
+    PK__symbol_c__80D46EC1D6053487  [PK] [CLUSTERED]
+      Key: context_id
+    ix_symbol_context_lookup  [NONCLUSTERED]
+      Key: symbol, source_id, expires_at
+    ix_symbol_context_symbol  [NONCLUSTERED]
+      Key: symbol
+    ix_symbol_context_symbol__signal_type__expires_at  [NONCLUSTERED]
+      Key: symbol, signal_type, expires_at
+
+  --- dbo.symbol_quotes ---
+    PK__symbol_q__3213E83FB59321D9  [PK] [CLUSTERED]
+      Key: id
+    ix_symbol_quotes_symbol_time  [NONCLUSTERED]
+      Key: symbol, captured_at
+    ix_symbol_quotes_user_id  [NONCLUSTERED]
+      Key: user_id
+    ix_symbol_quotes_user_id__symbol__captured_at  [NONCLUSTERED]
+      Key: user_id, symbol, captured_at DESC
+    ix_symbol_quotes_user_symbol_time  [NONCLUSTERED]
+      Key: user_id, symbol, captured_at
+
+  --- dbo.symbol_reference ---
+    PK_symbol_reference  [PK] [CLUSTERED]
+      Key: symbol
+    IX_symbol_reference_asset_type  [NONCLUSTERED]
+      Key: asset_type
+    IX_symbol_reference_name  [NONCLUSTERED]
+      Key: name
+    ux_symbol_reference_api_symbol  [UNIQUE] [NONCLUSTERED]
+      Key: api_symbol
+
+  --- dbo.sysdiagrams ---
+    PK__sysdiagr__C2B05B61D982F6E5  [PK] [CLUSTERED]
+      Key: diagram_id
+    UK_principal_name  [UNIQUE] [NONCLUSTERED]
+      Key: principal_id, name
+
+  --- dbo.trade_candidates ---
+    PK__trade_ca__2CF982D2E81E7322  [PK] [CLUSTERED]
+      Key: trade_key
+    ix_trade_candidates_symbol__scanned_at  [NONCLUSTERED]
+      Key: symbol, scanned_at DESC
+    ix_trade_candidates_symbol_user  [NONCLUSTERED]
+      Key: symbol, user_id
+    ix_trade_candidates_user_id__scanned_at  [NONCLUSTERED]
+      Key: user_id, scanned_at DESC
+    ix_trade_candidates_user_scanned  [NONCLUSTERED]
+      Key: user_id, scanned_at
+
+  --- dbo.trade_log ---
+    PK__trade_lo__3213E83F521766AF  [PK] [CLUSTERED]
+      Key: id
+    ix_trade_log_symbol  [NONCLUSTERED]
+      Key: symbol
+    ix_trade_log_user_date  [NONCLUSTERED]
+      Key: user_id, created_at
+    ix_trade_log_user_id  [NONCLUSTERED]
+      Key: user_id
+
+  --- dbo.trade_recommendations ---
+    PK__trade_re__3213E83F64DB7240  [PK] [CLUSTERED]
+      Key: id
+    ix_trade_recommendations_symbol  [NONCLUSTERED]
+      Key: symbol
+    ix_trade_recommendations_trade_key  [UNIQUE] [NONCLUSTERED]
+      Key: trade_key
+    ix_trade_recommendations_user_symbol  [NONCLUSTERED]
+      Key: user_id, symbol
+
+  --- dbo.user_configs ---
+    PK__user_con__3213E83F19ECD9DF  [PK] [CLUSTERED]
+      Key: id
+    UQ__user_con__B9BE370E426076EA  [UNIQUE] [NONCLUSTERED]
+      Key: user_id
+
+  --- dbo.user_favorites ---
+    PK__user_fav__3213E83F1916B829  [PK] [CLUSTERED]
+      Key: id
+    ix_user_favorites_symbol  [NONCLUSTERED]
+      Key: symbol
+    ix_user_favorites_user  [NONCLUSTERED]
+      Key: user_id
+    ix_user_favorites_user_id  [NONCLUSTERED]
+      Key: user_id
+    uq_user_favorites_trade  [UNIQUE] [NONCLUSTERED]
+      Key: user_id, trade_id
+
+  --- dbo.user_sessions ---
+    PK__user_ses__3213E83FA76A91F8  [PK] [CLUSTERED]
+      Key: id
+    ix_user_sessions_expires_at  [NONCLUSTERED]
+      Key: expires_at
+    ix_user_sessions_user_id__expires_at  [NONCLUSTERED]
+      Key: user_id, expires_at
+    UQ__user_ses__69B13FDDA611039B  [UNIQUE] [NONCLUSTERED]
+      Key: session_id
+
+  --- dbo.user_watchlist ---
+    PK__user_wat__3213E83FA2C4710B  [PK] [CLUSTERED]
+      Key: id
+    ix_user_watchlist_user_id  [NONCLUSTERED]
+      Key: user_id
+    ix_user_watchlist_user_pos  [NONCLUSTERED]
+      Key: user_id, position
+    uq_user_watchlist_symbol  [UNIQUE] [NONCLUSTERED]
+      Key: user_id, symbol
+
+  --- dbo.users ---
+    PK__users__3213E83F32E86C99  [PK] [CLUSTERED]
+      Key: id
+    ix_users_username  [UNIQUE] [NONCLUSTERED]
+      Key: username
+    UQ__users__AB6E61643C396546  [UNIQUE] [NONCLUSTERED]
+      Key: email
+
+  --- dbo.validation_assessments ---
+    PK__validati__00B98C26ADF9A26F  [PK] [CLUSTERED]
+      Key: assessment_id
+    ix_validation_assessments_symbol  [NONCLUSTERED]
+      Key: symbol
+    ix_validation_assessments_ticket  [NONCLUSTERED]
+      Key: jira_ticket
+
+  --- dbo.watchlist_symbols ---
+    PK__watchlis__3213E83F230C85B6  [PK] [CLUSTERED]
+      Key: id
+    ix_watchlist_symbols_symbol  [NONCLUSTERED]
+      Key: symbol
+    ix_watchlist_symbols_watchlist  [NONCLUSTERED]
+      Key: watchlist_id
+    uq_watchlist_symbol  [UNIQUE] [NONCLUSTERED]
+      Key: watchlist_id, symbol
+
+  --- dbo.watchlists ---
+    PK__watchlis__3213E83F7619B4BF  [PK] [CLUSTERED]
+      Key: id
+    ix_watchlists_user  [NONCLUSTERED]
+      Key: user_id
+    ux_watchlists_user_id__name  [UNIQUE] [NONCLUSTERED]
+      Key: user_id, name
+
+
+==========================================================================================
+  END OF DATA DICTIONARY
+==========================================================================================

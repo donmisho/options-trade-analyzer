@@ -1,0 +1,1399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Options Analyzer — Architecture Report</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface2: #1c2333;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-muted: #8b949e;
+    --accent: #58a6ff;
+    --accent2: #3fb950;
+    --accent3: #d2a8ff;
+    --accent4: #f0883e;
+    --accent5: #ff7b72;
+    --accent6: #79c0ff;
+    --gradient1: linear-gradient(135deg, #58a6ff 0%, #3fb950 100%);
+    --gradient2: linear-gradient(135deg, #d2a8ff 0%, #58a6ff 100%);
+    --gradient3: linear-gradient(135deg, #f0883e 0%, #ff7b72 100%);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+
+  /* === SIDEBAR NAV === */
+  .sidebar {
+    position: fixed;
+    top: 0; left: 0;
+    width: 260px;
+    height: 100vh;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    padding: 24px 16px;
+    z-index: 100;
+    overflow-y: auto;
+  }
+
+  .sidebar h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: var(--text-muted);
+    margin-bottom: 16px;
+  }
+
+  .sidebar a {
+    display: block;
+    padding: 8px 12px;
+    color: var(--text-muted);
+    text-decoration: none;
+    font-size: 14px;
+    border-radius: 6px;
+    transition: all 0.2s;
+    margin-bottom: 2px;
+  }
+
+  .sidebar a:hover, .sidebar a.active {
+    background: var(--surface2);
+    color: var(--accent);
+  }
+
+  .sidebar .dot {
+    display: inline-block;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    margin-right: 8px;
+  }
+
+  /* === MAIN CONTENT === */
+  .main {
+    margin-left: 260px;
+    padding: 0;
+  }
+
+  /* === HERO / DIAGRAM === */
+  .hero {
+    position: relative;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 40px;
+    overflow: hidden;
+  }
+
+  .hero::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: radial-gradient(ellipse at 30% 50%, rgba(88,166,255,0.08) 0%, transparent 50%),
+                radial-gradient(ellipse at 70% 50%, rgba(63,185,80,0.06) 0%, transparent 50%);
+    animation: heroGlow 8s ease-in-out infinite alternate;
+  }
+
+  @keyframes heroGlow {
+    0% { transform: translate(0, 0) scale(1); }
+    100% { transform: translate(-2%, 2%) scale(1.05); }
+  }
+
+  .hero-title {
+    font-size: 48px;
+    font-weight: 800;
+    background: var(--gradient1);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 12px;
+    z-index: 1;
+    text-align: center;
+  }
+
+  .hero-subtitle {
+    font-size: 18px;
+    color: var(--text-muted);
+    margin-bottom: 48px;
+    z-index: 1;
+    text-align: center;
+  }
+
+  /* === ARCHITECTURE DIAGRAM === */
+  .diagram-container {
+    position: relative;
+    width: 100%;
+    max-width: 1100px;
+    z-index: 1;
+  }
+
+  .diagram-svg {
+    width: 100%;
+    height: auto;
+  }
+
+  /* Animated flow lines */
+  .flow-line {
+    stroke-dasharray: 8 4;
+    animation: flowDash 1.5s linear infinite;
+  }
+
+  @keyframes flowDash {
+    to { stroke-dashoffset: -24; }
+  }
+
+  /* Animated pulse on nodes */
+  .node-pulse {
+    animation: pulse 3s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 0.7; }
+    50% { opacity: 1; }
+  }
+
+  /* Node hover effect */
+  .diagram-node {
+    cursor: pointer;
+    transition: filter 0.3s;
+  }
+  .diagram-node:hover {
+    filter: brightness(1.3) drop-shadow(0 0 12px rgba(88,166,255,0.5));
+  }
+
+  /* Floating particles */
+  .particle {
+    position: absolute;
+    width: 4px; height: 4px;
+    border-radius: 50%;
+    background: var(--accent);
+    opacity: 0;
+    animation: float 6s ease-in-out infinite;
+  }
+
+  @keyframes float {
+    0% { opacity: 0; transform: translateY(0) scale(0); }
+    10% { opacity: 0.6; transform: translateY(-20px) scale(1); }
+    90% { opacity: 0.3; transform: translateY(-200px) scale(0.5); }
+    100% { opacity: 0; transform: translateY(-220px) scale(0); }
+  }
+
+  /* === SECTIONS === */
+  section {
+    padding: 80px 48px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  section:last-child { border-bottom: none; }
+
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 40px;
+  }
+
+  .section-icon {
+    width: 48px; height: 48px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    flex-shrink: 0;
+  }
+
+  .section-title {
+    font-size: 32px;
+    font-weight: 700;
+  }
+
+  .section-desc {
+    font-size: 15px;
+    color: var(--text-muted);
+    margin-top: 4px;
+  }
+
+  /* === KPI CARDS === */
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 20px;
+    margin-bottom: 40px;
+  }
+
+  .kpi-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    text-align: center;
+    transition: transform 0.3s, box-shadow 0.3s;
+  }
+
+  .kpi-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+  }
+
+  .kpi-value {
+    font-size: 36px;
+    font-weight: 800;
+    margin-bottom: 4px;
+  }
+
+  .kpi-label {
+    font-size: 13px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+  }
+
+  /* === COMPONENT CARDS === */
+  .component-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 20px;
+  }
+
+  .component-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    transition: transform 0.3s, border-color 0.3s;
+  }
+
+  .component-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--accent);
+  }
+
+  .component-card h3 {
+    font-size: 16px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .component-card p {
+    font-size: 14px;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+  }
+
+  .tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    margin-right: 4px;
+    margin-bottom: 4px;
+  }
+
+  .tag-blue { background: rgba(88,166,255,0.15); color: var(--accent); }
+  .tag-green { background: rgba(63,185,80,0.15); color: var(--accent2); }
+  .tag-purple { background: rgba(210,168,255,0.15); color: var(--accent3); }
+  .tag-orange { background: rgba(240,136,62,0.15); color: var(--accent4); }
+  .tag-red { background: rgba(255,123,114,0.15); color: var(--accent5); }
+
+  /* === DATA FLOW TABLE === */
+  .flow-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+  }
+
+  .flow-table th {
+    text-align: left;
+    padding: 12px 16px;
+    background: var(--surface2);
+    color: var(--text-muted);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .flow-table td {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+
+  .flow-table tr:hover td {
+    background: rgba(88,166,255,0.04);
+  }
+
+  /* === EXTERNAL SERVICES === */
+  .service-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+  }
+
+  .service-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    padding: 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+  }
+
+  .service-icon {
+    width: 40px; height: 40px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    flex-shrink: 0;
+  }
+
+  .service-item h4 { font-size: 15px; margin-bottom: 4px; }
+  .service-item p { font-size: 13px; color: var(--text-muted); }
+
+  /* === INSIGHTS / CALLOUTS === */
+  .insight-card {
+    background: var(--surface);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 12px 12px 0;
+    padding: 20px 24px;
+    margin-bottom: 16px;
+  }
+
+  .insight-card h4 { font-size: 15px; margin-bottom: 6px; }
+  .insight-card p { font-size: 14px; color: var(--text-muted); }
+
+  /* === CODE REFS === */
+  .code-ref {
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    font-size: 13px;
+    background: var(--surface2);
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: var(--accent6);
+  }
+
+  /* === RESPONSIVE === */
+  @media (max-width: 900px) {
+    .sidebar { display: none; }
+    .main { margin-left: 0; }
+    section { padding: 40px 20px; }
+    .hero-title { font-size: 32px; }
+  }
+
+  /* === SCROLL REVEAL === */
+  .reveal {
+    opacity: 0;
+    transform: translateY(30px);
+    transition: opacity 0.6s ease, transform 0.6s ease;
+  }
+
+  .reveal.visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  /* File tree */
+  .file-tree {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 13px;
+    line-height: 1.8;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    overflow-x: auto;
+    color: var(--text-muted);
+  }
+
+  .file-tree .dir { color: var(--accent); font-weight: 600; }
+  .file-tree .file { color: var(--text-muted); }
+  .file-tree .comment { color: #484f58; }
+
+  /* Layer diagram bars */
+  .layer-bar {
+    display: flex;
+    align-items: center;
+    padding: 16px 24px;
+    margin-bottom: 8px;
+    border-radius: 10px;
+    font-weight: 600;
+    font-size: 15px;
+    transition: transform 0.3s;
+    cursor: default;
+  }
+  .layer-bar:hover { transform: scaleX(1.02); }
+  .layer-bar .layer-label { flex: 1; }
+  .layer-bar .layer-detail { font-weight: 400; font-size: 13px; color: rgba(255,255,255,0.7); }
+</style>
+</head>
+<body>
+
+<!-- SIDEBAR -->
+<nav class="sidebar">
+  <h2>Architecture Report</h2>
+  <a href="#hero"><span class="dot" style="background:var(--accent)"></span>Overview</a>
+  <a href="#kpis"><span class="dot" style="background:var(--accent2)"></span>KPI Metrics</a>
+  <a href="#layers"><span class="dot" style="background:var(--accent3)"></span>System Layers</a>
+  <a href="#components"><span class="dot" style="background:var(--accent4)"></span>Component Directory</a>
+  <a href="#dataflow"><span class="dot" style="background:var(--accent5)"></span>Data Flow</a>
+  <a href="#external"><span class="dot" style="background:var(--accent6)"></span>External Services</a>
+  <a href="#frontend"><span class="dot" style="background:var(--accent3)"></span>Frontend Architecture</a>
+  <a href="#insights"><span class="dot" style="background:var(--accent2)"></span>Architecture Insights</a>
+  <a href="#coderefs"><span class="dot" style="background:var(--text-muted)"></span>Code References</a>
+</nav>
+
+<!-- MAIN -->
+<div class="main">
+
+<!-- HERO -->
+<section class="hero" id="hero">
+  <!-- Floating particles -->
+  <div class="particle" style="left:10%;top:80%;animation-delay:0s;background:var(--accent)"></div>
+  <div class="particle" style="left:30%;top:90%;animation-delay:1.2s;background:var(--accent2)"></div>
+  <div class="particle" style="left:55%;top:85%;animation-delay:2.4s;background:var(--accent3)"></div>
+  <div class="particle" style="left:75%;top:75%;animation-delay:3.6s;background:var(--accent4)"></div>
+  <div class="particle" style="left:90%;top:88%;animation-delay:4.8s;background:var(--accent)"></div>
+  <div class="particle" style="left:20%;top:70%;animation-delay:1.8s;background:var(--accent5)"></div>
+  <div class="particle" style="left:65%;top:92%;animation-delay:0.6s;background:var(--accent6)"></div>
+
+  <h1 class="hero-title">Options Analyzer</h1>
+  <p class="hero-subtitle">FastAPI + React options analysis, portfolio tracking, and AI-powered trade evaluation platform</p>
+
+  <!-- ANIMATED ARCHITECTURE DIAGRAM -->
+  <div class="diagram-container">
+    <svg class="diagram-svg" viewBox="0 0 1100 680" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="g1" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#58a6ff"/>
+          <stop offset="100%" stop-color="#3fb950"/>
+        </linearGradient>
+        <linearGradient id="g2" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#d2a8ff"/>
+          <stop offset="100%" stop-color="#58a6ff"/>
+        </linearGradient>
+        <linearGradient id="g3" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#f0883e"/>
+          <stop offset="100%" stop-color="#ff7b72"/>
+        </linearGradient>
+        <linearGradient id="g4" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#3fb950"/>
+          <stop offset="100%" stop-color="#56d364"/>
+        </linearGradient>
+        <linearGradient id="g5" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#79c0ff"/>
+          <stop offset="100%" stop-color="#58a6ff"/>
+        </linearGradient>
+        <filter id="glow">
+          <feGaussianBlur stdDeviation="3" result="blur"/>
+          <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+        </filter>
+      </defs>
+
+      <!-- LAYER BACKGROUNDS -->
+      <!-- Browser layer -->
+      <rect x="30" y="20" width="1040" height="100" rx="16" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+      <text x="55" y="48" font-size="11" fill="#8b949e" font-weight="600" letter-spacing="1">BROWSER</text>
+
+      <!-- API Gateway layer -->
+      <rect x="30" y="140" width="1040" height="100" rx="16" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+      <text x="55" y="168" font-size="11" fill="#8b949e" font-weight="600" letter-spacing="1">API GATEWAY &amp; AUTH</text>
+
+      <!-- Business Logic layer -->
+      <rect x="30" y="260" width="1040" height="140" rx="16" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+      <text x="55" y="288" font-size="11" fill="#8b949e" font-weight="600" letter-spacing="1">BUSINESS LOGIC</text>
+
+      <!-- Data & External layer -->
+      <rect x="30" y="420" width="1040" height="100" rx="16" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+      <text x="55" y="448" font-size="11" fill="#8b949e" font-weight="600" letter-spacing="1">DATA &amp; PROVIDERS</text>
+
+      <!-- Infrastructure layer -->
+      <rect x="30" y="540" width="1040" height="120" rx="16" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+      <text x="55" y="568" font-size="11" fill="#8b949e" font-weight="600" letter-spacing="1">INFRASTRUCTURE</text>
+
+      <!-- === BROWSER LAYER NODES === -->
+      <!-- React SPA -->
+      <g class="diagram-node" filter="url(#glow)">
+        <rect x="120" y="50" width="180" height="52" rx="10" fill="url(#g1)" opacity="0.9"/>
+        <text x="210" y="72" text-anchor="middle" font-size="13" fill="white" font-weight="700">React SPA</text>
+        <text x="210" y="88" text-anchor="middle" font-size="10" fill="rgba(255,255,255,0.7)">Vite + React Router v6</text>
+      </g>
+
+      <!-- Strategy Configs -->
+      <g class="diagram-node node-pulse">
+        <rect x="340" y="50" width="160" height="52" rx="10" fill="#1c2333" stroke="#58a6ff" stroke-width="1.5"/>
+        <text x="420" y="72" text-anchor="middle" font-size="12" fill="#58a6ff" font-weight="600">Strategy Configs</text>
+        <text x="420" y="88" text-anchor="middle" font-size="10" fill="#8b949e">6 plug-in strategies</text>
+      </g>
+
+      <!-- AppContext -->
+      <g class="diagram-node node-pulse">
+        <rect x="540" y="50" width="150" height="52" rx="10" fill="#1c2333" stroke="#3fb950" stroke-width="1.5"/>
+        <text x="615" y="72" text-anchor="middle" font-size="12" fill="#3fb950" font-weight="600">AppContext</text>
+        <text x="615" y="88" text-anchor="middle" font-size="10" fill="#8b949e">State + AuthContext</text>
+      </g>
+
+      <!-- Dashboard Widgets -->
+      <g class="diagram-node node-pulse">
+        <rect x="730" y="50" width="170" height="52" rx="10" fill="#1c2333" stroke="#d2a8ff" stroke-width="1.5"/>
+        <text x="815" y="72" text-anchor="middle" font-size="12" fill="#d2a8ff" font-weight="600">Dashboard Widgets</text>
+        <text x="815" y="88" text-anchor="middle" font-size="10" fill="#8b949e">7 composable widgets</text>
+      </g>
+
+      <!-- === API LAYER NODES === -->
+      <!-- FastAPI -->
+      <g class="diagram-node" filter="url(#glow)">
+        <rect x="120" y="168" width="180" height="52" rx="10" fill="url(#g2)" opacity="0.9"/>
+        <text x="210" y="190" text-anchor="middle" font-size="13" fill="white" font-weight="700">FastAPI</text>
+        <text x="210" y="206" text-anchor="middle" font-size="10" fill="rgba(255,255,255,0.7)">17 route modules</text>
+      </g>
+
+      <!-- Auth / BFF -->
+      <g class="diagram-node">
+        <rect x="340" y="168" width="160" height="52" rx="10" fill="#1c2333" stroke="#d2a8ff" stroke-width="1.5"/>
+        <text x="420" y="190" text-anchor="middle" font-size="12" fill="#d2a8ff" font-weight="600">Auth + BFF</text>
+        <text x="420" y="206" text-anchor="middle" font-size="10" fill="#8b949e">Entra ID / JWT / CSRF</text>
+      </g>
+
+      <!-- MCP Server -->
+      <g class="diagram-node">
+        <rect x="540" y="168" width="150" height="52" rx="10" fill="#1c2333" stroke="#f0883e" stroke-width="1.5"/>
+        <text x="615" y="190" text-anchor="middle" font-size="12" fill="#f0883e" font-weight="600">MCP Server</text>
+        <text x="615" y="206" text-anchor="middle" font-size="10" fill="#8b949e">ota-market-data</text>
+      </g>
+
+      <!-- CORS + Middleware -->
+      <g class="diagram-node">
+        <rect x="730" y="168" width="170" height="52" rx="10" fill="#1c2333" stroke="#79c0ff" stroke-width="1.5"/>
+        <text x="815" y="190" text-anchor="middle" font-size="12" fill="#79c0ff" font-weight="600">Middleware</text>
+        <text x="815" y="206" text-anchor="middle" font-size="10" fill="#8b949e">CORS + CSRF + Session</text>
+      </g>
+
+      <!-- === BUSINESS LOGIC NODES === -->
+      <!-- Strategy Scorer -->
+      <g class="diagram-node" filter="url(#glow)">
+        <rect x="70" y="300" width="170" height="52" rx="10" fill="url(#g3)" opacity="0.9"/>
+        <text x="155" y="322" text-anchor="middle" font-size="13" fill="white" font-weight="700">Strategy Scorer</text>
+        <text x="155" y="338" text-anchor="middle" font-size="10" fill="rgba(255,255,255,0.7)">6 strategies + hard gates</text>
+      </g>
+
+      <!-- Analysis Engines -->
+      <g class="diagram-node">
+        <rect x="270" y="300" width="170" height="52" rx="10" fill="#1c2333" stroke="#f0883e" stroke-width="1.5"/>
+        <text x="355" y="322" text-anchor="middle" font-size="12" fill="#f0883e" font-weight="600">Analysis Engines</text>
+        <text x="355" y="338" text-anchor="middle" font-size="10" fill="#8b949e">Vertical / LongCall / Dir.</text>
+      </g>
+
+      <!-- AI Evaluation -->
+      <g class="diagram-node" filter="url(#glow)">
+        <rect x="470" y="300" width="170" height="52" rx="10" fill="url(#g4)" opacity="0.9"/>
+        <text x="555" y="322" text-anchor="middle" font-size="13" fill="white" font-weight="700">AI Evaluation</text>
+        <text x="555" y="338" text-anchor="middle" font-size="10" fill="rgba(255,255,255,0.7)">Foundry / Anthropic</text>
+      </g>
+
+      <!-- Position Monitor -->
+      <g class="diagram-node">
+        <rect x="670" y="300" width="170" height="52" rx="10" fill="#1c2333" stroke="#3fb950" stroke-width="1.5"/>
+        <text x="755" y="322" text-anchor="middle" font-size="12" fill="#3fb950" font-weight="600">Position Monitor</text>
+        <text x="755" y="338" text-anchor="middle" font-size="10" fill="#8b949e">Health grades + alerts</text>
+      </g>
+
+      <!-- Insight Engine -->
+      <g class="diagram-node">
+        <rect x="870" y="300" width="170" height="52" rx="10" fill="#1c2333" stroke="#ff7b72" stroke-width="1.5"/>
+        <text x="955" y="322" text-anchor="middle" font-size="12" fill="#ff7b72" font-weight="600">Insight Engine</text>
+        <text x="955" y="338" text-anchor="middle" font-size="10" fill="#8b949e">Anomaly detection</text>
+      </g>
+
+      <!-- Black-Scholes -->
+      <g class="diagram-node node-pulse">
+        <rect x="170" y="368" width="140" height="26" rx="6" fill="#1c2333" stroke="#79c0ff" stroke-width="1"/>
+        <text x="240" y="386" text-anchor="middle" font-size="10" fill="#79c0ff">Black-Scholes</text>
+      </g>
+
+      <!-- Narrative Validator -->
+      <g class="diagram-node node-pulse">
+        <rect x="340" y="368" width="140" height="26" rx="6" fill="#1c2333" stroke="#79c0ff" stroke-width="1"/>
+        <text x="410" y="386" text-anchor="middle" font-size="10" fill="#79c0ff">Narrative Validator</text>
+      </g>
+
+      <!-- SKILL.md -->
+      <g class="diagram-node node-pulse">
+        <rect x="510" y="368" width="140" height="26" rx="6" fill="#1c2333" stroke="#d2a8ff" stroke-width="1"/>
+        <text x="580" y="386" text-anchor="middle" font-size="10" fill="#d2a8ff">SKILL.md Loader</text>
+      </g>
+
+      <!-- === DATA & PROVIDER NODES === -->
+      <!-- Schwab -->
+      <g class="diagram-node" filter="url(#glow)">
+        <rect x="100" y="448" width="160" height="52" rx="10" fill="url(#g5)" opacity="0.9"/>
+        <text x="180" y="470" text-anchor="middle" font-size="13" fill="white" font-weight="700">Schwab API</text>
+        <text x="180" y="486" text-anchor="middle" font-size="10" fill="rgba(255,255,255,0.7)">OAuth + Market Data</text>
+      </g>
+
+      <!-- Azure SQL -->
+      <g class="diagram-node">
+        <rect x="300" y="448" width="160" height="52" rx="10" fill="#1c2333" stroke="#58a6ff" stroke-width="1.5"/>
+        <text x="380" y="470" text-anchor="middle" font-size="12" fill="#58a6ff" font-weight="600">Azure SQL</text>
+        <text x="380" y="486" text-anchor="middle" font-size="10" fill="#8b949e">25 tables + Alembic</text>
+      </g>
+
+      <!-- Key Vault -->
+      <g class="diagram-node">
+        <rect x="500" y="448" width="160" height="52" rx="10" fill="#1c2333" stroke="#3fb950" stroke-width="1.5"/>
+        <text x="580" y="470" text-anchor="middle" font-size="12" fill="#3fb950" font-weight="600">Key Vault</text>
+        <text x="580" y="486" text-anchor="middle" font-size="10" fill="#8b949e">Secrets + tokens</text>
+      </g>
+
+      <!-- Foundry / Claude -->
+      <g class="diagram-node">
+        <rect x="700" y="448" width="160" height="52" rx="10" fill="#1c2333" stroke="#d2a8ff" stroke-width="1.5"/>
+        <text x="780" y="470" text-anchor="middle" font-size="12" fill="#d2a8ff" font-weight="600">Azure Foundry</text>
+        <text x="780" y="486" text-anchor="middle" font-size="10" fill="#8b949e">Claude AI eval</text>
+      </g>
+
+      <!-- Entra ID -->
+      <g class="diagram-node">
+        <rect x="900" y="448" width="140" height="52" rx="10" fill="#1c2333" stroke="#f0883e" stroke-width="1.5"/>
+        <text x="970" y="470" text-anchor="middle" font-size="12" fill="#f0883e" font-weight="600">Entra ID</text>
+        <text x="970" y="486" text-anchor="middle" font-size="10" fill="#8b949e">OIDC + OAuth 2.1</text>
+      </g>
+
+      <!-- === INFRASTRUCTURE NODES === -->
+      <!-- App Service -->
+      <g class="diagram-node">
+        <rect x="100" y="570" width="180" height="52" rx="10" fill="#1c2333" stroke="#58a6ff" stroke-width="1.5"/>
+        <text x="190" y="592" text-anchor="middle" font-size="12" fill="#58a6ff" font-weight="600">Azure App Service</text>
+        <text x="190" y="608" text-anchor="middle" font-size="10" fill="#8b949e">Linux F1 / Uvicorn</text>
+      </g>
+
+      <!-- Static Web Apps -->
+      <g class="diagram-node">
+        <rect x="320" y="570" width="180" height="52" rx="10" fill="#1c2333" stroke="#3fb950" stroke-width="1.5"/>
+        <text x="410" y="592" text-anchor="middle" font-size="12" fill="#3fb950" font-weight="600">Static Web Apps</text>
+        <text x="410" y="608" text-anchor="middle" font-size="10" fill="#8b949e">React SPA hosting</text>
+      </g>
+
+      <!-- GitHub Actions -->
+      <g class="diagram-node">
+        <rect x="540" y="570" width="180" height="52" rx="10" fill="#1c2333" stroke="#f0883e" stroke-width="1.5"/>
+        <text x="630" y="592" text-anchor="middle" font-size="12" fill="#f0883e" font-weight="600">GitHub Actions</text>
+        <text x="630" y="608" text-anchor="middle" font-size="10" fill="#8b949e">6 workflows CI/CD</text>
+      </g>
+
+      <!-- APScheduler -->
+      <g class="diagram-node">
+        <rect x="760" y="570" width="160" height="52" rx="10" fill="#1c2333" stroke="#d2a8ff" stroke-width="1.5"/>
+        <text x="840" y="592" text-anchor="middle" font-size="12" fill="#d2a8ff" font-weight="600">APScheduler</text>
+        <text x="840" y="608" text-anchor="middle" font-size="10" fill="#8b949e">Mon-Fri 4:15pm ET</text>
+      </g>
+
+      <!-- App Insights -->
+      <g class="diagram-node node-pulse">
+        <rect x="950" y="575" width="100" height="40" rx="8" fill="#1c2333" stroke="#79c0ff" stroke-width="1"/>
+        <text x="1000" y="600" text-anchor="middle" font-size="10" fill="#79c0ff">App Insights</text>
+      </g>
+
+      <!-- === FLOW LINES === -->
+      <!-- Browser → API -->
+      <line x1="210" y1="102" x2="210" y2="168" class="flow-line" stroke="#58a6ff" stroke-width="2" opacity="0.5"/>
+      <!-- API → Business Logic -->
+      <line x1="210" y1="220" x2="155" y2="300" class="flow-line" stroke="#d2a8ff" stroke-width="2" opacity="0.5"/>
+      <line x1="210" y1="220" x2="355" y2="300" class="flow-line" stroke="#d2a8ff" stroke-width="1.5" opacity="0.4"/>
+      <line x1="210" y1="220" x2="555" y2="300" class="flow-line" stroke="#d2a8ff" stroke-width="1.5" opacity="0.4"/>
+      <!-- Business → Data -->
+      <line x1="155" y1="352" x2="180" y2="448" class="flow-line" stroke="#f0883e" stroke-width="1.5" opacity="0.4"/>
+      <line x1="355" y1="352" x2="380" y2="448" class="flow-line" stroke="#f0883e" stroke-width="1.5" opacity="0.4"/>
+      <line x1="555" y1="352" x2="780" y2="448" class="flow-line" stroke="#3fb950" stroke-width="2" opacity="0.5"/>
+      <!-- Position Monitor → Insight Engine -->
+      <line x1="840" y1="326" x2="870" y2="326" class="flow-line" stroke="#ff7b72" stroke-width="2" opacity="0.5"/>
+      <!-- Monitor → Schwab -->
+      <line x1="755" y1="352" x2="180" y2="448" class="flow-line" stroke="#79c0ff" stroke-width="1.5" opacity="0.3"/>
+      <!-- Auth → Entra -->
+      <line x1="420" y1="220" x2="970" y2="448" class="flow-line" stroke="#f0883e" stroke-width="1.5" opacity="0.3"/>
+      <!-- Data → Infra -->
+      <line x1="180" y1="500" x2="190" y2="570" class="flow-line" stroke="#58a6ff" stroke-width="1.5" opacity="0.3"/>
+      <line x1="380" y1="500" x2="410" y2="570" class="flow-line" stroke="#3fb950" stroke-width="1.5" opacity="0.3"/>
+      <!-- Scheduler → Monitor -->
+      <line x1="840" y1="570" x2="755" y2="352" class="flow-line" stroke="#d2a8ff" stroke-width="1.5" opacity="0.4"/>
+    </svg>
+  </div>
+</section>
+
+<!-- EXECUTIVE SUMMARY -->
+<section id="summary" class="reveal">
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(88,166,255,0.15)">&#x1f4cb;</div>
+    <div>
+      <div class="section-title">Executive Summary</div>
+      <div class="section-desc">High-level overview of the system architecture</div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:32px">
+    <div>
+      <p style="font-size:15px;color:var(--text-muted);margin-bottom:16px">
+        Options Analyzer is a <strong style="color:var(--text)">full-stack options analysis and portfolio tracking platform</strong>
+        built on FastAPI (Python) and React (Vite). It provides multi-strategy scoring, AI-powered trade evaluation via Azure Foundry (Claude),
+        real-time market data from Charles Schwab, and automated position monitoring with health grading.
+      </p>
+      <p style="font-size:15px;color:var(--text-muted);margin-bottom:16px">
+        The architecture follows a <strong style="color:var(--text)">provider-adapter pattern</strong> for all external integrations,
+        making it straightforward to add new data sources, AI models, or brokerage connections. A plugin-based strategy system on both
+        frontend and backend allows new trading strategies to be added with zero changes to existing code.
+      </p>
+      <p style="font-size:15px;color:var(--text-muted)">
+        Infrastructure runs on <strong style="color:var(--text)">Azure</strong> (App Service + Static Web Apps + SQL + Key Vault + Entra ID)
+        with CI/CD through GitHub Actions featuring a dev-first deployment gate and one-click rollback.
+      </p>
+    </div>
+    <div>
+      <div class="insight-card">
+        <h4>Key Design Principles</h4>
+        <p>
+          <strong>Provider Adapter Pattern</strong> — All external sources implement abstract interfaces. Zero engine/route changes to add a provider.<br><br>
+          <strong>Strategy Plugin System</strong> — Frontend configs + backend scorers. New strategy = 2 files.<br><br>
+          <strong>SKILL.md Prompts</strong> — AI prompts live in Markdown files, never hardcoded in Python.<br><br>
+          <strong>BFF Auth</strong> — Entra ID OIDC + encrypted HTTP-only session cookies. No tokens in browser JS.<br><br>
+          <strong>Hard Gates</strong> — Deterministic quality gates (earnings, negative EV) run before AI evaluation.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- KPI METRICS -->
+<section id="kpis" class="reveal">
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(63,185,80,0.15)">&#x1f4ca;</div>
+    <div>
+      <div class="section-title">KPI Metrics</div>
+      <div class="section-desc">Codebase stats at a glance</div>
+    </div>
+  </div>
+
+  <div class="kpi-grid">
+    <div class="kpi-card">
+      <div class="kpi-value" style="color:var(--accent)">76</div>
+      <div class="kpi-label">Python Modules</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-value" style="color:var(--accent2)">78</div>
+      <div class="kpi-label">JS/JSX Files</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-value" style="color:var(--accent3)">21,540</div>
+      <div class="kpi-label">Lines Python</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-value" style="color:var(--accent4)">19,459</div>
+      <div class="kpi-label">Lines JS/JSX</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-value" style="color:var(--accent5)">17</div>
+      <div class="kpi-label">API Route Modules</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-value" style="color:var(--accent6)">25</div>
+      <div class="kpi-label">Database Tables</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-value" style="color:var(--accent)">6</div>
+      <div class="kpi-label">Trading Strategies</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-value" style="color:var(--accent2)">6</div>
+      <div class="kpi-label">CI/CD Workflows</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-value" style="color:var(--accent3)">29</div>
+      <div class="kpi-label">Test Files</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-value" style="color:var(--accent4)">5</div>
+      <div class="kpi-label">Alembic Migrations</div>
+    </div>
+  </div>
+</section>
+
+<!-- SYSTEM LAYERS -->
+<section id="layers" class="reveal">
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(210,168,255,0.15)">&#x1f3d7;</div>
+    <div>
+      <div class="section-title">System Layers</div>
+      <div class="section-desc">Five-layer architecture from browser to infrastructure</div>
+    </div>
+  </div>
+
+  <div class="layer-bar" style="background:linear-gradient(90deg, rgba(88,166,255,0.2) 0%, rgba(63,185,80,0.1) 100%); border:1px solid rgba(88,166,255,0.3)">
+    <span class="layer-label" style="color:var(--accent)">&#9632; Presentation — React SPA</span>
+    <span class="layer-detail">Vite + React Router v6 + AppContext + 6 strategy configs + 7 dashboard widgets</span>
+  </div>
+  <div class="layer-bar" style="background:linear-gradient(90deg, rgba(210,168,255,0.2) 0%, rgba(88,166,255,0.1) 100%); border:1px solid rgba(210,168,255,0.3)">
+    <span class="layer-label" style="color:var(--accent3)">&#9632; API Gateway — FastAPI</span>
+    <span class="layer-detail">17 route modules + CORS + CSRF + Entra OIDC BFF + MCP server</span>
+  </div>
+  <div class="layer-bar" style="background:linear-gradient(90deg, rgba(240,136,62,0.2) 0%, rgba(255,123,114,0.1) 100%); border:1px solid rgba(240,136,62,0.3)">
+    <span class="layer-label" style="color:var(--accent4)">&#9632; Business Logic — Engines &amp; Agents</span>
+    <span class="layer-detail">Strategy scorer + analysis engines + AI evaluation + position monitor + insight engine + hard gates</span>
+  </div>
+  <div class="layer-bar" style="background:linear-gradient(90deg, rgba(63,185,80,0.2) 0%, rgba(86,211,100,0.1) 100%); border:1px solid rgba(63,185,80,0.3)">
+    <span class="layer-label" style="color:var(--accent2)">&#9632; Data &amp; Providers — Adapters</span>
+    <span class="layer-detail">Schwab + Azure SQL (25 tables) + Key Vault + Foundry/Anthropic + Entra ID</span>
+  </div>
+  <div class="layer-bar" style="background:linear-gradient(90deg, rgba(121,192,255,0.2) 0%, rgba(88,166,255,0.1) 100%); border:1px solid rgba(121,192,255,0.3)">
+    <span class="layer-label" style="color:var(--accent6)">&#9632; Infrastructure — Azure + CI/CD</span>
+    <span class="layer-detail">App Service + Static Web Apps + GitHub Actions (6 workflows) + APScheduler + App Insights</span>
+  </div>
+</section>
+
+<!-- COMPONENT DIRECTORY -->
+<section id="components" class="reveal">
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(240,136,62,0.15)">&#x1f9e9;</div>
+    <div>
+      <div class="section-title">Component Directory</div>
+      <div class="section-desc">Key backend modules and their responsibilities</div>
+    </div>
+  </div>
+
+  <div class="component-grid">
+    <!-- API Routes -->
+    <div class="component-card">
+      <h3><span style="color:var(--accent3)">&#x25cf;</span> API Routes (17 modules)</h3>
+      <p>FastAPI routers handling all HTTP endpoints. Each module is initialized at startup with its dependencies via init_*() functions.</p>
+      <span class="tag tag-purple">market_routes</span>
+      <span class="tag tag-purple">analysis_routes</span>
+      <span class="tag tag-purple">evaluation_routes</span>
+      <span class="tag tag-purple">position_routes</span>
+      <span class="tag tag-purple">trade_evaluation_routes</span>
+      <span class="tag tag-purple">insight_routes</span>
+      <span class="tag tag-purple">dashboard_routes</span>
+      <span class="tag tag-purple">identity_routes</span>
+      <span class="tag tag-purple">schwab_auth_routes</span>
+      <span class="tag tag-purple">mcp_routes</span>
+      <span class="tag tag-purple">health_routes</span>
+      <span class="tag tag-purple">changelog_routes</span>
+      <span class="tag tag-purple">export_routes</span>
+      <span class="tag tag-purple">config_routes</span>
+      <span class="tag tag-purple">admin_routes</span>
+      <span class="tag tag-purple">user_routes</span>
+      <span class="tag tag-purple">named_watchlist_routes</span>
+    </div>
+
+    <!-- Analysis Engines -->
+    <div class="component-card">
+      <h3><span style="color:var(--accent4)">&#x25cf;</span> Analysis Engines</h3>
+      <p>Deterministic scoring engines for different trade structures. Each computes a 0-100 score from market data inputs.</p>
+      <span class="tag tag-orange">vertical_engine.py</span>
+      <span class="tag tag-orange">long_call_engine.py</span>
+      <span class="tag tag-orange">directional_engine.py</span>
+      <span class="tag tag-orange">strategy_scorer.py</span>
+      <span class="tag tag-orange">strategy_definitions.py</span>
+      <span class="tag tag-orange">strategy_routing.py</span>
+      <span class="tag tag-orange">strategy_classifier.py</span>
+      <span class="tag tag-orange">black_scholes.py</span>
+      <span class="tag tag-orange">chain_collection.py</span>
+    </div>
+
+    <!-- Hard Gates -->
+    <div class="component-card">
+      <h3><span style="color:var(--accent5)">&#x25cf;</span> Hard Gates</h3>
+      <p>First-match-wins quality gates that can reject trades before AI evaluation. Registered at startup in evaluation order.</p>
+      <span class="tag tag-red">earnings_gate.py</span>
+      <span class="tag tag-red">negative_ev_gate.py</span>
+    </div>
+
+    <!-- AI Adapters -->
+    <div class="component-card">
+      <h3><span style="color:var(--accent2)">&#x25cf;</span> AI Adapters</h3>
+      <p>Pluggable AI model adapters. Foundry (Azure-hosted Claude) is preferred; Anthropic direct is fallback.</p>
+      <span class="tag tag-green">foundry_adapter.py</span>
+      <span class="tag tag-green">anthropic_adapter.py</span>
+      <span class="tag tag-green">base.py</span>
+    </div>
+
+    <!-- Agents -->
+    <div class="component-card">
+      <h3><span style="color:var(--accent)">&#x25cf;</span> Agents</h3>
+      <p>Background AI-powered agents. Position Monitor runs on schedule (4:15pm ET Mon-Fri). Insight Engine detects anomalies.</p>
+      <span class="tag tag-blue">position_monitor.py</span>
+      <span class="tag tag-blue">insight_engine.py</span>
+      <span class="tag tag-blue">context_store.py</span>
+      <span class="tag tag-blue">telemetry.py</span>
+    </div>
+
+    <!-- Providers -->
+    <div class="component-card">
+      <h3><span style="color:var(--accent6)">&#x25cf;</span> Market Data Providers</h3>
+      <p>Provider adapter pattern. ProviderRegistry manages lifecycle. Schwab is primary (OAuth); future providers implement same interface.</p>
+      <span class="tag tag-blue">schwab.py</span>
+      <span class="tag tag-blue">schwab_token_manager.py</span>
+      <span class="tag tag-blue">schwab_context_source.py</span>
+      <span class="tag tag-blue">factory.py</span>
+      <span class="tag tag-blue">base.py</span>
+      <span class="tag tag-blue">finnhub_earnings.py</span>
+    </div>
+
+    <!-- Auth System -->
+    <div class="component-card">
+      <h3><span style="color:var(--accent3)">&#x25cf;</span> Auth System</h3>
+      <p>Three-tier security (READ/WRITE/TRADE). BFF pattern with Entra ID OIDC, encrypted session cookies, CSRF protection.</p>
+      <span class="tag tag-purple">service.py</span>
+      <span class="tag tag-purple">dependencies.py</span>
+      <span class="tag tag-purple">session_manager.py</span>
+      <span class="tag tag-purple">client_assertion.py</span>
+      <span class="tag tag-purple">providers.py</span>
+    </div>
+
+    <!-- Data Layer -->
+    <div class="component-card">
+      <h3><span style="color:var(--accent)">&#x25cf;</span> Data Layer</h3>
+      <p>Async SQLAlchemy ORM over Azure SQL with Alembic migrations. SecretsManager wraps Key Vault with .env fallback.</p>
+      <span class="tag tag-blue">database.py (25 tables)</span>
+      <span class="tag tag-blue">session.py</span>
+      <span class="tag tag-blue">schemas.py</span>
+      <span class="tag tag-blue">secrets.py</span>
+      <span class="tag tag-blue">config.py</span>
+    </div>
+  </div>
+</section>
+
+<!-- DATA FLOW -->
+<section id="dataflow" class="reveal">
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(255,123,114,0.15)">&#x1f500;</div>
+    <div>
+      <div class="section-title">Data Flow</div>
+      <div class="section-desc">Key request paths through the system</div>
+    </div>
+  </div>
+
+  <table class="flow-table">
+    <thead>
+      <tr>
+        <th style="width:22%">Flow</th>
+        <th style="width:15%">Trigger</th>
+        <th>Path</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong style="color:var(--accent)">Trade Scoring</strong></td>
+        <td>User selects symbol</td>
+        <td>React <code class="code-ref">SecurityStrategiesPage</code> &#8594; <code class="code-ref">POST /analyze/scorecard</code> &#8594; <code class="code-ref">strategy_scorer</code> routes to engines (vertical, long_call, directional) &#8594; hard gates check &#8594; 0-100 scores per strategy &#8594; <code class="code-ref">StrategyScorecard</code></td>
+      </tr>
+      <tr>
+        <td><strong style="color:var(--accent2)">AI Evaluation</strong></td>
+        <td>User clicks Evaluate</td>
+        <td>React &#8594; <code class="code-ref">POST /evaluate/structured</code> &#8594; <code class="code-ref">skill_loader</code> fills SKILL.md template &#8594; <code class="code-ref">FoundryAdapter</code> calls Azure Foundry (Claude) &#8594; structured JSON &#8594; <code class="code-ref">TradeEvaluationCard</code></td>
+      </tr>
+      <tr>
+        <td><strong style="color:var(--accent3)">Position Follow</strong></td>
+        <td>User follows trade</td>
+        <td>React &#8594; <code class="code-ref">POST /positions/follow</code> &#8594; stores entry snapshot (greeks, IV rank, SMA, probability matrix, Claude verdict) &#8594; paper position in Azure SQL &#8594; <code class="code-ref">PositionsPage</code></td>
+      </tr>
+      <tr>
+        <td><strong style="color:var(--accent4)">Position Monitor</strong></td>
+        <td>APScheduler (4:15pm ET)</td>
+        <td><code class="code-ref">APScheduler</code> &#8594; <code class="code-ref">PositionMonitorAgent.run()</code> &#8594; fetches current prices from <code class="code-ref">SchwabPriceContextSource</code> &#8594; computes health grade (A-F) &#8594; threshold breach? &#8594; <code class="code-ref">InsightEngine.generate()</code> &#8594; Claude call &#8594; insight row in SQL</td>
+      </tr>
+      <tr>
+        <td><strong style="color:var(--accent5)">Authentication</strong></td>
+        <td>User opens app</td>
+        <td>React <code class="code-ref">AuthContext</code> &#8594; <code class="code-ref">GET /auth/me</code> &#8594; if 401: redirect to <code class="code-ref">/auth/login</code> &#8594; Entra ID OIDC &#8594; callback &#8594; <code class="code-ref">SessionManager</code> sets encrypted cookie &#8594; all subsequent API calls send cookie</td>
+      </tr>
+      <tr>
+        <td><strong style="color:var(--accent6)">Market Data</strong></td>
+        <td>Any analysis request</td>
+        <td>Route handler &#8594; <code class="code-ref">ProviderRegistry.get_market_data()</code> &#8594; <code class="code-ref">SchwabMarketData</code> &#8594; <code class="code-ref">SchwabTokenManager</code> (auto-refresh via background task) &#8594; Schwab API &#8594; quotes, chains, fundamentals</td>
+      </tr>
+      <tr>
+        <td><strong style="color:var(--accent)">MCP Integration</strong></td>
+        <td>Claude.ai connector</td>
+        <td>Claude.ai &#8594; <code class="code-ref">/mcp</code> (mounted sub-app) &#8594; Entra OAuth 2.1 validation &#8594; <code class="code-ref">ota-market-data</code> MCP tools &#8594; market data responses</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- EXTERNAL SERVICES -->
+<section id="external" class="reveal">
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(121,192,255,0.15)">&#x1f310;</div>
+    <div>
+      <div class="section-title">External Services</div>
+      <div class="section-desc">Third-party integrations and Azure resources</div>
+    </div>
+  </div>
+
+  <div class="service-list">
+    <div class="service-item">
+      <div class="service-icon" style="background:rgba(88,166,255,0.15)">&#x2601;</div>
+      <div>
+        <h4>Azure App Service</h4>
+        <p>Linux container running Uvicorn. F1 free tier (dev). ODBC Driver 18 auto-installed at cold start. Central US region.</p>
+      </div>
+    </div>
+    <div class="service-item">
+      <div class="service-icon" style="background:rgba(63,185,80,0.15)">&#x1f5c4;</div>
+      <div>
+        <h4>Azure SQL Database</h4>
+        <p>25 ORM tables. Entra ID Managed Identity auth. Alembic migrations. Dev server: Central US. Async via aioodbc.</p>
+      </div>
+    </div>
+    <div class="service-item">
+      <div class="service-icon" style="background:rgba(210,168,255,0.15)">&#x1f511;</div>
+      <div>
+        <h4>Azure Key Vault</h4>
+        <p>All secrets (JWT keys, API tokens, Schwab OAuth tokens, session encryption keys). DefaultAzureCredential auth.</p>
+      </div>
+    </div>
+    <div class="service-item">
+      <div class="service-icon" style="background:rgba(240,136,62,0.15)">&#x1f916;</div>
+      <div>
+        <h4>Azure Foundry (Claude)</h4>
+        <p>Preferred AI adapter. Azure-hosted Claude model for trade evaluation, position monitoring, and insight generation.</p>
+      </div>
+    </div>
+    <div class="service-item">
+      <div class="service-icon" style="background:rgba(255,123,114,0.15)">&#x1f464;</div>
+      <div>
+        <h4>Microsoft Entra ID</h4>
+        <p>OIDC authentication. Certificate-based client assertion. BFF pattern with encrypted session cookies. OAuth 2.1 for MCP.</p>
+      </div>
+    </div>
+    <div class="service-item">
+      <div class="service-icon" style="background:rgba(121,192,255,0.15)">&#x1f4b0;</div>
+      <div>
+        <h4>Charles Schwab API</h4>
+        <p>Primary market data provider. OAuth 2.0 with background token refresh. Quotes, option chains, fundamentals.</p>
+      </div>
+    </div>
+    <div class="service-item">
+      <div class="service-icon" style="background:rgba(88,166,255,0.15)">&#x1f680;</div>
+      <div>
+        <h4>GitHub Actions</h4>
+        <p>6 workflows: build-on-push, deploy-to-dev, deploy-to-prod, rollback-prod, static web app deploy, firewall rule cleanup.</p>
+      </div>
+    </div>
+    <div class="service-item">
+      <div class="service-icon" style="background:rgba(63,185,80,0.15)">&#x1f4e1;</div>
+      <div>
+        <h4>Azure Static Web Apps</h4>
+        <p>Hosts the React SPA. Auto-deployed on push to main. SPA fallback routing via staticwebapp.config.json.</p>
+      </div>
+    </div>
+    <div class="service-item">
+      <div class="service-icon" style="background:rgba(210,168,255,0.15)">&#x1f4ca;</div>
+      <div>
+        <h4>Application Insights</h4>
+        <p>OpenTelemetry integration for agent observability. Tracks AI calls, position monitor runs, and startup timing.</p>
+      </div>
+    </div>
+    <div class="service-item">
+      <div class="service-icon" style="background:rgba(240,136,62,0.15)">&#x1f4c8;</div>
+      <div>
+        <h4>Finnhub</h4>
+        <p>Earnings calendar data for the earnings hard gate. Prevents trade evaluation within earnings windows.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FRONTEND ARCHITECTURE -->
+<section id="frontend" class="reveal">
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(210,168,255,0.15)">&#x1f3a8;</div>
+    <div>
+      <div class="section-title">Frontend Architecture</div>
+      <div class="section-desc">React SPA structure, routing, and component hierarchy</div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:32px;margin-bottom:32px">
+    <div>
+      <h3 style="margin-bottom:16px;font-size:18px">Page Routes</h3>
+      <table class="flow-table">
+        <thead><tr><th>Route</th><th>Page Component</th></tr></thead>
+        <tbody>
+          <tr><td><code class="code-ref">/dashboard</code></td><td>DashboardPage (default home)</td></tr>
+          <tr><td><code class="code-ref">/trades</code></td><td>TradesPage (trade finder)</td></tr>
+          <tr><td><code class="code-ref">/security-strategies</code></td><td>SecurityStrategiesPage</td></tr>
+          <tr><td><code class="code-ref">/security-strategies/:symbol</code></td><td>SecurityStrategiesPage</td></tr>
+          <tr><td><code class="code-ref">/strategies/:key</code></td><td>StrategyPage</td></tr>
+          <tr><td><code class="code-ref">/positions</code></td><td>PositionsPage</td></tr>
+          <tr><td><code class="code-ref">/changelog</code></td><td>ChangeLogPage</td></tr>
+          <tr><td><code class="code-ref">/connect</code></td><td>BrokerConnectPage (no nav)</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div>
+      <h3 style="margin-bottom:16px;font-size:18px">Strategy Configs (Plugin System)</h3>
+      <div class="component-grid" style="grid-template-columns:1fr">
+        <div class="component-card" style="padding:16px">
+          <span class="tag tag-green">steady-paycheck</span> Covered calls / cash-secured puts<br>
+          <span class="tag tag-blue">weekly-grind</span> Short-term credit spreads<br>
+          <span class="tag tag-purple">trend-rider</span> Directional momentum plays<br>
+          <span class="tag tag-orange">lottery-ticket</span> High-risk asymmetric bets<br>
+          <span class="tag tag-red">long-calls</span> Naked long options<br>
+          <span class="tag tag-blue">verticals</span> Bull call / bear put spreads
+        </div>
+      </div>
+
+      <h3 style="margin:24px 0 16px;font-size:18px">Dashboard Widgets</h3>
+      <div class="component-card" style="padding:16px">
+        <span class="tag tag-blue">ActionsWidget</span>
+        <span class="tag tag-green">ChartWidget</span>
+        <span class="tag tag-purple">MarketOverviewWidget</span>
+        <span class="tag tag-orange">MediaWidget</span>
+        <span class="tag tag-red">PnLByStrategyWidget</span>
+        <span class="tag tag-blue">PositionsLiveWidget</span>
+        <span class="tag tag-green">PositionsScorecardWidget</span>
+      </div>
+    </div>
+  </div>
+
+  <h3 style="margin-bottom:16px;font-size:18px">Key Components</h3>
+  <div class="component-grid">
+    <div class="component-card">
+      <h3><span style="color:var(--accent)">&#x25cf;</span> Layout.jsx</h3>
+      <p>Left rail navigation (220px fixed) + Outlet. AuthContext check wraps all protected routes.</p>
+    </div>
+    <div class="component-card">
+      <h3><span style="color:var(--accent2)">&#x25cf;</span> AppContext.jsx</h3>
+      <p>Global state: activeSymbol, watchlist, favorites, prices. AuthContext handles Entra ID session.</p>
+    </div>
+    <div class="component-card">
+      <h3><span style="color:var(--accent3)">&#x25cf;</span> QuoteBar.jsx</h3>
+      <p>Shared quote display component used identically on every page. Shows real-time price data.</p>
+    </div>
+    <div class="component-card">
+      <h3><span style="color:var(--accent4)">&#x25cf;</span> StrategyScorecard.jsx</h3>
+      <p>Multi-strategy score display. Renders 0-100 scores per strategy with color-coded pills.</p>
+    </div>
+    <div class="component-card">
+      <h3><span style="color:var(--accent5)">&#x25cf;</span> TradeEvaluationCard.jsx</h3>
+      <p>Structured Claude output card. Replaces the deprecated AskClaudePanel chat interface.</p>
+    </div>
+    <div class="component-card">
+      <h3><span style="color:var(--accent6)">&#x25cf;</span> ConfigDrawer.jsx</h3>
+      <p>Strategy-aware configuration panel. Renders dynamically from strategy configSchema arrays.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ARCHITECTURE INSIGHTS -->
+<section id="insights" class="reveal">
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(63,185,80,0.15)">&#x1f4a1;</div>
+    <div>
+      <div class="section-title">Architecture Insights</div>
+      <div class="section-desc">Notable patterns, decisions, and trade-offs</div>
+    </div>
+  </div>
+
+  <div class="insight-card" style="border-left-color:var(--accent)">
+    <h4>Provider Adapter Pattern — Zero-Touch Extensibility</h4>
+    <p>All external sources (market data, AI, signals) implement abstract base classes. The ProviderRegistry manages instantiation and lifecycle.
+    Adding a new brokerage or AI model means writing one adapter class — zero changes to routes, engines, or frontend.
+    This pattern has already proven itself: Schwab replaced Tradier as primary provider with no business logic changes.</p>
+  </div>
+
+  <div class="insight-card" style="border-left-color:var(--accent2)">
+    <h4>BFF Authentication — No Tokens in Browser</h4>
+    <p>The Backend-For-Frontend pattern with Entra ID means the React SPA never touches JWT tokens or secrets.
+    The SessionManager encrypts session data into HTTP-only cookies. CSRF protection via double-submit cookie pattern.
+    Certificate-based client assertion (entra-bff-cert from Key Vault) handles the OIDC token exchange server-side.</p>
+  </div>
+
+  <div class="insight-card" style="border-left-color:var(--accent3)">
+    <h4>SKILL.md — Prompts as Configuration</h4>
+    <p>AI prompts are never hardcoded in Python. They live as Markdown files under <code class="code-ref">app/skills/</code> with variable placeholders.
+    The SkillLoader fills templates at runtime. This allows prompt iteration without code changes and keeps the AI contract visible and version-controlled.</p>
+  </div>
+
+  <div class="insight-card" style="border-left-color:var(--accent4)">
+    <h4>Hard Gates — Deterministic Before Probabilistic</h4>
+    <p>Before any AI evaluation runs, deterministic hard gates check for disqualifying conditions (earnings window, negative expected value).
+    Gates are registered at startup in evaluation order (first-match-wins). This saves AI costs and prevents nonsensical evaluations.
+    New gates can be added by implementing the gate interface and registering at startup.</p>
+  </div>
+
+  <div class="insight-card" style="border-left-color:var(--accent5)">
+    <h4>Lifespan Initialization — Explicit Dependency Wiring</h4>
+    <p>FastAPI's lifespan context manager wires all dependencies in a specific order: DB &#8594; Secrets &#8594; Auth &#8594; Providers &#8594; Schwab &#8594; AI &#8594; Gates &#8594; Telemetry &#8594; Scheduler &#8594; MCP.
+    Each route module exposes an <code class="code-ref">init_*()</code> function that receives its dependencies. No global mutable state, no import-time side effects.
+    Shutdown follows reverse order with graceful resource cleanup.</p>
+  </div>
+
+  <div class="insight-card" style="border-left-color:var(--accent6)">
+    <h4>Deploy Pipeline — Dev-First Social Contract</h4>
+    <p>CI/CD uses a 4-stage model: build-on-push &#8594; deploy-to-dev &#8594; smoke test &#8594; deploy-to-prod.
+    The dev-first gate is a social contract (not automated) — a deliberate scoping choice at solo-dev scale.
+    One-click rollback via artifact re-deploy provides ~3-5 minute RTO.</p>
+  </div>
+</section>
+
+<!-- CODE REFERENCES -->
+<section id="coderefs" class="reveal">
+  <div class="section-header">
+    <div class="section-icon" style="background:rgba(139,148,158,0.15)">&#x1f4c1;</div>
+    <div>
+      <div class="section-title">Code References</div>
+      <div class="section-desc">Key file locations for navigating the codebase</div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
+    <div>
+      <h3 style="margin-bottom:16px;font-size:16px;color:var(--accent)">Backend Entry Points</h3>
+      <div class="file-tree">
+<span class="dir">app/</span>
+  <span class="file">main.py</span> <span class="comment">&#8592; FastAPI app + lifespan wiring</span>
+  <span class="dir">core/</span>
+    <span class="file">config.py</span> <span class="comment">&#8592; Pydantic Settings (.env)</span>
+    <span class="file">secrets.py</span> <span class="comment">&#8592; Key Vault + .env fallback</span>
+  <span class="dir">auth/</span>
+    <span class="file">service.py</span> <span class="comment">&#8592; JWT, passwords, TOTP</span>
+    <span class="file">dependencies.py</span> <span class="comment">&#8592; require_tier1/2/3</span>
+    <span class="file">session_manager.py</span> <span class="comment">&#8592; BFF encrypted sessions</span>
+    <span class="file">client_assertion.py</span> <span class="comment">&#8592; Entra cert auth</span>
+  <span class="dir">models/</span>
+    <span class="file">database.py</span> <span class="comment">&#8592; 25 SQLAlchemy models</span>
+    <span class="file">session.py</span> <span class="comment">&#8592; Async engine + init_db</span>
+    <span class="file">schemas.py</span> <span class="comment">&#8592; Pydantic I/O schemas</span>
+  <span class="dir">providers/</span>
+    <span class="file">factory.py</span> <span class="comment">&#8592; ProviderRegistry</span>
+    <span class="file">schwab.py</span> <span class="comment">&#8592; Primary market data</span>
+    <span class="file">base.py</span> <span class="comment">&#8592; Abstract interfaces</span>
+      </div>
+    </div>
+    <div>
+      <h3 style="margin-bottom:16px;font-size:16px;color:var(--accent2)">Business Logic</h3>
+      <div class="file-tree">
+<span class="dir">app/analysis/</span>
+  <span class="file">strategy_scorer.py</span> <span class="comment">&#8592; Multi-strategy orchestrator</span>
+  <span class="file">strategy_definitions.py</span> <span class="comment">&#8592; Weights &amp; thresholds</span>
+  <span class="file">strategy_routing.py</span> <span class="comment">&#8592; Strategy-to-engine map</span>
+  <span class="file">vertical_engine.py</span> <span class="comment">&#8592; Spread scoring</span>
+  <span class="file">long_call_engine.py</span> <span class="comment">&#8592; Naked options scoring</span>
+  <span class="file">black_scholes.py</span> <span class="comment">&#8592; Probability matrix</span>
+  <span class="dir">hard_gates/</span> <span class="comment">&#8592; Quality gates</span>
+<span class="dir">app/agents/</span>
+  <span class="file">position_monitor.py</span> <span class="comment">&#8592; Daily health check</span>
+  <span class="file">insight_engine.py</span> <span class="comment">&#8592; Anomaly &#8594; AI insight</span>
+<span class="dir">app/ai/</span>
+  <span class="file">foundry_adapter.py</span> <span class="comment">&#8592; Azure Claude</span>
+  <span class="file">anthropic_adapter.py</span> <span class="comment">&#8592; Direct Claude</span>
+<span class="dir">app/skills/</span>
+  <span class="file">skill_loader.py</span> <span class="comment">&#8592; SKILL.md templating</span>
+  <span class="dir">claude-trade-agent/</span>
+  <span class="dir">position-monitor/</span>
+  <span class="dir">insight-engine/</span>
+      </div>
+    </div>
+  </div>
+
+  <div style="margin-top:24px;display:grid;grid-template-columns:1fr 1fr;gap:24px">
+    <div>
+      <h3 style="margin-bottom:16px;font-size:16px;color:var(--accent3)">Frontend Entry Points</h3>
+      <div class="file-tree">
+<span class="dir">web/src/</span>
+  <span class="file">App.jsx</span> <span class="comment">&#8592; Routes + providers</span>
+  <span class="file">main.jsx</span> <span class="comment">&#8592; React root</span>
+  <span class="dir">context/</span>
+    <span class="file">AppContext.jsx</span> <span class="comment">&#8592; Global state</span>
+    <span class="file">AuthContext.jsx</span> <span class="comment">&#8592; Session auth</span>
+  <span class="dir">api/</span>
+    <span class="file">client.js</span> <span class="comment">&#8592; All API functions</span>
+  <span class="dir">strategy-configs/</span>
+    <span class="file">index.js</span> <span class="comment">&#8592; Strategy registry</span>
+    <span class="file">*.config.js</span> <span class="comment">&#8592; 6 strategy plugins</span>
+  <span class="dir">widgets/</span>
+    <span class="file">WidgetRegistry.js</span> <span class="comment">&#8592; Dashboard widgets</span>
+      </div>
+    </div>
+    <div>
+      <h3 style="margin-bottom:16px;font-size:16px;color:var(--accent4)">Infrastructure</h3>
+      <div class="file-tree">
+<span class="dir">.github/workflows/</span>
+  <span class="file">build-on-push.yml</span> <span class="comment">&#8592; CI build + artifact</span>
+  <span class="file">deploy-to-dev.yml</span> <span class="comment">&#8592; Manual &#8594; dev</span>
+  <span class="file">deploy-to-prod.yml</span> <span class="comment">&#8592; Manual &#8594; prod</span>
+  <span class="file">rollback-prod.yml</span> <span class="comment">&#8592; Emergency rollback</span>
+  <span class="file">azure-static-web-apps*.yml</span> <span class="comment">&#8592; SWA deploy</span>
+<span class="dir">alembic/</span>
+  <span class="file">env.py</span> <span class="comment">&#8592; Reuses app engine</span>
+  <span class="dir">versions/</span> <span class="comment">&#8592; 5 migration files</span>
+<span class="file">requirements.txt</span> <span class="comment">&#8592; 80+ packages</span>
+<span class="file">web/package.json</span> <span class="comment">&#8592; React deps</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<section style="padding:40px 48px;text-align:center;border-top:1px solid var(--border)">
+  <p style="color:var(--text-muted);font-size:13px">
+    Generated by archflow &middot; Options Analyzer Architecture Report &middot; May 2026
+  </p>
+</section>
+
+</div><!-- /main -->
+
+<!-- SCROLL REVEAL SCRIPT -->
+<script>
+  // Intersection Observer for scroll reveal
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+      }
+    });
+  }, { threshold: 0.1 });
+
+  document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+  // Active sidebar link
+  const sections = document.querySelectorAll('section[id]');
+  const navLinks = document.querySelectorAll('.sidebar a');
+
+  window.addEventListener('scroll', () => {
+    let current = '';
+    sections.forEach(section => {
+      const top = section.offsetTop - 100;
+      if (window.scrollY >= top) {
+        current = section.getAttribute('id');
+      }
+    });
+    navLinks.forEach(link => {
+      link.classList.remove('active');
+      if (link.getAttribute('href') === '#' + current) {
+        link.classList.add('active');
+      }
+    });
+  });
+</script>
+
+</body>
+</html>
