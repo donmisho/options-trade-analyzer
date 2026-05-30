@@ -102,6 +102,38 @@ def adjustment_formula(name: str):
     return decorator
 
 
+def gate_formula(name: str):
+    """Register a gate formula implementation under *name*.
+
+    Gate formulas must return ``bool``:
+    - ``True`` = gate passed (candidate continues)
+    - ``False`` = gate failed (engine checks stop_if_fail / terminal_verdict)
+
+    The engine's ``_evaluate_rule`` calls ``bool(result)`` on the return,
+    but we enforce actual ``bool`` at the wrapper level for clarity.
+
+    OTA-730, OTA-731
+    """
+
+    def decorator(fn: FormulaFn) -> FormulaFn:
+        @functools.wraps(fn)
+        def wrapper(
+            named_values: dict[str, Any], params: dict[str, Any]
+        ) -> bool:
+            result = fn(named_values, params)
+            if not isinstance(result, bool):
+                raise FormulaReturnValueError(
+                    f"Gate formula '{name}' returned "
+                    f"{type(result).__name__}, expected bool."
+                )
+            return result
+
+        _REGISTRY.register(name, wrapper)
+        return fn
+
+    return decorator
+
+
 def get_registry() -> DictFormulaRegistry:
     """Return the live screening formula registry.
 
@@ -113,6 +145,7 @@ def get_registry() -> DictFormulaRegistry:
 
 
 # ── Auto-register all formula modules ──────────────────────────────────
-# Importing triggers @screening_formula / @adjustment_formula decorators.
+# Importing triggers @screening_formula / @adjustment_formula / @gate_formula decorators.
 import app.options_rules.screening.scoring_formulas as _scoring  # noqa: E402, F401
 import app.options_rules.screening.adjustment_formulas as _adj  # noqa: E402, F401
+import app.options_rules.screening.gate_formulas as _gates  # noqa: E402, F401
