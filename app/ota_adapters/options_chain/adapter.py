@@ -13,7 +13,9 @@ domain knowledge on the input side of the engine (§5).
 The adapter does NOT run rules, assign scores, or reference strategies.
 
 OTA-713 (skeleton), OTA-714 (chain fetch + structure building), OTA-715 (DERIVED),
-OTA-716 (B-S COMPUTED tier), OTA-717 (SMA producers)
+OTA-716 (B-S COMPUTED tier), OTA-717 (SMA producers),
+OTA-718 (gamma — already propagated), OTA-719 (ATR_14), OTA-720 (IV percentile),
+OTA-721 (chart_state), OTA-722 (is_etf)
 """
 
 from __future__ import annotations
@@ -25,9 +27,11 @@ from datetime import date
 from typing import Any
 
 from scipy.stats import norm
+from sqlalchemy import text
 
 from app.core.config import settings
 from app.insight_engine import Candidate, Tier
+from app.models.session import async_session
 from app.ota_adapters._shared.black_scholes import (
     black_scholes_probability,
     compute_naked_long_option_ev,
@@ -197,6 +201,110 @@ def _compute_naked_derived(nv: dict) -> None:
     )
 
 
+# ── ATR_14 (OTA-719) ──────────────────────────────────────────────────
+
+def _compute_atr_14(candles: list[dict]) -> float | None:
+    """Compute ATR(14) from OHLC candles.  Returns None if insufficient data.
+
+    Requires at least 15 bars (14 True Range values, each needing a
+    previous close).
+    """
+    if len(candles) < 15:
+        return None
+    trs: list[float] = []
+    for i in range(1, len(candles)):
+        h = candles[i].get("high", 0) or 0
+        l = candles[i].get("low", 0) or 0
+        prev_c = candles[i - 1].get("close", 0) or 0
+        if h <= 0 or l <= 0 or prev_c <= 0:
+            continue
+        tr = max(h - l, abs(h - prev_c), abs(l - prev_c))
+        trs.append(tr)
+    if len(trs) < 14:
+        return None
+    return round(sum(trs[-14:]) / 14, 4)
+
+
+# ── IV percentile (OTA-720) ──────────────────────────────────────────
+
+def _compute_iv_percentile(candles: list[dict], current_atm_iv: float) -> float | None:
+    """True IV percentile from historical realized volatility.
+
+    Data-source decision (OTA-720): Schwab does not provide historical
+    implied volatility data via its API.  Instead we compute rolling
+    20-day realized volatility (annualised close-to-close) from the
+    same daily OHLC bars fetched for ATR_14 / SMA, then rank the
+    current ATM IV against that distribution.  This gives a percentile
+    that answers "current IV is higher than X% of recent realized vol
+    windows" — a standard approximation when historical IV is
+    unavailable.
+
+    Returns 0–100 float, or None if < 30 daily closes.
+    """
+    closes = [
+        c["close"] for c in candles
+        if isinstance(c.get("close"), (int, float)) and c["close"] > 0
+    ]
+    if len(closes) < 30 or current_atm_iv <= 0:
+        return None
+
+    log_returns = [math.log(closes[i] / closes[i - 1]) for i in range(1, len(closes))]
+    window = 20
+    if len(log_returns) < window:
+        return None
+
+    realized_vols: list[float] = []
+    for i in range(window, len(log_returns) + 1):
+        wr = log_returns[i - window:i]
+        mean = sum(wr) / window
+        variance = sum((r - mean) ** 2 for r in wr) / (window - 1)
+        rv = math.sqrt(variance) * math.sqrt(252)
+        realized_vols.append(rv)
+
+    if not realized_vols:
+        return None
+
+    below = sum(1 for rv in realized_vols if rv < current_atm_iv)
+    return round(below / len(realized_vols) * 100, 1)
+
+
+def _get_atm_iv(contracts: list[dict], underlying_price: float) -> float:
+    """Estimate ATM IV from the closest call options.  Defaults to 0.30."""
+    if not contracts or underlying_price <= 0:
+        return 0.30
+    calls = [c for c in contracts if c.get("option_type") == "call"]
+    if not calls:
+        return 0.30
+    calls_sorted = sorted(calls, key=lambda c: abs(c.get("strike", 0) - underlying_price))
+    ivs = [
+        c.get("implied_volatility", 0) or 0
+        for c in calls_sorted[:5]
+        if (c.get("implied_volatility", 0) or 0) > 0
+    ]
+    return sum(ivs) / len(ivs) if ivs else 0.30
+
+
+# ── chart_state (OTA-721) ────────────────────────────────────────────
+
+_CHART_STATE_MAP: dict[str, str] = {
+    "BULLISH": "Bullish",
+    "BEARISH": "Bearish",
+    "MIXED":   "Mixed",
+    "NEUTRAL": "Neutral",
+}
+
+
+def _map_chart_state(sma_alignment: str | None) -> str:
+    """Map sma_alignment enum to chart_state enum (title-case)."""
+    return _CHART_STATE_MAP.get(sma_alignment or "", "Neutral")
+
+
+# ── is_etf (OTA-722) ─────────────────────────────────────────────────
+
+# Known ETF asset types from symbol_reference — anything not Equity/ADR
+_EQUITY_TYPES = frozenset({"Equity", "ADR"})
+
+
 # ── §5.1 Input catalog ────────────────────────────────────────────────
 
 
@@ -283,6 +391,11 @@ _CATALOG: dict[str, CatalogEntry] = {
     "SMA_21":          _derived("SMA_21", "number", "SKIP"),
     "SMA_50":          _derived("SMA_50", "number", "SKIP"),
     "sma_alignment":   _derived("sma_alignment", "enum:BULLISH|BEARISH|MIXED|NEUTRAL", "SKIP"),
+    # ── DERIVED — ATR, IV percentile, chart_state, is_etf (OTA-719–722) ──
+    "ATR_14":          _derived("ATR_14", "number", "SKIP"),
+    "iv_percentile":   _derived("iv_percentile", "number", "SKIP"),
+    "chart_state":     _derived("chart_state", "enum:Bullish|Bearish|Mixed|Neutral", "SKIP"),
+    "is_etf":          _derived("is_etf", "boolean", "FAIL_OPEN"),
     # ── COMPUTED (OTA-716) ──
     "probability_matrix": _computed("probability_matrix", "matrix"),
     "total_ev":           _computed("total_ev", "number"),
@@ -377,14 +490,12 @@ class OptionsChainAdapter:
         for c in candidates:
             _compute_derived(c)
 
-        # SMA — fetch candles and stamp onto all candidates (OTA-717)
-        sma_data = await self._fetch_sma(scan_request)
-        if sma_data:
+        # Per-symbol context: SMA, ATR_14, IV percentile, chart_state, is_etf
+        ctx = await self._fetch_market_context(scan_request)
+        if ctx:
             for c in candidates:
-                c.named_values["SMA_8"] = sma_data.get("sma_8")
-                c.named_values["SMA_21"] = sma_data.get("sma_21")
-                c.named_values["SMA_50"] = sma_data.get("sma_50")
-                c.named_values["sma_alignment"] = sma_data.get("alignment")
+                for k, v in ctx.items():
+                    c.named_values[k] = v
 
         log.debug(
             "OptionsChainAdapter.produce_candidates: %d candidates for %s",
@@ -533,25 +644,81 @@ class OptionsChainAdapter:
         self._underlying_price = chain_data.get("underlying_price", 0)
         self._chain_data = chain_data
 
-    # ── internal: SMA fetch (OTA-717) ──
+    # ── internal: market context (OTA-717–722) ──
 
-    async def _fetch_sma(self, scan_request: dict[str, Any]) -> dict | None:
-        """Fetch candles and compute SMA signal.  Returns None on failure."""
-        provider = get_market_data_provider(scan_request.get("user_id"))
-        if not hasattr(provider, "get_price_history"):
-            return None
+    async def _fetch_market_context(
+        self, scan_request: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Fetch OHLC candles + symbol reference, compute per-symbol values.
+
+        Returns a dict of named values to stamp onto every candidate:
+        SMA_8/21/50, sma_alignment, ATR_14, iv_percentile, chart_state, is_etf.
+        """
+        ctx: dict[str, Any] = {}
         symbol = scan_request["symbol"]
+        provider = get_market_data_provider(scan_request.get("user_id"))
         api_sym = to_api_symbol_cached(
             symbol, settings.default_market_data_provider,
         )
+
+        # Fetch OHLC candles (180 days daily) for ATR_14 + SMA + IV percentile
+        candles: list[dict] = []
+        if hasattr(provider, "get_candles"):
+            try:
+                candles = await provider.get_candles(api_sym, range_days=180)
+            except Exception as exc:
+                log.warning("OHLC candle fetch failed for %s: %s", symbol, exc)
+
+        price = self._underlying_price
+
+        # SMA (OTA-717)
+        if candles and price > 0:
+            sma = compute_sma_signal(candles, price)
+            ctx["SMA_8"] = sma.get("sma_8")
+            ctx["SMA_21"] = sma.get("sma_21")
+            ctx["SMA_50"] = sma.get("sma_50")
+            ctx["sma_alignment"] = sma.get("alignment")
+            ctx["chart_state"] = _map_chart_state(sma.get("alignment"))
+        else:
+            ctx["sma_alignment"] = "NEUTRAL"
+            ctx["chart_state"] = "Neutral"
+
+        # ATR_14 (OTA-719)
+        ctx["ATR_14"] = _compute_atr_14(candles) if candles else None
+
+        # IV percentile (OTA-720)
+        atm_iv = _get_atm_iv(self._contracts, price)
+        ctx["iv_percentile"] = (
+            _compute_iv_percentile(candles, atm_iv) if candles else None
+        )
+
+        # is_etf (OTA-722)
+        ctx["is_etf"] = await self._fetch_is_etf(symbol)
+
+        return ctx
+
+    async def _fetch_is_etf(self, symbol: str) -> bool | None:
+        """Query symbol_reference.asset_type to determine ETF status.
+
+        Returns True if the symbol is an ETF (asset_type not in Equity/ADR),
+        False if it is an equity/ADR, or None if the symbol is not in the
+        reference table (FAIL_OPEN — treated as non-ETF by engine rules).
+        """
         try:
-            candles = await provider.get_price_history(api_sym)
+            async with async_session() as db:
+                result = await db.execute(
+                    text("SELECT asset_type FROM symbol_reference WHERE symbol = :sym"),
+                    {"sym": symbol.upper()},
+                )
+                row = result.fetchone()
         except Exception as exc:
-            log.warning("SMA candle fetch failed for %s: %s", symbol, exc)
+            log.warning("is_etf lookup failed for %s: %s", symbol, exc)
             return None
-        if not candles or self._underlying_price <= 0:
+
+        if row is None:
             return None
-        return compute_sma_signal(candles, self._underlying_price)
+        asset_type = row[0]
+        return asset_type not in _EQUITY_TYPES if asset_type else None
 
     # ── internal: spread building ──
 
