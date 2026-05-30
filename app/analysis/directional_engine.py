@@ -1,3 +1,9 @@
+# TODO(OTA-756): delete after OTA-765 removes the route caller
+# (app/api/analysis_routes.py still imports DirectionalEngine).
+# The fitness_score math has been migrated to registered formulas
+# in app/options_rules/directional/ (OTA-755). The engine's
+# directional_comparison strategy + DirectionalAdapter replace
+# this module entirely.
 """
 Directional Strategy Comparison Engine
 
