@@ -31,6 +31,7 @@ from app.insight_engine import Candidate, Tier
 from app.models.session import async_session
 from app.ota_adapters._shared.black_scholes import (
     black_scholes_probability,
+    compute_naked_long_option_ev,
     compute_probability_matrix,
 )
 from app.ota_adapters._shared.schwab_client import get_market_data_provider
@@ -58,6 +59,81 @@ def _direction_from_structure(structure: str | None) -> str | None:
     return None
 
 
+# ── DERIVED producers (OTA-738) ──────────────────────────────────────
+
+
+def _compute_derived(candidate: Candidate) -> None:
+    """Populate all DERIVED named values from RAW values on a Candidate."""
+    nv = candidate.named_values
+
+    # pnl_pct — abs denominator for credit spreads (OTA-738)
+    entry = nv.get("position_entry_price")
+    mark = nv.get("current_position_mark")
+    if entry is not None and mark is not None and entry != 0:
+        nv["pnl_pct"] = (mark - entry) / abs(entry)
+    else:
+        nv["pnl_pct"] = None
+
+    # Structure-aware breach flags (OTA-738)
+    direction = nv.get("position_structure_direction")
+    current_price = nv.get("current_underlying_price")
+    warning = nv.get("position_exit_warning_underlying")
+    stop = nv.get("position_exit_stop_underlying")
+
+    if direction and current_price is not None and warning is not None:
+        if direction == "bullish":
+            nv["warning_breached"] = current_price <= warning
+        else:  # bearish
+            nv["warning_breached"] = current_price >= warning
+    else:
+        nv["warning_breached"] = None
+
+    if direction and current_price is not None and stop is not None:
+        if direction == "bullish":
+            nv["stop_breached"] = current_price <= stop
+        else:  # bearish
+            nv["stop_breached"] = current_price >= stop
+    else:
+        nv["stop_breached"] = None
+
+    # warning_proximity_ratio — normalised distance, no 20% literal (OTA-738)
+    if (direction and current_price is not None
+            and warning is not None and stop is not None):
+        buffer = abs(warning - stop)
+        if buffer > 0:
+            if direction == "bullish":
+                distance = current_price - warning
+            else:
+                distance = warning - current_price
+            nv["warning_proximity_ratio"] = distance / buffer
+        else:
+            nv["warning_proximity_ratio"] = None
+    else:
+        nv["warning_proximity_ratio"] = None
+
+    # days_since_entry (OTA-738)
+    entry_date_iso = nv.get("position_entry_date")
+    if entry_date_iso:
+        try:
+            entry_d = date.fromisoformat(entry_date_iso[:10])
+            nv["days_since_entry"] = (date.today() - entry_d).days
+        except (ValueError, TypeError):
+            nv["days_since_entry"] = None
+    else:
+        nv["days_since_entry"] = None
+
+    # days_to_expiration (OTA-738)
+    expiration_iso = nv.get("position_expiration")
+    if expiration_iso:
+        try:
+            exp_d = date.fromisoformat(expiration_iso[:10])
+            nv["days_to_expiration"] = max(0, (exp_d - date.today()).days)
+        except (ValueError, TypeError):
+            nv["days_to_expiration"] = None
+    else:
+        nv["days_to_expiration"] = None
+
+
 # ── §5.1 Input catalog ───────────────────────────────────────────────
 
 
@@ -83,8 +159,33 @@ def _computed(name, vtype, null_sem="SKIP"):
     return CatalogEntry(name, Tier.COMPUTED, vtype, null_sem, "populate_computed")
 
 
-# Catalog populated in OTA-740; placeholder for now
-_CATALOG: dict[str, CatalogEntry] = {}
+_CATALOG: dict[str, CatalogEntry] = {
+    # ── RAW — positions table (OTA-736) ──
+    "position_entry_price":              _raw("position_entry_price", "number", "FAIL_CLOSED"),
+    "position_structure":                _raw("position_structure", "enum", "FAIL_OPEN"),
+    "position_structure_direction":      _raw("position_structure_direction", "enum:bullish|bearish", "FAIL_OPEN"),
+    "position_exit_warning_underlying":  _raw("position_exit_warning_underlying", "number", "SKIP"),
+    "position_exit_stop_underlying":     _raw("position_exit_stop_underlying", "number", "SKIP"),
+    "position_exit_scale_out_underlying": _raw("position_exit_scale_out_underlying", "number", "SKIP"),
+    "position_exit_levels_complete":     _raw("position_exit_levels_complete", "boolean", "FAIL_OPEN"),
+    "position_entry_date":              _raw("position_entry_date", "date", "FAIL_OPEN"),
+    "position_entry_underlying_price":  _raw("position_entry_underlying_price", "number", "SKIP"),
+    "position_expiration":              _raw("position_expiration", "date", "SKIP"),
+    # ── RAW — current market state (OTA-737) ──
+    "current_underlying_price":         _raw("current_underlying_price", "number", "FAIL_CLOSED"),
+    "current_position_mark":            _raw("current_position_mark", "number", "FAIL_CLOSED"),
+    # ── DERIVED (OTA-738) ──
+    "pnl_pct":                          _derived("pnl_pct", "number", "FAIL_CLOSED"),
+    "warning_breached":                 _derived("warning_breached", "boolean", "SKIP"),
+    "stop_breached":                    _derived("stop_breached", "boolean", "SKIP"),
+    "warning_proximity_ratio":          _derived("warning_proximity_ratio", "number", "SKIP"),
+    "days_since_entry":                 _derived("days_since_entry", "number", "FAIL_OPEN"),
+    "days_to_expiration":               _derived("days_to_expiration", "number", "SKIP"),
+    # ── COMPUTED (OTA-739, feature-flagged) ──
+    "current_prob_of_profit":           _computed("current_prob_of_profit", "number"),
+    "current_ev":                       _computed("current_ev", "number"),
+    "probability_of_max_loss_now":      _computed("probability_of_max_loss_now", "number"),
+}
 
 
 # ── Adapter ───────────────────────────────────────────────────────────
@@ -135,6 +236,10 @@ class PositionHealthAdapter:
         # OTA-737: fetch current underlying prices via _shared/ Schwab provider
         await self._stamp_market_prices(candidates, scan_request)
 
+        # OTA-738: compute DERIVED values from RAW
+        for c in candidates:
+            _compute_derived(c)
+
         log.debug(
             "PositionHealthAdapter.produce_candidates: %d candidates from %d positions",
             len(candidates), len(positions),
@@ -142,6 +247,10 @@ class PositionHealthAdapter:
         return candidates
 
     # ── §5.2 — COMPUTED callback (engine ComputedAdapter protocol) ──
+
+    # Feature flag for COMPUTED producers (OTA-739).
+    # Default OFF — v1 grading does not use these values.
+    ENABLE_COMPUTED = False
 
     def populate_computed(
         self,
@@ -154,15 +263,86 @@ class PositionHealthAdapter:
         the exact set of COMPUTED names referenced by active rules that
         still apply to the survivors.
 
-        COMPUTED producers (OTA-739) are feature-flagged and not yet active.
+        COMPUTED producers (OTA-739) are feature-flagged — default OFF.
         """
         if not needed:
+            return
+        if not self.ENABLE_COMPUTED:
             return
         log.debug(
             "PositionHealthAdapter.populate_computed needed=%s, n=%d",
             needed, len(candidates),
         )
-        # COMPUTED producers added in OTA-739
+        for c in candidates:
+            nv = c.named_values
+            price = nv.get("current_underlying_price")
+            if not price or price <= 0:
+                continue
+
+            # Need IV and DTE for B-S — extract from position context
+            dte = nv.get("days_to_expiration")
+            if not dte or dte <= 0:
+                continue
+
+            # Use entry underlying price to estimate ATM IV proxy
+            # (adapter doesn't have chain data — use a conservative default)
+            iv = 0.30  # conservative default; future: fetch live IV from chain
+            t_years = max(dte / 365.0, 0.001)
+
+            structure = nv.get("position_structure")
+            entry_price = nv.get("position_entry_price", 0)
+
+            if "current_prob_of_profit" in needed:
+                be = self._estimate_breakeven(nv)
+                if be is not None:
+                    nv["current_prob_of_profit"] = round(
+                        black_scholes_probability(price, be, t_years, 0.05, iv), 4,
+                    )
+                else:
+                    nv["current_prob_of_profit"] = None
+
+            if "current_ev" in needed and entry_price:
+                # For spreads, approximate EV from PoP and max P/L
+                pop = nv.get("current_prob_of_profit")
+                if pop is not None:
+                    # Approximate max_profit / max_loss from entry
+                    # This is a rough estimate; full chain data would be better
+                    nv["current_ev"] = None  # requires more context than adapter has
+                else:
+                    nv["current_ev"] = None
+
+            if "probability_of_max_loss_now" in needed:
+                stop = nv.get("position_exit_stop_underlying")
+                direction = nv.get("position_structure_direction")
+                if stop is not None and direction:
+                    if direction == "bullish":
+                        # P(price <= stop)
+                        nv["probability_of_max_loss_now"] = round(
+                            1.0 - black_scholes_probability(price, stop, t_years, 0.05, iv), 4,
+                        )
+                    else:
+                        # P(price >= stop)
+                        nv["probability_of_max_loss_now"] = round(
+                            black_scholes_probability(price, stop, t_years, 0.05, iv), 4,
+                        )
+                else:
+                    nv["probability_of_max_loss_now"] = None
+
+    @staticmethod
+    def _estimate_breakeven(nv: dict) -> float | None:
+        """Estimate breakeven from position structure and entry price."""
+        structure = nv.get("position_structure")
+        entry_price = nv.get("position_entry_price")
+        entry_underlying = nv.get("position_entry_underlying_price")
+        if not entry_price or not entry_underlying:
+            return None
+        # Rough estimate: for credit spreads, breakeven ≈ short_strike ± credit
+        # Without full leg data, use entry_underlying ± entry_price as proxy
+        if structure in _BULLISH_STRUCTURES:
+            return entry_underlying - abs(entry_price)
+        elif structure in _BEARISH_STRUCTURES:
+            return entry_underlying + abs(entry_price)
+        return None
 
     # ── internal: market price fetch (OTA-737) ──
 
@@ -282,9 +462,11 @@ class PositionHealthAdapter:
         position_id = pos["position_id"]
         symbol = pos["symbol"]
 
-        # Parse trade_structure JSON for structure type
-        structure = self._parse_structure_type(pos.get("trade_structure"))
+        # Parse trade_structure JSON for structure type and expiration
+        trade_structure_json = pos.get("trade_structure")
+        structure = self._parse_structure_type(trade_structure_json)
         direction = _direction_from_structure(structure)
+        expiration = self._parse_expiration(trade_structure_json)
 
         # Parse claude_exit_levels
         exit_levels = self._parse_exit_levels(pos.get("claude_exit_levels"))
@@ -323,6 +505,7 @@ class PositionHealthAdapter:
             ),
             # RAW auxiliaries for OTA-738
             "position_entry_date": entry_date_iso,
+            "position_expiration": expiration,
             "position_entry_underlying_price": (
                 float(pos["entry_underlying_price"])
                 if pos.get("entry_underlying_price") is not None else None
@@ -349,6 +532,19 @@ class PositionHealthAdapter:
             # trade_structure may store type directly or under a key
             if isinstance(ts, dict):
                 return ts.get("type") or ts.get("structure_type") or ts.get("spread_type")
+            return None
+        except (json.JSONDecodeError, TypeError):
+            return None
+
+    @staticmethod
+    def _parse_expiration(trade_structure_json: str | None) -> str | None:
+        """Extract expiration date from trade_structure JSON."""
+        if not trade_structure_json:
+            return None
+        try:
+            ts = json.loads(trade_structure_json)
+            if isinstance(ts, dict):
+                return ts.get("expiration") or ts.get("expiry")
             return None
         except (json.JSONDecodeError, TypeError):
             return None
