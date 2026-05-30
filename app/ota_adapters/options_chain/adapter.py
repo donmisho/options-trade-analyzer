@@ -101,13 +101,24 @@ def _compute_dte(expiration: str) -> int:
 def _compute_derived(candidate: Candidate) -> None:
     """Populate all DERIVED named values from RAW values on a Candidate."""
     nv = candidate.named_values
-    nv["DTE"] = _compute_dte(nv.get("expiration", ""))
+    nv["dte"] = _compute_dte(nv.get("expiration", ""))
+    nv["entry_date"] = date.today().isoformat()
+    nv["expiry_date"] = nv.get("expiration")
+    nv["stock_price"] = nv.get("underlying_price", 0)
 
     structure = nv.get("spread_type")
     if structure in SPREAD_TYPES:
         _compute_spread_derived(nv, structure)
     else:
         _compute_naked_derived(nv)
+
+    # Trade direction from structure type
+    if structure in ("bull_call", "bull_put", "long_call"):
+        nv["trade_direction"] = "bullish"
+    elif structure in ("bear_call", "bear_put", "long_put"):
+        nv["trade_direction"] = "bearish"
+    else:
+        nv["trade_direction"] = None
 
 
 def _compute_spread_derived(nv: dict, structure: str) -> None:
@@ -168,6 +179,25 @@ def _compute_spread_derived(nv: dict, structure: str) -> None:
     else:
         nv["cushion_pct"] = None
 
+    # net_theta (position perspective: long + short raw thetas)
+    nv["net_theta"] = round(
+        (nv.get("long_theta", 0) or 0) + (nv.get("short_theta", 0) or 0), 6,
+    )
+    # min-leg liquidity
+    nv["min_leg_open_interest"] = min(
+        nv.get("long_oi", 0) or 0, nv.get("short_oi", 0) or 0,
+    )
+    nv["min_leg_volume"] = min(
+        nv.get("long_volume", 0) or 0, nv.get("short_volume", 0) or 0,
+    )
+    # Aliases for rule-referenced names
+    nv["credit_width_pct"] = nv.get("credit_pct_of_width")
+    nv["debit_width_pct"] = nv.get("debit_pct_of_width")
+    # Per-leg bid-ask spread (max of both legs, dollars)
+    long_ba = (nv.get("long_ask", 0) or 0) - (nv.get("long_bid", 0) or 0)
+    short_ba = (nv.get("short_ask", 0) or 0) - (nv.get("short_bid", 0) or 0)
+    nv["bid_ask_spread"] = round(max(long_ba, short_ba), 4)
+
 
 def _compute_naked_derived(nv: dict) -> None:
     bid = nv.get("bid", 0) or 0
@@ -199,6 +229,38 @@ def _compute_naked_derived(nv: dict) -> None:
     nv["theta_runway_days"] = (
         round(premium / theta_per_day, 1) if theta_per_day > 0 else None
     )
+
+    # Additional DERIVED for naked options
+    nv["net_theta"] = theta
+    nv["mid_price"] = round(mid, 4)
+    nv["min_leg_open_interest"] = nv.get("open_interest", 0) or 0
+    nv["min_leg_volume"] = nv.get("volume", 0) or 0
+    nv["bid_ask_spread"] = round(ask - bid, 4) if ask > bid else 0
+
+
+# ── Post-context derivations (OTA-723) ────────────────────────────────
+
+def _compute_post_context_derived(candidates: list[Candidate]) -> None:
+    """Compute DERIVED values that depend on market context (SMA, ATR, etc.).
+
+    Called after _fetch_market_context has stamped per-symbol values onto
+    every candidate.
+    """
+    for c in candidates:
+        nv = c.named_values
+        # sma_alignment_classification alias (rule-referenced name)
+        nv["sma_alignment_classification"] = nv.get("sma_alignment")
+        # iv_rank proxy — alias for iv_percentile until true IV rank is available
+        nv["iv_rank"] = nv.get("iv_percentile")
+        # cushion_vs_atr — cushion as a multiple of ATR-based move
+        atr = nv.get("atr_14")
+        price = nv.get("underlying_price", 0)
+        cushion = nv.get("cushion_pct")
+        if atr and atr > 0 and price > 0 and cushion is not None:
+            atr_pct = atr / price * 100
+            nv["cushion_vs_atr"] = round(cushion / atr_pct, 4) if atr_pct > 0 else None
+        else:
+            nv["cushion_vs_atr"] = None
 
 
 # ── ATR_14 (OTA-719) ──────────────────────────────────────────────────
@@ -369,38 +431,60 @@ _CATALOG: dict[str, CatalogEntry] = {
     "iv":                _raw("iv", "number"),
     "volume":            _raw("volume", "number"),
     "open_interest":     _raw("open_interest", "number"),
-    # ── DERIVED ──
-    "DTE":                   _derived("DTE", "number", "FAIL_CLOSED"),
-    "net_debit":             _derived("net_debit", "number", "SKIP"),
-    "net_credit":            _derived("net_credit", "number", "SKIP"),
-    "max_profit":            _derived("max_profit", "number", "FAIL_CLOSED"),
-    "max_loss":              _derived("max_loss", "number", "FAIL_CLOSED"),
-    "breakeven":             _derived("breakeven", "number", "FAIL_CLOSED"),
-    "prob_of_profit":        _derived("prob_of_profit", "number"),
-    "ev_raw":                _derived("ev_raw", "number"),
-    "reward_risk_ratio":     _derived("reward_risk_ratio", "number"),
-    "cushion_pct":           _derived("cushion_pct", "number", "SKIP"),
-    "bid_ask_spread_pct":    _derived("bid_ask_spread_pct", "number", "SKIP"),
-    "premium_dollars":       _derived("premium_dollars", "number"),
-    "theta_runway_days":     _derived("theta_runway_days", "number", "SKIP"),
-    "credit_pct_of_width":   _derived("credit_pct_of_width", "number", "SKIP"),
-    "debit_pct_of_width":    _derived("debit_pct_of_width", "number", "SKIP"),
+    # ── RAW — earnings (external source, nullable until wired) ──
+    "next_earnings_date": _raw("next_earnings_date", "date", "SKIP"),
+    # ── DERIVED — core trade math ──
+    "dte":                    _derived("dte", "number", "FAIL_CLOSED"),
+    "net_debit":              _derived("net_debit", "number", "SKIP"),
+    "net_credit":             _derived("net_credit", "number", "SKIP"),
+    "max_profit":             _derived("max_profit", "number", "FAIL_CLOSED"),
+    "max_loss":               _derived("max_loss", "number", "FAIL_CLOSED"),
+    "breakeven":              _derived("breakeven", "number", "FAIL_CLOSED"),
+    "prob_of_profit":         _derived("prob_of_profit", "number"),
+    "ev_raw":                 _derived("ev_raw", "number"),
+    "reward_risk_ratio":      _derived("reward_risk_ratio", "number"),
+    "cushion_pct":            _derived("cushion_pct", "number", "SKIP"),
+    "bid_ask_spread_pct":     _derived("bid_ask_spread_pct", "number", "SKIP"),
+    "premium_dollars":        _derived("premium_dollars", "number"),
+    "theta_runway_days":      _derived("theta_runway_days", "number", "SKIP"),
+    "credit_pct_of_width":    _derived("credit_pct_of_width", "number", "SKIP"),
+    "debit_pct_of_width":     _derived("debit_pct_of_width", "number", "SKIP"),
     "breakeven_distance_pct": _derived("breakeven_distance_pct", "number", "SKIP"),
-    # ── DERIVED — SMA (OTA-717) ──
-    "SMA_8":           _derived("SMA_8", "number", "SKIP"),
-    "SMA_21":          _derived("SMA_21", "number", "SKIP"),
-    "SMA_50":          _derived("SMA_50", "number", "SKIP"),
-    "sma_alignment":   _derived("sma_alignment", "enum:BULLISH|BEARISH|MIXED|NEUTRAL", "SKIP"),
-    # ── DERIVED — ATR, IV percentile, chart_state, is_etf (OTA-719–722) ──
-    "ATR_14":          _derived("ATR_14", "number", "SKIP"),
-    "iv_percentile":   _derived("iv_percentile", "number", "SKIP"),
-    "chart_state":     _derived("chart_state", "enum:Bullish|Bearish|Mixed|Neutral", "SKIP"),
-    "is_etf":          _derived("is_etf", "boolean", "FAIL_OPEN"),
+    "net_theta":              _derived("net_theta", "number"),
+    "trade_direction":        _derived("trade_direction", "enum:bullish|bearish", "SKIP"),
+    "stock_price":            _derived("stock_price", "number", "FAIL_CLOSED"),
+    "mid_price":              _derived("mid_price", "number", "SKIP"),
+    "min_leg_open_interest":  _derived("min_leg_open_interest", "number"),
+    "min_leg_volume":         _derived("min_leg_volume", "number"),
+    "entry_date":             _derived("entry_date", "date"),
+    "expiry_date":            _derived("expiry_date", "date", "FAIL_CLOSED"),
+    # ── DERIVED — aliases (rule-referenced alternate names) ──
+    "sma_alignment_classification": _derived("sma_alignment_classification", "enum:BULLISH|BEARISH|MIXED|NEUTRAL", "SKIP"),
+    "credit_width_pct":      _derived("credit_width_pct", "number", "SKIP"),
+    "debit_width_pct":       _derived("debit_width_pct", "number", "SKIP"),
+    "bid_ask_spread":        _derived("bid_ask_spread", "number", "SKIP"),
+    # ── DERIVED — SMA (OTA-717), lowercase per rule references ──
+    "sma_8":            _derived("sma_8", "number", "SKIP"),
+    "sma_21":           _derived("sma_21", "number", "SKIP"),
+    "sma_50":           _derived("sma_50", "number", "SKIP"),
+    "sma_alignment":    _derived("sma_alignment", "enum:BULLISH|BEARISH|MIXED|NEUTRAL", "SKIP"),
+    # ── DERIVED — ATR, IV, chart_state, is_etf (OTA-719–722) ──
+    "atr_14":           _derived("atr_14", "number", "SKIP"),
+    "iv_percentile":    _derived("iv_percentile", "number", "SKIP"),
+    "atm_iv":           _derived("atm_iv", "number", "SKIP"),
+    "iv_rank":          _derived("iv_rank", "number", "SKIP"),
+    "chart_state":      _derived("chart_state", "enum:Bullish|Bearish|Mixed|Neutral", "SKIP"),
+    "is_etf":           _derived("is_etf", "boolean", "FAIL_OPEN"),
+    "cushion_vs_atr":   _derived("cushion_vs_atr", "number", "SKIP"),
+    # ── DERIVED — earnings (null when no earnings data source) ──
+    "dte_before_earnings": _derived("dte_before_earnings", "number", "SKIP"),
+    "dte_after_earnings":  _derived("dte_after_earnings", "number", "SKIP"),
     # ── COMPUTED (OTA-716) ──
     "probability_matrix": _computed("probability_matrix", "matrix"),
     "total_ev":           _computed("total_ev", "number"),
     "p_max_loss":         _computed("p_max_loss", "number"),
     "p_max_profit":       _computed("p_max_profit", "number"),
+    "bs_delta":           _computed("bs_delta", "number"),
 }
 
 
@@ -490,12 +574,15 @@ class OptionsChainAdapter:
         for c in candidates:
             _compute_derived(c)
 
-        # Per-symbol context: SMA, ATR_14, IV percentile, chart_state, is_etf
+        # Per-symbol context: SMA, atr_14, IV percentile, chart_state, is_etf
         ctx = await self._fetch_market_context(scan_request)
         if ctx:
             for c in candidates:
                 for k, v in ctx.items():
                     c.named_values[k] = v
+
+        # Post-context derivations (depend on market context values)
+        _compute_post_context_derived(candidates)
 
         log.debug(
             "OptionsChainAdapter.produce_candidates: %d candidates for %s",
@@ -525,7 +612,7 @@ class OptionsChainAdapter:
         for c in candidates:
             nv = c.named_values
             price = nv.get("underlying_price", 0)
-            dte = nv.get("DTE", 0)
+            dte = nv.get("dte", 0)
             structure = nv.get("spread_type", "")
 
             # Representative IV — use long_iv (spreads) or iv (naked)
@@ -567,6 +654,16 @@ class OptionsChainAdapter:
 
             if "p_max_profit" in needed or "p_max_loss" in needed:
                 self._compute_probabilities(nv, structure, price, iv, t_years, needed)
+
+            if "bs_delta" in needed:
+                opt_type = nv.get("option_type", "call")
+                strike_val = nv.get("long_strike") or nv.get("strike") or 0
+                if price > 0 and strike_val > 0:
+                    nv["bs_delta"] = round(
+                        _bs_delta(opt_type, price, strike_val, t_years, iv), 6,
+                    )
+                else:
+                    nv["bs_delta"] = None
 
     @staticmethod
     def _compute_probabilities(
@@ -671,23 +768,24 @@ class OptionsChainAdapter:
 
         price = self._underlying_price
 
-        # SMA (OTA-717)
+        # SMA (OTA-717) — lowercase keys match seeded rule references
         if candles and price > 0:
             sma = compute_sma_signal(candles, price)
-            ctx["SMA_8"] = sma.get("sma_8")
-            ctx["SMA_21"] = sma.get("sma_21")
-            ctx["SMA_50"] = sma.get("sma_50")
+            ctx["sma_8"] = sma.get("sma_8")
+            ctx["sma_21"] = sma.get("sma_21")
+            ctx["sma_50"] = sma.get("sma_50")
             ctx["sma_alignment"] = sma.get("alignment")
             ctx["chart_state"] = _map_chart_state(sma.get("alignment"))
         else:
             ctx["sma_alignment"] = "NEUTRAL"
             ctx["chart_state"] = "Neutral"
 
-        # ATR_14 (OTA-719)
-        ctx["ATR_14"] = _compute_atr_14(candles) if candles else None
+        # ATR_14 (OTA-719) — lowercase key
+        ctx["atr_14"] = _compute_atr_14(candles) if candles else None
 
-        # IV percentile (OTA-720)
+        # IV percentile + ATM IV (OTA-720)
         atm_iv = _get_atm_iv(self._contracts, price)
+        ctx["atm_iv"] = atm_iv
         ctx["iv_percentile"] = (
             _compute_iv_percentile(candles, atm_iv) if candles else None
         )
