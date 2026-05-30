@@ -98,8 +98,9 @@ The OTA project uses a 6-stage workflow plus one terminal cancellation state. Th
 | 1 | Schedule | 10001 | To Do | Don | Promoted — confirmed candidate for next work set |
 | 2 | Write Story | 10002 | In Progress | Claude Web | Refining the Story description, requirements, scope |
 | 3 | Write Prompt | 10003 | In Progress | Claude Web | Story complete; writing the Claude Code execution prompt |
-| 4 | Code & Test Complete | 10004 | In Progress | Claude Code | Code committed and built; artifact ready to deploy. **Not yet in production.** |
-| 5 | Production Deployed | 10157 | Done | Automation / manual override | Live in prod after manual deploy + smoke test + slot swap |
+| 4 | Prompt Written | 10228 | In Progress | Claude Web | Prompt MD file created and ready for Claude Code to execute |
+| 5 | Code & Test Complete | 10004 | In Progress | Claude Code | Code committed and built; artifact ready to deploy. **Not yet in production.** |
+| 6 | Production Deployed | 10157 | Done | Automation / manual override | Live in prod after manual deploy + smoke test + slot swap |
 | C | Cancelled | 10158 | Done | Don / Automation | Work absorbed elsewhere, superseded, or no longer needed. **Not deployed; intentionally not done.** Tickets in Idea, Schedule, Write Story, or Write Prompt may be cancelled. Code & Test Complete tickets are not cancelled — they are deployed or rolled back via a follow-up Story. |
 
 ### Transition ID reference
@@ -111,6 +112,8 @@ The OTA project uses a 6-stage workflow plus one terminal cancellation state. Th
 | In Progress | Any | Write Story | 31 |
 | Write Prompt | Any | Write Prompt | 41 |
 | Done | Any | Code & Test Complete | 51 |
+| MD File Created for Prompt | Write Prompt | Prompt Written | 16 |
+| Override (to Prompt Written) | Any | Prompt Written | 17 |
 | Claude Code Build | Write Prompt | Code & Test Complete | 6 |
 | Deployed to Prod | Code & Test Complete | Production Deployed | 5 |
 | Override | Code & Test Complete | Production Deployed | 10 |

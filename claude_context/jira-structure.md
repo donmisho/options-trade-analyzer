@@ -1,7 +1,7 @@
 # Jira Structure (Profile)
 
 **Scope:** Profile level — applies to all of Don's projects under this profile (currently OTA, future TMTC projects).
-**Last Updated:** 2026-05-19 UTC
+**Last Updated:** 2026-05-30 UTC
 **Governing Story:** OTA-569 (Documentation Governance — Profile)
 **Creation Subtask:** OTA-589
 
@@ -100,8 +100,9 @@ Each project on this profile uses a phase-based workflow with the following patt
 | 1 | Schedule | To Do | Don |
 | 2 | Write Story | In Progress | Claude Web |
 | 3 | Write Prompt | In Progress | Claude Web |
-| 4 | Code & Test Complete | In Progress | Claude Code |
-| 5 | Production Deployed | Done | Automation / manual override |
+| 4 | Prompt Written | In Progress | Claude Web |
+| 5 | Code & Test Complete | In Progress | Claude Code |
+| 6 | Production Deployed | Done | Automation / manual override |
 | C | Cancelled | Done | Don / Automation |
 
 The terminology is *phases*, not sprints. Sprint-based planning is not used on this profile.
@@ -162,5 +163,6 @@ When creating, transitioning, or modifying issues via the Atlassian MCP or the J
 
 | Date | Subtask | Change |
 |---|---|---|
+| 2026-05-19 UTC | Added "Prompt written" status to follow "write prompt"
 | 2026-05-19 UTC | OTA-674 | Added "Title conventions" section. Codifies the universal rule: titles describe the work, not the execution order. Phase numbers, sprint numbers, and step prefixes belong in descriptions, commit messages, or prompt files — never in titles. Applies to all projects on this profile; project-level overrides are not permitted. |
 | 2026-05-06 UTC | OTA-589 | Initial creation. Replaces a workaround where Jira hierarchy and parenting rules were duplicated inside each project's `CLAUDE.md`. Codifies the no-Feature decision driven by license tier — explicit "if you see Feature anywhere, it's wrong, ignore it" guidance included. Documents the transition-name quirk ("To Do" transition → Schedule status). Captures API lessons learned: parent must be direct named param, prefer markdown contentFormat, use transition IDs not names. |
