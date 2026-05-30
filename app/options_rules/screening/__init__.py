@@ -70,6 +70,38 @@ def screening_formula(name: str):
     return decorator
 
 
+def adjustment_formula(name: str):
+    """Register an adjustment formula implementation under *name*.
+
+    Unlike ``screening_formula``, adjustment formulas may return:
+    - ``bool``: True = no penalty, False = trigger junction's score_penalty
+    - ``float``: added directly to score (can be negative, e.g. -25)
+
+    No [0, 100] clamping is applied. The engine's ``_run_adjustments``
+    handles clamping after applying the delta.
+
+    OTA-728, OTA-729
+    """
+
+    def decorator(fn: FormulaFn) -> FormulaFn:
+        @functools.wraps(fn)
+        def wrapper(
+            named_values: dict[str, Any], params: dict[str, Any]
+        ) -> Any:
+            result = fn(named_values, params)
+            if not isinstance(result, (bool, int, float)):
+                raise FormulaReturnValueError(
+                    f"Adjustment formula '{name}' returned "
+                    f"{type(result).__name__}, expected bool or number."
+                )
+            return result
+
+        _REGISTRY.register(name, wrapper)
+        return fn
+
+    return decorator
+
+
 def get_registry() -> DictFormulaRegistry:
     """Return the live screening formula registry.
 
@@ -81,5 +113,6 @@ def get_registry() -> DictFormulaRegistry:
 
 
 # ── Auto-register all formula modules ──────────────────────────────────
-# Importing scoring_formulas triggers @screening_formula decorators.
+# Importing triggers @screening_formula / @adjustment_formula decorators.
 import app.options_rules.screening.scoring_formulas as _scoring  # noqa: E402, F401
+import app.options_rules.screening.adjustment_formulas as _adj  # noqa: E402, F401

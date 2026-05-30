@@ -53,8 +53,10 @@ class TestScoringFormulasRegistration:
             assert name in registered, f"Formula '{name}' not registered"
 
     def test_formula_membership_with_validation(self):
-        """OTA-699 membership check passes when all 16 formulas are
+        """OTA-699 membership check passes when all registered formulas are
         in both the SHARED contract and the live registry."""
+        # Contract must include ALL registered formulas (scoring + adjustment)
+        all_formula_names = sorted(get_registry().registered_names())
         lookups = [
             {
                 "owner_app_id": "SHARED",
@@ -64,10 +66,10 @@ class TestScoringFormulasRegistration:
                 "sort_order": i + 1,
                 "enabled": True,
             }
-            for i, name in enumerate(sorted(SCORING_FORMULA_NAMES))
+            for i, name in enumerate(all_formula_names)
         ]
 
-        # Build a minimal config with one scoring rule per formula
+        # Build a minimal config with one rule per registered formula
         rules = [
             {
                 "rule_id": i + 1,
@@ -83,10 +85,10 @@ class TestScoringFormulasRegistration:
                 "null_semantics": None,
                 "enabled": True,
             }
-            for i, name in enumerate(sorted(SCORING_FORMULA_NAMES))
+            for i, name in enumerate(all_formula_names)
         ]
 
-        n = len(SCORING_FORMULA_NAMES)
+        n = len(all_formula_names)
         weight = 1.0 / n
         junction = [
             {
@@ -102,7 +104,7 @@ class TestScoringFormulasRegistration:
                 "rationale": f"{name}",
                 "enabled": True,
             }
-            for i, name in enumerate(sorted(SCORING_FORMULA_NAMES))
+            for i, name in enumerate(all_formula_names)
         ]
 
         source = InMemoryConfigSource(
