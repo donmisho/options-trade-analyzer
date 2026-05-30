@@ -385,6 +385,8 @@ def _run_adjustments(
     """Run adjustment rules. Returns the final adjusted score."""
     for binding in adjustment_bindings:
         score_before = score
+        # Inject current score so floor/cap adjustments can compute exact deltas
+        candidate.named_values["_current_score"] = score
         adj_result = _evaluate_rule_numeric(candidate, binding, registry)
 
         # If the formula returns a bool, convert: True → 0 (pass), False → penalty

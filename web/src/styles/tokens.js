@@ -82,6 +82,15 @@ export const WEIGHT_LABELS = {
   theta_efficiency: "Theta Efficiency",
 };
 
+// Position health grade colors (used in PositionHealthBadge)
+export const HEALTH_GRADE_COLORS = {
+  A: { color: "#22c55e", bg: "rgba(34, 197, 94, 0.12)" },
+  B: { color: "#14b8a6", bg: "rgba(20, 184, 166, 0.12)" },
+  C: { color: "#eab308", bg: "rgba(234, 179, 8, 0.12)" },
+  D: { color: "#f97316", bg: "rgba(249, 115, 22, 0.12)" },
+  F: { color: "#ef4444", bg: "rgba(239, 68, 68, 0.12)" },
+};
+
 // Default analysis presets (used by ConfigDrawer)
 export const DEFAULT_PRESETS = [
   {
