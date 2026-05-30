@@ -49,6 +49,10 @@ from app.models.schemas import (
 from app.skills.skill_loader import get_skill
 from app.agents.telemetry import invoke_with_tracing
 from app.analysis.black_scholes import compute_probability_matrix
+from app.ota_adapters._shared.black_scholes import (
+    compute_naked_long_option_ev as _compute_naked_long_option_ev,
+    pdf_prob as _pdf_prob,
+)
 from app.models.session import async_session
 from app.validators.narrative_grounding import EvaluationFields, validate_narrative
 from app.analysis.hard_gates import evaluate_hard_gates, GateTradeContext
@@ -1127,52 +1131,8 @@ async def ai_health():
     return {"status": "ok", "provider": "foundry"}
 
 
-# ─── OTA-676: Naked Single-Leg Long Option EV ────────────────────────────────
-
-def _compute_naked_long_option_ev(
-    option_type: str,
-    strike: float,
-    underlying_price: float,
-    iv: float,
-    days_to_exp: int,
-    entry_price: float,
-    risk_free_rate: float = 0.05,
-) -> float:
-    """
-    Compute total expected value in dollars per contract for a naked single-leg
-    long option using the canonical lognormal probability matrix.
-
-    Uses compute_probability_matrix() from app/analysis/black_scholes.py with a
-    wide price range (±50%) to capture the full distribution including the modal
-    outcome (option expiring worthless for OTM trades).
-
-    Returns EV in dollars per contract (same units as _build_exit_rows total_ev).
-    """
-    from app.analysis.black_scholes import compute_probability_matrix
-
-    pm = compute_probability_matrix(
-        current_price=underlying_price,
-        iv=iv,
-        dte=max(days_to_exp, 1),
-        risk_free_rate=risk_free_rate,
-        price_range_pct=0.50,
-        price_step=5.0,
-    )
-
-    expiry_probs = pm.matrix[-1]
-    is_put = option_type.upper() in ("PUT", "P")
-
-    total_ev = 0.0
-    for price, prob in zip(pm.price_levels, expiry_probs):
-        if is_put:
-            intrinsic = max(0.0, strike - price)
-        else:
-            intrinsic = max(0.0, price - strike)
-        pnl = (intrinsic - entry_price) * 100
-        total_ev += pnl * prob
-
-    return round(total_ev, 4)
-
+# ─── OTA-676: _compute_naked_long_option_ev — moved to
+# app.ota_adapters._shared.black_scholes (OTA-716). Imported at top of file.
 
 # ─── OTA-292: Exit Scenario Engine ───────────────────────────────────────────
 
@@ -1220,13 +1180,8 @@ def _max_profit_loss(spread_type: str, long_strike: float, short_strike: float, 
         return round(entry_price * 100, 2), round((spread_width - entry_price) * 100, 2)
 
 
-def _pdf_prob(S0: float, K: float, dte: int, iv: float, r: float, step: float = 5.0) -> float:
-    """Discrete PDF probability: P(underlying in [K-step/2, K+step/2] at expiry)."""
-    from app.analysis.black_scholes import black_scholes_probability
-    T = max(dte / 365.0, 0.001)
-    p_lo = black_scholes_probability(S0, K - step / 2, T, r, iv)
-    p_hi = black_scholes_probability(S0, K + step / 2, T, r, iv)
-    return round(max(0.0, p_lo - p_hi), 6)
+# _pdf_prob — moved to app.ota_adapters._shared.black_scholes (OTA-716).
+# Imported at top of file.
 
 
 def _exit_zone(

@@ -12,7 +12,8 @@ domain knowledge on the input side of the engine (§5).
 
 The adapter does NOT run rules, assign scores, or reference strategies.
 
-OTA-713 (skeleton), OTA-714 (chain fetch + structure building), OTA-715 (DERIVED)
+OTA-713 (skeleton), OTA-714 (chain fetch + structure building), OTA-715 (DERIVED),
+OTA-716 (B-S COMPUTED tier), OTA-717 (SMA producers)
 """
 
 from __future__ import annotations
@@ -27,7 +28,13 @@ from scipy.stats import norm
 
 from app.core.config import settings
 from app.insight_engine import Candidate, Tier
+from app.ota_adapters._shared.black_scholes import (
+    black_scholes_probability,
+    compute_naked_long_option_ev,
+    compute_probability_matrix,
+)
 from app.ota_adapters._shared.schwab_client import get_market_data_provider
+from app.ota_adapters._shared.sma import compute_sma_signal
 from app.services.symbol_cache import to_api_symbol_cached
 
 log = logging.getLogger(__name__)
@@ -211,6 +218,10 @@ def _derived(name, vtype, null_sem="FAIL_OPEN"):
     return CatalogEntry(name, Tier.DERIVED, vtype, null_sem, "_compute_derived")
 
 
+def _computed(name, vtype, null_sem="SKIP"):
+    return CatalogEntry(name, Tier.COMPUTED, vtype, null_sem, "populate_computed")
+
+
 _CATALOG: dict[str, CatalogEntry] = {
     # ── RAW — chain level ──
     "underlying_price":  _raw("underlying_price", "number", "FAIL_CLOSED"),
@@ -267,6 +278,16 @@ _CATALOG: dict[str, CatalogEntry] = {
     "credit_pct_of_width":   _derived("credit_pct_of_width", "number", "SKIP"),
     "debit_pct_of_width":    _derived("debit_pct_of_width", "number", "SKIP"),
     "breakeven_distance_pct": _derived("breakeven_distance_pct", "number", "SKIP"),
+    # ── DERIVED — SMA (OTA-717) ──
+    "SMA_8":           _derived("SMA_8", "number", "SKIP"),
+    "SMA_21":          _derived("SMA_21", "number", "SKIP"),
+    "SMA_50":          _derived("SMA_50", "number", "SKIP"),
+    "sma_alignment":   _derived("sma_alignment", "enum:BULLISH|BEARISH|MIXED|NEUTRAL", "SKIP"),
+    # ── COMPUTED (OTA-716) ──
+    "probability_matrix": _computed("probability_matrix", "matrix"),
+    "total_ev":           _computed("total_ev", "number"),
+    "p_max_loss":         _computed("p_max_loss", "number"),
+    "p_max_profit":       _computed("p_max_profit", "number"),
 }
 
 
@@ -356,6 +377,15 @@ class OptionsChainAdapter:
         for c in candidates:
             _compute_derived(c)
 
+        # SMA — fetch candles and stamp onto all candidates (OTA-717)
+        sma_data = await self._fetch_sma(scan_request)
+        if sma_data:
+            for c in candidates:
+                c.named_values["SMA_8"] = sma_data.get("sma_8")
+                c.named_values["SMA_21"] = sma_data.get("sma_21")
+                c.named_values["SMA_50"] = sma_data.get("sma_50")
+                c.named_values["sma_alignment"] = sma_data.get("alignment")
+
         log.debug(
             "OptionsChainAdapter.produce_candidates: %d candidates for %s",
             len(candidates), symbol,
@@ -371,12 +401,118 @@ class OptionsChainAdapter:
     ) -> None:
         """Populate COMPUTED named values on surviving candidates.
 
-        Stub — real COMPUTED math lands in OTA-716.
+        Only computes the values listed in *needed* — the engine passes
+        the exact set of COMPUTED names referenced by active rules that
+        still apply to the survivors.  This avoids unnecessary B-S math.
         """
+        if not needed:
+            return
         log.debug(
-            "OptionsChainAdapter.populate_computed (stub) needed=%s, n=%d",
+            "OptionsChainAdapter.populate_computed needed=%s, n=%d",
             needed, len(candidates),
         )
+        for c in candidates:
+            nv = c.named_values
+            price = nv.get("underlying_price", 0)
+            dte = nv.get("DTE", 0)
+            structure = nv.get("spread_type", "")
+
+            # Representative IV — use long_iv (spreads) or iv (naked)
+            iv = nv.get("long_iv") or nv.get("iv") or 0
+            if iv <= 0:
+                continue
+
+            t_years = max(dte / 365.0, 0.001)
+
+            if "probability_matrix" in needed:
+                try:
+                    pm = compute_probability_matrix(
+                        current_price=price, iv=iv, dte=max(dte, 1),
+                    )
+                    nv["probability_matrix"] = {
+                        "price_levels": pm.price_levels,
+                        "dates": [d.isoformat() for d in pm.dates],
+                        "matrix": pm.matrix,
+                    }
+                except Exception:
+                    nv["probability_matrix"] = None
+
+            if structure in NAKED_TYPES and "total_ev" in needed:
+                mid = ((nv.get("bid", 0) or 0) + (nv.get("ask", 0) or 0)) / 2
+                if mid > 0:
+                    try:
+                        nv["total_ev"] = compute_naked_long_option_ev(
+                            option_type=nv.get("option_type", "call"),
+                            strike=nv.get("strike", 0),
+                            underlying_price=price,
+                            iv=iv,
+                            days_to_exp=max(dte, 1),
+                            entry_price=mid,
+                        )
+                    except Exception:
+                        nv["total_ev"] = None
+                else:
+                    nv["total_ev"] = None
+
+            if "p_max_profit" in needed or "p_max_loss" in needed:
+                self._compute_probabilities(nv, structure, price, iv, t_years, needed)
+
+    @staticmethod
+    def _compute_probabilities(
+        nv: dict, structure: str, price: float, iv: float,
+        t_years: float, needed: set[str],
+    ) -> None:
+        """Compute p_max_profit / p_max_loss via B-S CDF."""
+        r = 0.05
+        if structure in SPREAD_TYPES:
+            long_strike = nv.get("long_strike", 0)
+            short_strike = nv.get("short_strike", 0)
+            if not long_strike or not short_strike:
+                return
+            if structure in ("bull_call", "bull_put"):
+                # Max profit when S >= short_strike
+                if "p_max_profit" in needed:
+                    nv["p_max_profit"] = round(
+                        black_scholes_probability(price, short_strike, t_years, r, iv), 4,
+                    )
+                # Max loss when S <= long_strike
+                if "p_max_loss" in needed:
+                    nv["p_max_loss"] = round(
+                        1.0 - black_scholes_probability(price, long_strike, t_years, r, iv), 4,
+                    )
+            else:  # bear_put, bear_call
+                # Max profit when S <= short_strike
+                if "p_max_profit" in needed:
+                    nv["p_max_profit"] = round(
+                        1.0 - black_scholes_probability(price, short_strike, t_years, r, iv), 4,
+                    )
+                # Max loss when S >= long_strike
+                if "p_max_loss" in needed:
+                    nv["p_max_loss"] = round(
+                        black_scholes_probability(price, long_strike, t_years, r, iv), 4,
+                    )
+        elif structure in NAKED_TYPES:
+            strike = nv.get("strike", 0)
+            if not strike:
+                return
+            opt_type = nv.get("option_type", "call")
+            if opt_type == "call":
+                # Max loss = expires worthless: P(S <= strike)
+                if "p_max_loss" in needed:
+                    nv["p_max_loss"] = round(
+                        1.0 - black_scholes_probability(price, strike, t_years, r, iv), 4,
+                    )
+                # p_max_profit undefined for unbounded upside — set None
+                if "p_max_profit" in needed:
+                    nv["p_max_profit"] = None
+            else:  # put
+                # Max loss = expires worthless: P(S >= strike)
+                if "p_max_loss" in needed:
+                    nv["p_max_loss"] = round(
+                        black_scholes_probability(price, strike, t_years, r, iv), 4,
+                    )
+                if "p_max_profit" in needed:
+                    nv["p_max_profit"] = None
 
     # ── internal: chain fetch ──
 
@@ -396,6 +532,26 @@ class OptionsChainAdapter:
         self._contracts = chain_data.get("contracts", [])
         self._underlying_price = chain_data.get("underlying_price", 0)
         self._chain_data = chain_data
+
+    # ── internal: SMA fetch (OTA-717) ──
+
+    async def _fetch_sma(self, scan_request: dict[str, Any]) -> dict | None:
+        """Fetch candles and compute SMA signal.  Returns None on failure."""
+        provider = get_market_data_provider(scan_request.get("user_id"))
+        if not hasattr(provider, "get_price_history"):
+            return None
+        symbol = scan_request["symbol"]
+        api_sym = to_api_symbol_cached(
+            symbol, settings.default_market_data_provider,
+        )
+        try:
+            candles = await provider.get_price_history(api_sym)
+        except Exception as exc:
+            log.warning("SMA candle fetch failed for %s: %s", symbol, exc)
+            return None
+        if not candles or self._underlying_price <= 0:
+            return None
+        return compute_sma_signal(candles, self._underlying_price)
 
     # ── internal: spread building ──
 
