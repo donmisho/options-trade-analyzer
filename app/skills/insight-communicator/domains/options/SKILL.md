@@ -1,8 +1,8 @@
 ---
-name: insight-engine-options
+name: insight-communicator-options
 version: 1.0.0
 description: >
-  Generates insights for options position deviations. Called by the Insight Engine
+  Generates insights for options position deviations. Called by the Insight Communicator
   when a position health deviation is detected. Returns structured insight JSON
   for display on the trading dashboard.
 metadata:

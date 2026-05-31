@@ -30,7 +30,7 @@ from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.context_store import ContextStore
-from app.agents.insight_engine import InsightEngine
+from app.agents.insight_communicator import InsightCommunicator
 from app.agents.telemetry import invoke_with_tracing
 from app.models.database import Position, AgentRunLog
 from app.providers.base import ContextSource
@@ -333,13 +333,13 @@ class PositionMonitorAgent:
     ) -> None:
         """
         For each position update where needs_insight=True, run the deviation
-        detector to classify the deviation and call InsightEngine.generate().
+        detector to classify the deviation and call InsightCommunicator.generate().
         """
         escalations = [u for u in updates if u.needs_insight]
         if not escalations:
             return
 
-        engine = InsightEngine(
+        engine = InsightCommunicator(
             ai_provider=self._adapter,
             domain="options",
         )
@@ -388,5 +388,5 @@ class PositionMonitorAgent:
 
     @staticmethod
     def _score_health_grade(grade: str) -> int:
-        """Map health grade to a deviation score for InsightEngine."""
+        """Map health grade to a deviation score for InsightCommunicator."""
         return {"A": 0, "B": 20, "C": 50, "D": 75, "F": 95}.get(grade, 50)

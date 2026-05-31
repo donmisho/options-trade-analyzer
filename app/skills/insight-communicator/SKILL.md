@@ -1,8 +1,8 @@
 ---
-name: insight-engine
+name: insight-communicator
 version: 1.0.0
 description: >
-  Generic insight generation engine. Given a detected deviation for any monitored
+  Generic insight communicator. Given a detected deviation for any monitored
   entity, crafts a short actionable insight with severity classification and
   recommended next steps. Domain vocabulary is provided per-invocation via the
   domain_context field.

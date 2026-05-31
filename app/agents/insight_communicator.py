@@ -1,14 +1,14 @@
 """
-InsightEngine — Phase 3.6 Stream A3.
+InsightCommunicator — Phase 3.6 Stream A3.
 
-Generic insight generation engine. Given a detected deviation for any monitored
+Generic insight communicator. Given a detected deviation for any monitored
 entity, calls Claude to craft a short actionable insight and writes it to the
 insights table.
 
 Domain-agnostic design:
-  - domain='options' → uses app/skills/insight-engine/domains/options/SKILL.md
-  - domain='manufacturing' → uses app/skills/insight-engine/domains/manufacturing/SKILL.md
-  - The generic skill at app/skills/insight-engine/SKILL.md serves as fallback
+  - domain='options' → uses app/skills/insight-communicator/domains/options/SKILL.md
+  - domain='manufacturing' → uses app/skills/insight-communicator/domains/manufacturing/SKILL.md
+  - The generic skill at app/skills/insight-communicator/SKILL.md serves as fallback
 
 Deduplication:
   One active insight per (entity_id, deviation_type). If an active insight already
@@ -40,11 +40,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class InsightEngine:
+class InsightCommunicator:
     """
-    Generic insight generation engine. Domain-agnostic.
+    Generic insight communicator. Domain-agnostic.
 
-    Instantiate with a domain name and skill path. The same engine class
+    Instantiate with a domain name and skill path. The same communicator class
     serves all domains; only the SKILL.md and entity vocabulary change.
     """
 
@@ -52,18 +52,18 @@ class InsightEngine:
         self,
         ai_provider: "FoundryEvalAdapter",
         domain: str,
-        skill_path: str = "insight-engine",
+        skill_path: str = "insight-communicator",
     ):
         self._provider = ai_provider
         self.domain = domain
         # Try domain-specific skill first; fall back to generic
-        domain_skill_path = f"insight-engine/domains/{domain}"
+        domain_skill_path = f"insight-communicator/domains/{domain}"
         try:
             self._skill = get_skill(domain_skill_path)
-            logger.debug(f"InsightEngine: loaded domain skill '{domain_skill_path}'")
+            logger.debug(f"InsightCommunicator: loaded domain skill '{domain_skill_path}'")
         except FileNotFoundError:
             self._skill = get_skill(skill_path)
-            logger.debug(f"InsightEngine: no domain skill for '{domain}' — using generic")
+            logger.debug(f"InsightCommunicator: no domain skill for '{domain}' — using generic")
 
     async def generate(
         self,
@@ -125,7 +125,7 @@ class InsightEngine:
                 span_ctx["input_tokens"] = input_tokens
                 span_ctx["output_tokens"] = output_tokens
             except Exception as e:
-                logger.error(f"InsightEngine: Claude call failed for {entity_id}: {e}")
+                logger.error(f"InsightCommunicator: Claude call failed for {entity_id}: {e}")
                 raise
 
         # Parse response
@@ -159,7 +159,7 @@ class InsightEngine:
                 existing.source_position_id = source_position_id
             insight = existing
             logger.info(
-                f"InsightEngine: updated existing insight {existing.insight_id} "
+                f"InsightCommunicator: updated existing insight {existing.insight_id} "
                 f"for {entity_id} ({deviation.deviation_type})"
             )
         else:
@@ -186,7 +186,7 @@ class InsightEngine:
             )
             db.add(insight)
             logger.info(
-                f"InsightEngine: created insight {insight.insight_id} "
+                f"InsightCommunicator: created insight {insight.insight_id} "
                 f"for {entity_id} ({deviation.deviation_type}, severity={severity})"
             )
 
@@ -284,5 +284,5 @@ class InsightEngine:
         try:
             return json.loads(text)
         except Exception as e:
-            logger.error(f"InsightEngine: failed to parse response: {e}\nRaw: {raw[:200]}")
+            logger.error(f"InsightCommunicator: failed to parse response: {e}\nRaw: {raw[:200]}")
             return {}

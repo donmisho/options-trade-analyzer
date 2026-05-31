@@ -562,7 +562,7 @@ class Insight(Base):
     """
     An AI-generated insight for a monitored entity.
 
-    Created by InsightEngine when a deviation is detected. Domain-agnostic —
+    Created by InsightCommunicator when a deviation is detected. Domain-agnostic —
     the domain field determines what kind of entity is being monitored
     (options position, manufacturing equipment, customer account, etc.).
 

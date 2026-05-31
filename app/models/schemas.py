@@ -520,7 +520,7 @@ class DeviationResult(BaseModel):
     """
     Result of running a DeviationDetector check.
 
-    Returned by all four check_* methods. Contains everything InsightEngine
+    Returned by all four check_* methods. Contains everything InsightCommunicator
     needs to craft an insight: what was detected, how severe it is, and a
     description for Claude's context.
     """
