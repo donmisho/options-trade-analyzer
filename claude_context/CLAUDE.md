@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-**Last Updated:** 2026-05-19 UTC
+**Last Updated:** 2026-05-31 00:00 UTC
 **Governing Story:** OTA-573 (Documentation Governance — Project (OTA))
 
 ---
@@ -371,6 +371,19 @@ Schwab is the sole Active market data provider today. Tradier was Removed via OT
 
 ---
 
+## Insight Engine Rules (Quick Reference)
+
+These are non-negotiable invariants for the generic evaluation engine under `app/insight_engine/`. They are the *engine* contract, not business rules (those live in `business-rules.md`) and not architecture (the full spec is `insight_engine.md`; deployment placement is `architecture-plan.md` Pattern 5). Reference those docs — do not restate them.
+
+- **No domain imports.** Engine code under `app/insight_engine/` imports nothing from any domain module (no `app.analysis`, `app.providers`, `app.api`, `app.agents`, …), no LLM client, and no DB driver. Enforced at import time by `app/insight_engine/_guard.py` and by CI.
+- **No strategy-identity branches.** No `if strategy_id == …` or `if strategy_key == …` branches anywhere in engine code. Strategies are resolved by config lookup only, never by code path.
+- **Junction owns all strategy×rule parameters.** The strategy×rule junction is the only home of per-strategy rule parameters, `evaluation_order`, `stop_if_fail`, `score_penalty`, and scoring `weight`s. Nothing is inherited from the rule and nothing overrides a base rule; if the junction row is absent, the rule is not part of the strategy.
+- **Tables are the source of truth — no magic numbers.** All rule content (thresholds, weights, gate behaviour, bands, ordering) comes from the runtime tables. The engine hardcodes no rule literals. `Scoring Parameters.xlsx` is a build-time seed only; after import the tables are authoritative. Persisted evaluation history lands in the single `bronze_evaluations` table, discriminated by `record_type` (`SNAPSHOT` | `DECISION`).
+- **Every evaluation carries `source_app_id`.** Every `engine.evaluate(...)` call passes a `source_app_id` (`OTA`, `FFL`, `STK`, …); the engine stamps it onto every record it emits.
+- **Engine is LLM-free; deterministic evaluation precedes any LLM call.** The engine never calls an LLM. Every disqualifying rule runs before any LLM call (principle §2.6); an LLM, if used at all, only explains or elaborates on survivors — it never discovers a rule violation.
+
+---
+
 ## Active Cleanup Items
 
 **Valid until 2026-06-30.** After this date, Claude Web must ask Don to confirm or refresh this section before relying on it.
@@ -393,6 +406,7 @@ A multi-stream architecture cleanup is in flight under the Architecture Optimiza
 
 | Date | Ticket | Change |
 |---|---|---|
+| 2026-05-31 00:00 UTC | OTA-809 | Added "Insight Engine Rules (Quick Reference)" subsection (after Provider Lifecycle, before Active Cleanup Items) with six prescriptive engine invariants: no domain/LLM/DB imports under `app/insight_engine/`; no `strategy_id`/`strategy_key` identity branches; junction owns all strategy×rule parameters/`evaluation_order`/`stop_if_fail`/`score_penalty`/weights; tables are source of truth with no magic numbers (spreadsheet is build-time seed only) and persistence is the single `bronze_evaluations` table discriminated by `record_type`; every `engine.evaluate(...)` passes `source_app_id`; engine is LLM-free with deterministic evaluation preceding any LLM call (§2.6). Cross-references `insight_engine.md` and `architecture-plan.md` Pattern 5 rather than restating them. |
 | 2026-05-19 UTC | OTA-673 | Added "Issue title conventions" subsection under Jira Issue Hierarchy. Titles describe the work, not the execution order; phase numbers, sprint numbers, and step prefixes belong in descriptions, commit messages, or prompt files. Cross-references `jira-structure.md` § Title conventions for the profile-level rule. Backfilled the Governing Story field to OTA-573 (no longer a placeholder). Also corrected the Transition ID table: Override is transition `10` (not `9` as previously listed); added the `Deployed to Prod` transition (id `5`) which also targets Production Deployed. Both corrections caught during the same day's transition work on OTA-673 / OTA-674. |
 | 2026-05-06 UTC | TBD (Documentation Governance Epic) | Major restructure. (1) Removed all references to Feature issue type — OTA Jira license does not include Feature; hierarchy is now Epic → Story → Subtask, with Bug as sibling to Story (or as Subtask). (2) Extracted Prompt Writing Convention to profile-level `prompt-style.md`; replaced with per-domain required-reading table. (3) Extracted Parallel Session Strategy to profile-level `build-execution.md` (renamed and broadened to cover future subagent orchestration). (4) Extracted Product Roadmap (OTAR Categories) to project-level `product-roadmap.md`. (5) Extracted Development Environment to project-level `development-environment.md` (includes zombie-process warning). (6) Extracted Deployment Workflow to project-level `deployment-workflow.md`. (7) Removed "Common Epic parents" list — Don/Claude Web supplies parent in practice. (8) Removed Claude Code's "review Jira plan?" prompt at session start — that context belongs to Claude Web during planning. (9) Added Document Governance Rules section codifying: Claude Code does not modify SoT docs unsolicited; material changes filed as Subtasks under governing Stories; pre-commit verification of Workflow Phases, Transitions, and Hierarchy required. (10) Added Profile-Level Conventions subsection naming `jira-structure.md`, `prompt-style.md`, `build-execution.md`. (11) Added Last Reviewed date to Post-Build QA Gate with 60-day review cadence. (12) Active Cleanup Items section now carries an explicit valid-until date and points to OTA-535 as the live source. |
 | 2026-05-06 05:00 UTC | OTA-555 / 556 | Added bugfix.md to SoT inventory; added Bug Fix Sessions reference under Working Patterns. |
