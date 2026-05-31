@@ -1604,6 +1604,44 @@ _LONG_DTE_RATIONALE = (
 )
 
 
+# ── OTA-769: Seed per-strategy delta params on delta_quality junctions ────
+
+# Carry-forward values from strategy_scorer.py (exact, not rounded):
+#   TR: delta_center = (0.50 + 0.70) / 2 = 0.60, delta_half_range = max(0.10, (0.70 - 0.50) / 2) = 0.10
+# These match what the scorer injects at runtime today; seeding them on the
+# junction row makes the junction self-contained for OTA-779 (scorer deletion).
+_DELTA_QUALITY_PARAMS = {
+    "trend_rider": {"delta_center": 0.60, "delta_half_range": 0.10},
+}
+
+
+def populate_delta_quality_params(junctions):
+    """
+    OTA-769: Set delta_center / delta_half_range on delta_quality junction rows.
+
+    The scoring formula (`scoring_formulas.py:delta_quality`) reads these from
+    params with fallbacks of 0.35/0.15 — which match neither TR nor LT.  Today
+    the strategy_scorer injects the correct values at runtime, but once OTA-779
+    removes the scorer the junction row must carry them.  This seeds the exact
+    carry-forward values so behaviour is identical before and after OTA-779.
+    """
+    patched = 0
+    for j in junctions:
+        if j["rule_key"] != "delta_quality":
+            continue
+        strat = j["strategy_key"]
+        if strat not in _DELTA_QUALITY_PARAMS:
+            continue
+        params = j.get("parameters") or {}
+        params.update(_DELTA_QUALITY_PARAMS[strat])
+        j["parameters"] = params
+        patched += 1
+        log.info(f"  delta_quality params set for {strat}: {params}")
+
+    log.info(f"  OTA-769: patched {patched} delta_quality junction(s)")
+    return junctions
+
+
 def set_gate_mechanics(rules, junctions):
     """
     OTA-684: Set evaluation_order, stop_if_fail, and score_penalty on all
@@ -2180,6 +2218,10 @@ def main():
     # OTA-684: Set gate mechanics (evaluation_order, stop_if_fail, score_penalty)
     log.info("Setting gate mechanics on junction rows (OTA-684)...")
     junctions = set_gate_mechanics(rules, junctions)
+
+    # OTA-769: Seed delta_center / delta_half_range on delta_quality junctions
+    log.info("Populating delta_quality params (OTA-769)...")
+    junctions = populate_delta_quality_params(junctions)
 
     # OTA-689: Build formula registry from engine_rules.formula_ref (scanned, not hand-copied)
     log.info("Building formula registry from engine_rules.formula_ref (OTA-689)...")
