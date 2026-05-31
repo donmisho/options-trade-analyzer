@@ -4,10 +4,8 @@ and COMPONENT_DISPLAY_NAMES mapping.
 """
 
 import pytest
-from app.analysis.strategy_definitions import (
-    StrategyScore,
-    COMPONENT_DISPLAY_NAMES,
-)
+from app.analysis.strategy_definitions import StrategyScore
+from app.api.display_names import COMPONENT_DISPLAY_NAMES
 
 
 class TestStrategyScoreDataclass:

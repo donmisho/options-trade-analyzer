@@ -127,26 +127,3 @@ class StrategyScore:
     raw_score: Optional[int] = None  # 0-100 pre-penalty; None when no penalty
     component_breakdown: Optional[list] = None  # [{key, score, weight, contribution}, ...]
     penalty_reason: Optional[str] = None  # e.g. "cushion penalty" when raw != score
-
-
-# Display-name mapping: internal metric key -> v2 export label.
-# Order matches the QQQ v2 sample row order (OTA-643).
-COMPONENT_DISPLAY_NAMES = {
-    "expected_value":        "Expected value (EV)",
-    "probability_of_profit": "Expected value (EV)",   # folds into EV for display
-    "reward_risk":           "Structure fit (vs profile)",
-    "credit_width_pct":      "Structure fit (vs profile)",
-    "theta_margin_ratio":    "Structure fit (vs profile)",
-    "theta_gamma_ratio":     "Structure fit (vs profile)",
-    "delta_quality":         "Structure fit (vs profile)",
-    "cushion_strike":        "Cushion / strike placement",
-    "sma_alignment_score":   "Technical alignment (SMAs)",
-    "iv_rank":               "IV environment",
-    "iv_percentile_cost":    "IV environment",
-    "runway_score":          "DTE fit",
-    "payout_ratio":          "DTE fit",
-    "delta_otm_score":       "DTE fit",
-    "liquidity":             "Liquidity (bid-ask, volume)",
-    "bid_ask_tightness":     "Liquidity (bid-ask, volume)",
-    "open_interest":         "Liquidity (bid-ask, volume)",
-}
