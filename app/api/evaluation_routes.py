@@ -643,44 +643,12 @@ async def evaluate_structured(
         if _gate_result.penalty_points:
             _gate_penalty_points = _gate_result.penalty_points
 
-    # ─── Pipeline Gate 1: DTE Hard Filter ─────────────────────────────────────
-    # Fires BEFORE any scoring logic. 0-7 DTE has binary gamma exposure.
-    if dte <= 7:
-        auto_pass_reason = (
-            f"Insufficient time remaining for active management. "
-            f"This trade expires in {dte} day(s). "
-            "Minimum 8 DTE required to enter any position."
-        )
-    elif dte <= 13:
-        dte_warning_msg = (
-            f"{dte} DTE — Below recommended minimum. "
-            "20-point penalty applied. Exit management time is limited."
-        )
-
-    # ─── Pipeline Gate 2: Credit/Debit Quality ────────────────────────────────
-    # Fires BEFORE scoring. Hard disqualifier if credit < 30% or debit > 40% of width.
-    if auto_pass_reason is None and request.trade:
-        _net_debit = float(request.trade.get("net_debit") or 0)
-        _spread_width = float(request.trade.get("spread_width") or 0)
-
-        if _spread_width > 0:
-            if _net_debit < 0:  # credit spread — net_debit stored negative
-                _net_credit = abs(_net_debit)
-                credit_pct_of_width = round(_net_credit / _spread_width, 4)
-                if credit_pct_of_width < 0.30:
-                    auto_pass_reason = (
-                        f"Credit of ${_net_credit:.2f} represents {credit_pct_of_width * 100:.1f}% of the "
-                        f"${_spread_width:.0f} spread width. "
-                        f"Minimum 30% required (${_spread_width * 0.30:.2f} minimum credit)."
-                    )
-            elif _net_debit > 0:  # debit spread
-                debit_pct_of_width = round(_net_debit / _spread_width, 4)
-                if debit_pct_of_width > 0.40:
-                    auto_pass_reason = (
-                        f"Debit of ${_net_debit:.2f} represents {debit_pct_of_width * 100:.1f}% of the "
-                        f"${_spread_width:.0f} spread width. "
-                        f"Maximum 40% permitted (${_spread_width * 0.40:.2f} maximum debit)."
-                    )
+    # ─── OTA-780: Extract gate metadata ─────────────────────────────────────
+    # DTE warning, credit/debit metrics now come from registered gates.
+    if _gate_result:
+        dte_warning_msg = _gate_result.metadata.get("dte_warning")
+        credit_pct_of_width = _gate_result.metadata.get("credit_pct_of_width")
+        debit_pct_of_width = _gate_result.metadata.get("debit_pct_of_width")
 
     # ─── Auto-PASS / WAIT_FOR_EARNINGS: return immediately, NO Claude API call ─
     if auto_pass_reason:
@@ -897,14 +865,11 @@ async def evaluate_structured(
     _asym_ratio   = _asymmetry_ratio(_p_max_loss, _p_max_profit)
 
     for card in evaluations:
-        # Apply DTE penalty for 8-13 DTE
-        if dte_warning_msg and 8 <= dte <= 13:
-            card.score = max(0, card.score - 20)
-            card.dte_warning = dte_warning_msg
-
-        # Apply earnings gate penalty (OTA-502 — warning band, 8-13 biz days to earnings)
+        # Apply gate penalties (DTE warning, earnings gate, credit/debit — OTA-780)
         if _gate_penalty_points:
             card.score = max(0, card.score - _gate_penalty_points)
+        if dte_warning_msg:
+            card.dte_warning = dte_warning_msg
 
         # Apply probability asymmetry penalty (OTA-505 — graduated, post-score pre-band)
         if _asym_penalty:
@@ -984,11 +949,10 @@ async def evaluate_structured(
         if _retry_evals is not None:
             # Re-apply all post-parse fixes to retry cards
             for card in _retry_evals:
-                if dte_warning_msg and 8 <= dte <= 13:
-                    card.score = max(0, card.score - 20)
-                    card.dte_warning = dte_warning_msg
                 if _gate_penalty_points:
                     card.score = max(0, card.score - _gate_penalty_points)
+                if dte_warning_msg:
+                    card.dte_warning = dte_warning_msg
                 _correct_verdict = _assign_verdict(card.score)
                 if card.verdict != _correct_verdict:
                     card.verdict = _correct_verdict

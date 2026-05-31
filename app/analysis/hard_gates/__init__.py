@@ -151,13 +151,21 @@ async def evaluate_hard_gates(ctx: GateTradeContext) -> Optional[GateResult]:
     Run all registered gates in order.
 
     Returns:
-      - The first GateResult with triggered=True (short-circuits immediately).
-      - The last GateResult with non-zero modifiers if no gate triggered hard.
+      - The first GateResult with triggered=True (short-circuits immediately,
+        carrying forward accumulated penalties from prior modifiers).
+      - A merged GateResult if one or more non-triggered modifiers fired.
       - None if no gates are registered or no gate produced any output.
+
+    DTE override propagation: when a gate sets effective_dte_override, the
+    candidate's named_values["dte"] is updated so downstream gates see the
+    modified DTE value.
+
+    Penalty accumulation: penalties from multiple non-triggered gates stack
+    additively. OTA-780.
 
     Never raises. Individual gate failures are logged and skipped.
     """
-    last_modifier: Optional[GateResult] = None
+    modifiers: List[GateResult] = []
 
     for gate in _registered_gates:
         try:
@@ -171,18 +179,53 @@ async def evaluate_hard_gates(ctx: GateTradeContext) -> Optional[GateResult]:
             continue
 
         if result.triggered:
+            # Carry forward accumulated penalties from prior modifiers
+            for mod in modifiers:
+                result.penalty_points += mod.penalty_points
             logger.info(
                 f"Hard gate triggered: gate={gate.gate_id} symbol={ctx.symbol} "
                 f"action={result.action} reason={result.reason!r:.80}"
             )
             return result
 
-        if result.penalty_points or result.effective_dte_override is not None:
+        # Propagate DTE override to candidate for downstream gates
+        if result.effective_dte_override is not None:
+            if ctx.candidate and ctx.candidate.named_values is not None:
+                ctx.candidate.named_values["dte"] = result.effective_dte_override
+
+        if result.penalty_points or result.effective_dte_override is not None or result.metadata:
             logger.info(
                 f"Hard gate modifier: gate={gate.gate_id} symbol={ctx.symbol} "
                 f"penalty={result.penalty_points} "
                 f"effective_dte={result.effective_dte_override}"
             )
-            last_modifier = result
+            modifiers.append(result)
 
-    return last_modifier
+    if not modifiers:
+        return None
+
+    if len(modifiers) == 1:
+        return modifiers[0]
+
+    # Merge multiple modifiers
+    total_penalty = sum(m.penalty_points for m in modifiers)
+    dte_override = next(
+        (m.effective_dte_override for m in modifiers
+         if m.effective_dte_override is not None),
+        None,
+    )
+    merged_metadata: dict = {}
+    reasons: List[str] = []
+    for m in modifiers:
+        merged_metadata.update(m.metadata)
+        if m.reason:
+            reasons.append(m.reason)
+
+    return GateResult(
+        triggered=False,
+        penalty_points=total_penalty,
+        effective_dte_override=dte_override,
+        reason="; ".join(reasons),
+        gate_id=modifiers[-1].gate_id,
+        metadata=merged_metadata,
+    )

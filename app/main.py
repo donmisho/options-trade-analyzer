@@ -305,9 +305,13 @@ async def lifespan(app: FastAPI):
     from app.analysis.hard_gates import register_gate
     from app.analysis.hard_gates.earnings_gate import EarningsInWindowGate
     from app.analysis.hard_gates.negative_ev_gate import NegativeEVGate
-    register_gate(EarningsInWindowGate())   # OTA-502: earnings-in-window (first — catalyst risk)
-    register_gate(NegativeEVGate())         # OTA-503: negative EV (second — math quality gate)
-    logger.info("Hard gates registered: earnings_in_window, negative_ev (OTA-502/503)")
+    from app.analysis.hard_gates.dte_gate import DTEGate
+    from app.analysis.hard_gates.credit_debit_gate import CreditDebitQualityGate
+    register_gate(EarningsInWindowGate())      # OTA-502: earnings-in-window (first — catalyst risk)
+    register_gate(NegativeEVGate())            # OTA-503: negative EV (second — math quality gate)
+    register_gate(DTEGate())                   # OTA-780: DTE hard filter + 8-13 warning penalty
+    register_gate(CreditDebitQualityGate())    # OTA-780: credit/debit quality gate
+    logger.info("Hard gates registered: earnings_in_window, negative_ev, dte_filter, credit_debit_quality")
 
     # 7. Initialize OpenTelemetry → Application Insights (agent observability)
     appinsights_cs = secrets_manager.get("applicationinsights-connection-string")
