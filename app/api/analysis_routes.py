@@ -41,10 +41,18 @@ from app.analysis.long_call_engine import (
     LongCallEngine, LongCallWeights, LongCallFilters
 )
 from app.analysis.directional_engine import DirectionalEngine, Thesis
-from app.analysis.strategy_scorer import score_all_strategies, compute_sma_signal
+from app.ota_adapters._shared.sma import compute_sma_signal
 from app.services.symbol_normalization import canonicalize
 from app.services.symbol_cache import to_api_symbol_cached
-from app.analysis.strategy_definitions import STRATEGIES
+from app.analysis.strategy_definitions import (
+    STRATEGIES, OPTIONS_STRATEGY_PARAMS, OptionsStrategyParams, StrategyScore,
+)
+from app.analysis.strategy_routing import (
+    get_spread_types_for_strategy,
+    get_option_types_for_strategy,
+    uses_vertical_engine,
+    uses_long_option_engine,
+)
 from app.analysis.black_scholes import compute_probability_matrix
 from app.models.schemas import (
     ScorecardRequest, ScorecardResponse, StrategyScoreItem,
@@ -484,6 +492,435 @@ async def _persist_trade_candidates(
         await db.flush()
     except Exception as e:
         log.warning(f"Failed to persist trade candidates: {e}")
+
+
+# ─── Scoring Orchestration (moved from strategy_scorer.py — OTA-779) ───
+
+
+def _scorer_normalize(values: list, higher_is_better: bool = True) -> list:
+    """Min-max normalize a list of floats to 0-1.
+
+    NOTE: vertical_engine.py and long_call_engine.py each have their own
+    inline copies. A future cleanup (audit §7.5 #3) should consolidate all
+    three into a single engine-core function.
+    """
+    if not values:
+        return []
+    mn, mx = min(values), max(values)
+    rng = mx - mn
+    if rng == 0:
+        return [0.5] * len(values)
+    if higher_is_better:
+        return [(v - mn) / rng for v in values]
+    return [(mx - v) / rng for v in values]
+
+
+def _dte_from_expiration(expiration: str) -> int:
+    """Calculate DTE from YYYY-MM-DD string."""
+    try:
+        exp_date = datetime.strptime(expiration, "%Y-%m-%d").date()
+        return max(0, (exp_date - date.today()).days)
+    except (ValueError, TypeError):
+        return 0
+
+
+def _get_atm_iv(contracts: list, underlying_price: float) -> float:
+    """Estimate ATM IV from the closest call options.
+    Returns annualized IV as a decimal (0.25 = 25%). Defaults to 0.30.
+    """
+    if not contracts or underlying_price <= 0:
+        return 0.30
+    calls = [c for c in contracts if c.get("option_type") == "call"]
+    if not calls:
+        return 0.30
+    calls_sorted = sorted(calls, key=lambda c: abs(c.get("strike", 0) - underlying_price))
+    ivs = []
+    for c in calls_sorted[:5]:
+        iv = c.get("implied_volatility", 0) or 0
+        if iv > 0:
+            ivs.append(iv)
+    return sum(ivs) / len(ivs) if ivs else 0.30
+
+
+def cushion_penalty(
+    trade: dict,
+    current_price: float,
+    severe_threshold: float,
+    moderate_threshold: float,
+) -> tuple:
+    """Deterministic scoring penalty for thin short strike cushion.
+
+    cushion_pct = |current_price - short_strike| / current_price * 100
+    Returns (penalty: int, cushion_pct: float).
+    """
+    short_strike = trade.get("short_strike") or trade.get("sell_strike")
+    if short_strike is None or current_price is None or current_price == 0:
+        return 0, 0.0
+    pct = abs(current_price - short_strike) / current_price * 100
+    if pct < severe_threshold:
+        return -20, pct
+    elif pct < moderate_threshold:
+        return -10, pct
+    return 0, pct
+
+
+def _score_credit_spread_strategy(
+    strategy_key: str,
+    contracts: list,
+    underlying_price: float,
+    user_config: dict,
+    atm_iv: float,
+) -> Optional[StrategyScore]:
+    """Score a credit spread strategy (steady-paycheck or weekly-grind)."""
+    strategy = STRATEGIES[strategy_key]
+    cfg = user_config or {}
+    weights = strategy.scoring_weights
+
+    dte_min = int(cfg.get("dte_min", strategy.dte_min))
+    dte_max = int(cfg.get("dte_max", strategy.dte_max))
+    delta_max = float(cfg.get("delta_max", 0.30))
+
+    spread_types = get_spread_types_for_strategy(strategy_key)
+    if not spread_types:
+        return None
+
+    filters = SpreadFilters(
+        spread_types=spread_types,
+        min_short_delta=0.05,
+        max_short_delta=delta_max,
+        min_volume=1,
+        min_open_interest=10,
+        min_reward_risk=0.10,
+        min_ev_threshold=-999.0,
+    )
+    engine = VerticalSpreadEngine(filters=filters)
+    result = engine.analyze(contracts, underlying_price)
+    spreads = result.get("spreads", [])
+
+    spreads = [
+        s for s in spreads
+        if dte_min <= _dte_from_expiration(s.get("expiration", "")) <= dte_max
+    ]
+
+    if not spreads:
+        return StrategyScore(
+            strategy_key=strategy_key,
+            label=strategy.label,
+            score=0,
+            best_trade=None,
+            signal_summary=f"No credit spreads found in {dte_min}-{dte_max} DTE range",
+            metric_scores={},
+        )
+
+    def theta_margin_ratio(s):
+        ml = s.get("max_loss", 0)
+        return abs(s.get("net_theta", 0)) / ml if ml > 0 else 0
+
+    def theta_gamma_ratio(s):
+        ml = s.get("max_loss", 0)
+        return abs(s.get("net_theta", 0)) / ml if ml > 0 else 0
+
+    def credit_width_pct(s):
+        credit = abs(s.get("net_debit", 0))
+        width = s.get("spread_width", 1)
+        return (credit / width * 100) if width > 0 else 0
+
+    def liquidity_metric(s):
+        return (
+            s.get("long_volume", 0) + s.get("short_volume", 0) +
+            s.get("long_oi", 0) + s.get("short_oi", 0)
+        )
+
+    metric_fns = {
+        "theta_margin_ratio":    theta_margin_ratio,
+        "theta_gamma_ratio":     theta_gamma_ratio,
+        "probability_of_profit": lambda s: s.get("prob_of_profit", 0),
+        "expected_value":        lambda s: s.get("ev_raw", 0),
+        "reward_risk":           lambda s: s.get("reward_risk_ratio", 0),
+        "credit_width_pct":      credit_width_pct,
+        "liquidity":             liquidity_metric,
+    }
+
+    raw = {k: [metric_fns[k](s) for s in spreads] for k in weights if k in metric_fns}
+    iv_rank_norm = min(1.0, max(0.0, atm_iv / 0.60)) if atm_iv > 0 else 0.5
+    norm = {k: _scorer_normalize(raw[k], higher_is_better=True) for k in raw}
+
+    composite_scores = []
+    for i in range(len(spreads)):
+        cs = 0.0
+        for k, w in weights.items():
+            if k == "iv_rank":
+                cs += iv_rank_norm * w
+            elif k in norm:
+                cs += norm[k][i] * w
+        composite_scores.append(cs)
+
+    best_idx = composite_scores.index(max(composite_scores))
+    best = spreads[best_idx]
+    best_score = composite_scores[best_idx]
+    raw_score = min(100, max(0, round(best_score * 100)))
+
+    breakdown = []
+    for k, w in weights.items():
+        if k == "iv_rank":
+            comp_norm = iv_rank_norm
+        elif k in norm:
+            comp_norm = norm[k][best_idx]
+        else:
+            comp_norm = 0.0
+        comp_score = min(100, max(0, round(comp_norm * 100)))
+        contribution = round(comp_norm * w * 100, 1)
+        breakdown.append({"key": k, "score": comp_score, "weight": w, "contribution": contribution})
+
+    _opts = OPTIONS_STRATEGY_PARAMS.get(strategy_key, OptionsStrategyParams())
+    _cushion_penalty, _cushion_pct = cushion_penalty(
+        best, underlying_price,
+        severe_threshold=_opts.cushion_severe_threshold,
+        moderate_threshold=_opts.cushion_moderate_threshold,
+    )
+    score = raw_score
+    penalty_reason = None
+    if _cushion_penalty != 0:
+        score = max(0, raw_score + _cushion_penalty)
+        penalty_reason = "cushion penalty"
+
+    best_metrics = {k: round(float(metric_fns[k](best)), 4) for k in weights if k in metric_fns}
+    if "iv_rank" in weights:
+        best_metrics["iv_rank"] = round(iv_rank_norm, 4)
+    best_metrics["cushion_pct"] = round(_cushion_pct, 2)
+    if _cushion_penalty != 0:
+        best_metrics["cushion_penalty"] = _cushion_penalty
+
+    signal_summary = (
+        f"{len(spreads)} credit spreads in range. "
+        f"Best: {best.get('spread_type', '').replace('_', ' ').title()} "
+        f"short {best.get('short_strike', '')} | "
+        f"exp {best.get('expiration', '')[:7]} | "
+        f"PoP {best.get('prob_of_profit', 0):.0%} | "
+        f"R:R {best.get('reward_risk_ratio', 0):.2f}"
+    )
+
+    return StrategyScore(
+        strategy_key=strategy_key,
+        label=strategy.label,
+        score=score,
+        best_trade=best,
+        signal_summary=signal_summary,
+        metric_scores=best_metrics,
+        raw_score=raw_score if penalty_reason else None,
+        component_breakdown=breakdown,
+        penalty_reason=penalty_reason,
+    )
+
+
+def _score_long_option_strategy(
+    strategy_key: str,
+    contracts: list,
+    underlying_price: float,
+    user_config: dict,
+    atm_iv: float,
+) -> Optional[StrategyScore]:
+    """Score a long option strategy (trend-rider or lottery-ticket)."""
+    strategy = STRATEGIES[strategy_key]
+    cfg = user_config or {}
+    weights = strategy.scoring_weights
+
+    dte_min = int(cfg.get("dte_min", strategy.dte_min))
+    dte_max = int(cfg.get("dte_max", strategy.dte_max))
+    delta_min = float(cfg.get("delta_min", 0.05))
+    delta_max = float(cfg.get("delta_max", 0.85))
+
+    option_types = get_option_types_for_strategy(strategy_key)
+    if not option_types:
+        return None
+
+    filters = LongCallFilters(
+        min_delta=delta_min,
+        max_delta=delta_max,
+        min_days_to_exp=dte_min,
+        max_days_to_exp=dte_max,
+        max_premium=cfg.get("max_cost_per_contract", 10000.0),
+        min_volume=1,
+        min_open_interest=10,
+        max_bid_ask_spread_pct=0.50,
+        option_types=option_types,
+    )
+    engine = LongCallEngine(filters=filters)
+    result = engine.analyze(contracts, underlying_price)
+    options = result.get("options", [])
+
+    if not options:
+        return StrategyScore(
+            strategy_key=strategy_key,
+            label=strategy.label,
+            score=0,
+            best_trade=None,
+            signal_summary=f"No long call candidates in {dte_min}-{dte_max} DTE range",
+            metric_scores={},
+        )
+
+    sma_score = float(cfg.get("sma_alignment_score", 0.5))
+
+    if strategy_key == "trend-rider":
+        delta_center = (float(cfg.get("delta_min", 0.50)) + float(cfg.get("delta_max", 0.70))) / 2
+        delta_half_range = max(0.10, (float(cfg.get("delta_max", 0.70)) - float(cfg.get("delta_min", 0.50))) / 2)
+    else:
+        delta_center = 0.10
+        delta_half_range = 0.10
+
+    def delta_quality(o):
+        d = o.get("delta", 0)
+        return max(0.0, 1.0 - abs(d - delta_center) / (delta_half_range + 0.05))
+
+    def delta_otm_score(o):
+        d = o.get("delta", 0)
+        return max(0.0, 1.0 - d / 0.25)
+
+    def payout_ratio(o):
+        cost = o.get("premium_dollars", 0)
+        if cost <= 0:
+            return 0.0
+        return (o.get("delta", 0) * underlying_price * 0.10 * 100) / cost
+
+    def bid_ask_tightness(o):
+        ba_pct = o.get("bid_ask_spread_pct", 100)
+        return max(0.0, 1.0 - ba_pct / 100.0)
+
+    def iv_percentile_cost(o):
+        iv_pct = o.get("iv", 100)
+        iv_decimal = iv_pct / 100 if iv_pct > 1 else iv_pct
+        return max(0.0, 1.0 - iv_decimal / 1.0)
+
+    def runway_score(o):
+        return float(o.get("theta_runway_days", 0))
+
+    def expected_value(o):
+        mid = o.get("mid_price", 0)
+        return o.get("delta", 0) * underlying_price * 0.05 - mid
+
+    def open_interest_metric(o):
+        return float(o.get("open_interest", 0))
+
+    metric_fns = {
+        "sma_alignment_score": lambda o: sma_score,
+        "delta_quality":        delta_quality,
+        "expected_value":       expected_value,
+        "iv_percentile_cost":   iv_percentile_cost,
+        "runway_score":         runway_score,
+        "payout_ratio":         payout_ratio,
+        "delta_otm_score":      delta_otm_score,
+        "bid_ask_tightness":    bid_ask_tightness,
+        "open_interest":        open_interest_metric,
+    }
+
+    raw = {k: [metric_fns[k](o) for o in options] for k in weights if k in metric_fns}
+    norm = {k: _scorer_normalize(raw[k], higher_is_better=True) for k in raw}
+
+    composite_scores = []
+    for i in range(len(options)):
+        cs = sum(norm[k][i] * weights[k] for k in norm)
+        composite_scores.append(cs)
+
+    best_idx = composite_scores.index(max(composite_scores))
+    best = options[best_idx]
+    best_score = composite_scores[best_idx]
+    score = min(100, max(0, round(best_score * 100)))
+
+    breakdown = []
+    for k, w in weights.items():
+        if k in norm:
+            comp_norm = norm[k][best_idx]
+        else:
+            comp_norm = 0.0
+        comp_score = min(100, max(0, round(comp_norm * 100)))
+        contribution = round(comp_norm * w * 100, 1)
+        breakdown.append({"key": k, "score": comp_score, "weight": w, "contribution": contribution})
+
+    best_metrics = {k: round(float(metric_fns[k](best)), 4) for k in weights if k in metric_fns}
+
+    signal_summary = (
+        f"{len(options)} call candidates found. "
+        f"Best: {best.get('option_type', 'call').title()} {best.get('strike', '')} @ "
+        f"exp {best.get('expiration', '')[:7]} | "
+        f"Δ {best.get('delta', 0):.2f} | "
+        f"Premium {best.get('premium_dollars', 0):.0f}"
+    )
+
+    return StrategyScore(
+        strategy_key=strategy_key,
+        label=strategy.label,
+        score=score,
+        best_trade=best,
+        signal_summary=signal_summary,
+        metric_scores=best_metrics,
+        raw_score=None,
+        component_breakdown=breakdown,
+        penalty_reason=None,
+    )
+
+
+async def score_all_strategies(
+    symbol: str,
+    provider,
+    user_config: dict = None,
+) -> tuple:
+    """Fetch options chain ONCE, run all strategy scoring, return (scores, underlying_price).
+
+    CRITICAL: exactly one provider.get_chain() call regardless of strategy count.
+    """
+    try:
+        api_sym = to_api_symbol_cached(symbol, "schwab")
+        chain_data = await provider.get_chain(
+            symbol=api_sym,
+            min_dte=0,
+            max_dte=70,
+            strike_range_pct=20.0,
+        )
+    except Exception as e:
+        log.warning(f"Chain fetch failed for {symbol}: {e}")
+        return [
+            StrategyScore(
+                strategy_key=k, label=s.label, score=0, best_trade=None,
+                signal_summary="Chain fetch failed", metric_scores={},
+            )
+            for k, s in STRATEGIES.items()
+        ], 0.0
+
+    contracts = chain_data.get("contracts", [])
+    underlying_price = chain_data.get("underlying_price", 0)
+
+    if not contracts or underlying_price <= 0:
+        return [
+            StrategyScore(
+                strategy_key=k, label=s.label, score=0, best_trade=None,
+                signal_summary="No chain data available", metric_scores={},
+            )
+            for k, s in STRATEGIES.items()
+        ], 0.0
+
+    atm_iv = _get_atm_iv(contracts, underlying_price)
+
+    def _cfg_for(key: str) -> dict:
+        if not user_config:
+            return {}
+        return user_config.get(key, {})
+
+    scores: list[Optional[StrategyScore]] = []
+    for strategy_key, strategy in STRATEGIES.items():
+        cfg = _cfg_for(strategy_key)
+        if uses_vertical_engine(strategy_key):
+            result = _score_credit_spread_strategy(
+                strategy_key, contracts, underlying_price, cfg, atm_iv
+            )
+        elif uses_long_option_engine(strategy_key):
+            result = _score_long_option_strategy(
+                strategy_key, contracts, underlying_price, cfg, atm_iv
+            )
+        else:
+            result = None
+        scores.append(result)
+
+    return scores, underlying_price
 
 
 # ─── Endpoints ────────────────────────────────────────────────────

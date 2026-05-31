@@ -30,7 +30,7 @@ from app.analysis.hard_gates import (
 )
 from app.analysis.hard_gates.earnings_gate import EarningsInWindowGate
 from app.analysis.strategy_classifier import classify_best_strategy
-from app.analysis.strategy_scorer import StrategyScore
+from app.analysis.strategy_definitions import StrategyScore
 from app.insight_engine.models import Candidate
 
 

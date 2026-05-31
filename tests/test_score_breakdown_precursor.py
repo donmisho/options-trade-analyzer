@@ -4,7 +4,7 @@ and COMPONENT_DISPLAY_NAMES mapping.
 """
 
 import pytest
-from app.analysis.strategy_scorer import (
+from app.analysis.strategy_definitions import (
     StrategyScore,
     COMPONENT_DISPLAY_NAMES,
 )

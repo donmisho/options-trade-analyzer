@@ -12,12 +12,12 @@ Tests verify that:
 import pytest
 
 from app.analysis.strategy_classifier import (
-    STRATEGY_DTE_REQUIREMENTS,
     StrategyClassification,
     classify_best_strategy,
     filter_strategies_by_effective_dte,
 )
-from app.analysis.strategy_scorer import StrategyScore
+from app.analysis.strategy_definitions import STRATEGIES
+from app.analysis.strategy_definitions import StrategyScore
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -300,30 +300,33 @@ class TestHighestScoreWins:
         assert result.best_fit == "lottery-ticket"
 
 
-# ─── STRATEGY_DTE_REQUIREMENTS integrity ──────────────────────────────────────
+# ─── STRATEGIES DTE integrity (OTA-772: consolidated from STRATEGY_DTE_REQUIREMENTS)
 
-class TestRequirementsIntegrity:
-    """Sanity-check the constant itself."""
+class TestStrategiesDteIntegrity:
+    """Sanity-check the canonical STRATEGIES DTE fields."""
 
     def test_all_four_keys_present(self):
-        assert set(STRATEGY_DTE_REQUIREMENTS.keys()) == {
-            "trend-rider", "steady-paycheck", "weekly-grind", "lottery-ticket"
-        }
+        assert {"trend-rider", "steady-paycheck", "weekly-grind", "lottery-ticket"}.issubset(
+            STRATEGIES.keys()
+        )
 
-    def test_all_have_min_and_max(self):
-        for key, reqs in STRATEGY_DTE_REQUIREMENTS.items():
-            assert "min" in reqs, f"{key} missing 'min'"
-            assert "max" in reqs, f"{key} missing 'max'"
-            assert reqs["min"] <= reqs["max"], f"{key}: min > max"
+    def test_all_have_valid_dte_range(self):
+        for key in ("trend-rider", "steady-paycheck", "weekly-grind", "lottery-ticket"):
+            s = STRATEGIES[key]
+            assert s.dte_min <= s.dte_max, f"{key}: dte_min > dte_max"
 
     def test_trend_rider_values(self):
-        assert STRATEGY_DTE_REQUIREMENTS["trend-rider"] == {"min": 14, "max": 60}
+        s = STRATEGIES["trend-rider"]
+        assert (s.dte_min, s.dte_max) == (14, 60)
 
     def test_steady_paycheck_values(self):
-        assert STRATEGY_DTE_REQUIREMENTS["steady-paycheck"] == {"min": 14, "max": 45}
+        s = STRATEGIES["steady-paycheck"]
+        assert (s.dte_min, s.dte_max) == (14, 45)
 
     def test_weekly_grind_values(self):
-        assert STRATEGY_DTE_REQUIREMENTS["weekly-grind"] == {"min": 14, "max": 21}
+        s = STRATEGIES["weekly-grind"]
+        assert (s.dte_min, s.dte_max) == (14, 21)
 
     def test_lottery_ticket_values(self):
-        assert STRATEGY_DTE_REQUIREMENTS["lottery-ticket"] == {"min": 7, "max": 60}
+        s = STRATEGIES["lottery-ticket"]
+        assert (s.dte_min, s.dte_max) == (7, 60)

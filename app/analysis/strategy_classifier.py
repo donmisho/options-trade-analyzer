@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 from app.analysis.strategy_definitions import STRATEGIES
-from app.analysis.strategy_scorer import StrategyScore
+from app.analysis.strategy_definitions import StrategyScore
 from app.analysis.strategy_routing import is_compatible
 
 

@@ -21,7 +21,7 @@ import pytest
 
 from app.analysis.strategy_routing import is_compatible, get_compatible_strategies
 from app.analysis.strategy_classifier import classify_best_strategy
-from app.analysis.strategy_scorer import StrategyScore
+from app.analysis.strategy_definitions import StrategyScore
 from app.analysis.strategy_definitions import STRATEGIES
 from app.api.evaluation_routes import _assign_verdict
 from app.models.schemas import TradeEvaluationCard
@@ -165,7 +165,7 @@ class TestTradeEvaluationCardVerdictValidator:
 
 
 # DTE that falls within each strategy's classifier eligibility range
-# (from strategy_classifier.STRATEGY_DTE_REQUIREMENTS)
+# (from strategy_definitions.STRATEGIES — dte_min/dte_max)
 STRATEGY_TEST_DTE = {
     "steady-paycheck": 30,   # range: 14-45
     "weekly-grind":    18,   # range: 14-21

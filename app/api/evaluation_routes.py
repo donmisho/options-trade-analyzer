@@ -64,7 +64,7 @@ from app.analysis.scoring_factors.asymmetry import (
 )
 from app.analysis.strategy_classifier import classify_best_strategy
 from app.analysis.strategy_routing import normalize_to_structure
-from app.analysis.strategy_scorer import StrategyScore
+from app.analysis.strategy_definitions import StrategyScore
 
 router = APIRouter(prefix="/evaluate", tags=["Trade Evaluation"])
 

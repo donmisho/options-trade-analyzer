@@ -3,11 +3,13 @@ Tests for per-strategy user_config routing in score_all_strategies (OTA-516).
 
 These tests mock the provider to avoid real API calls and focus on verifying
 that user_config is correctly sliced per strategy before reaching the scorers.
+
+Orchestration moved from strategy_scorer.py to analysis_routes.py (OTA-779).
 """
 
 import pytest
 from unittest.mock import AsyncMock, patch
-from app.analysis.strategy_scorer import score_all_strategies
+from app.api.analysis_routes import score_all_strategies
 from app.analysis.strategy_definitions import STRATEGIES
 
 
@@ -112,10 +114,10 @@ async def test_config_slice_reaches_scorer():
     captured_configs = {}
 
     original_credit = __import__(
-        "app.analysis.strategy_scorer", fromlist=["_score_credit_spread_strategy"]
+        "app.api.analysis_routes", fromlist=["_score_credit_spread_strategy"]
     )._score_credit_spread_strategy
     original_long = __import__(
-        "app.analysis.strategy_scorer", fromlist=["_score_long_option_strategy"]
+        "app.api.analysis_routes", fromlist=["_score_long_option_strategy"]
     )._score_long_option_strategy
 
     def mock_credit(strategy_key, contracts, underlying_price, user_config, atm_iv):
@@ -133,8 +135,8 @@ async def test_config_slice_reaches_scorer():
         # lottery-ticket omitted — should get {}
     }
 
-    with patch("app.analysis.strategy_scorer._score_credit_spread_strategy", side_effect=mock_credit), \
-         patch("app.analysis.strategy_scorer._score_long_option_strategy", side_effect=mock_long):
+    with patch("app.api.analysis_routes._score_credit_spread_strategy", side_effect=mock_credit), \
+         patch("app.api.analysis_routes._score_long_option_strategy", side_effect=mock_long):
         await score_all_strategies("TEST", provider, user_config=user_config)
 
     assert captured_configs["weekly-grind"] == {"dte_min": 10}

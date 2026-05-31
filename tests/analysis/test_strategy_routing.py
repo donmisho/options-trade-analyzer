@@ -21,7 +21,7 @@ from app.analysis.strategy_routing import (
 )
 from app.analysis.strategy_definitions import STRATEGIES
 from app.analysis.strategy_classifier import classify_best_strategy
-from app.analysis.strategy_scorer import StrategyScore
+from app.analysis.strategy_definitions import StrategyScore
 
 
 # ─── Canonical matrix from business-rules.md ─────────────────────────────────
