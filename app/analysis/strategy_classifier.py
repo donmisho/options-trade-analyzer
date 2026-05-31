@@ -3,24 +3,11 @@ Strategy Classifier — OTA-506
 
 Determines the best-fit strategy for a specific trade based on effective DTE.
 
-Design note — two different DTE concepts in this codebase:
-    STRATEGY_DTE_REQUIREMENTS (this file) defines ENTRY ELIGIBILITY.
-    Given a trade with N effective DTE, is this strategy a viable fit for
-    how the user will actually hold it? This is a management-headroom check.
-
-    strategy_definitions.py (STRATEGIES) defines
-    SCORER CANDIDATE FILTERS — "should the scoring engine even consider this
-    option contract for this strategy's universe?" The scorer uses these to
-    narrow the options chain before computing composite scores.
-
-    These are intentionally kept separate. They change for different reasons.
-
-    Example: weekly-grind scorer min=5 (the engine scores 5-DTE contracts),
-    but classifier min=14 (the user needs 14 days of management headroom
-    before the framework allows entering a weekly-grind position).
-
-    See OTA-436 (strategy taxonomy redesign) for a planned migration of both
-    into a unified per-strategy config. Do not merge them before then.
+DTE eligibility bounds (dte_min / dte_max) live on the canonical
+StrategyConfig in strategy_definitions.py. Both the classifier and the
+scorer read the same source. OTA-772 consolidated the former separate
+STRATEGY_DTE_REQUIREMENTS dict into STRATEGIES. OTA-778 split the former
+StrategyDefinition into generic StrategyConfig and OptionsStrategyParams.
 
 Strategy keys use the internal kebab-case identifiers used throughout the
 codebase (strategy_definitions.py, strategy_scorer.py, frontend config files).
@@ -29,24 +16,9 @@ codebase (strategy_definitions.py, strategy_scorer.py, frontend config files).
 from dataclasses import dataclass
 from typing import List, Optional
 
+from app.analysis.strategy_definitions import STRATEGIES
 from app.analysis.strategy_scorer import StrategyScore
 from app.analysis.strategy_routing import is_compatible
-
-
-# ─── Entry eligibility DTE requirements ───────────────────────────────────────
-# Both bounds are inclusive.
-# OTA-506: Classifier MUST use effective_DTE (post earnings-gate override),
-# not nominal DTE. Caller is responsible for passing the correct value.
-#
-# These differ from the scorer's dte_min/dte_max in strategy_definitions.py.
-# See module docstring above for the distinction.
-
-STRATEGY_DTE_REQUIREMENTS: dict = {
-    "trend-rider":     {"min": 14, "max": 60},
-    "steady-paycheck": {"min": 14, "max": 45},
-    "weekly-grind":    {"min": 14, "max": 21},
-    "lottery-ticket":  {"min":  7, "max": 60},
-}
 
 
 # ─── Output type ──────────────────────────────────────────────────────────────
@@ -76,11 +48,12 @@ def filter_strategies_by_effective_dte(
 ) -> List[StrategyScore]:
     """
     Return only candidates whose DTE eligibility range includes effective_dte.
-    Both min and max bounds are inclusive.
+    Both bounds are inclusive.
 
-    Strategies not found in STRATEGY_DTE_REQUIREMENTS are passed through
-    unchanged (fail-open) so unknown or future strategies don't silently
-    disappear from the viable set.
+    Reads dte_min / dte_max from the canonical STRATEGIES dict
+    (strategy_definitions.py). Strategies not found in STRATEGIES are passed
+    through unchanged (fail-open) so unknown or future strategies don't
+    silently disappear from the viable set.
 
     Args:
         candidates: scored strategies to filter
@@ -89,12 +62,12 @@ def filter_strategies_by_effective_dte(
     """
     result = []
     for c in candidates:
-        reqs = STRATEGY_DTE_REQUIREMENTS.get(c.strategy_key)
-        if reqs is None:
+        strategy = STRATEGIES.get(c.strategy_key)
+        if strategy is None:
             # Unknown strategy key — pass through rather than silently drop
             result.append(c)
             continue
-        if reqs["min"] <= effective_dte <= reqs["max"]:
+        if strategy.dte_min <= effective_dte <= strategy.dte_max:
             result.append(c)
     return result
 

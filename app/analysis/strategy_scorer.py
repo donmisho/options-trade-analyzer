@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, date
 from typing import List, Optional
 
-from app.analysis.strategy_definitions import STRATEGIES
+from app.analysis.strategy_definitions import STRATEGIES, OPTIONS_STRATEGY_PARAMS, OptionsStrategyParams
 from app.analysis.strategy_routing import (
     get_spread_types_for_strategy,
     get_option_types_for_strategy,
@@ -122,7 +122,7 @@ def cushion_penalty(
 
     cushion_pct = |current_price - short_strike| / current_price * 100
 
-    Thresholds are per-strategy, sourced from StrategyDefinition (OTA-770):
+    Thresholds are per-strategy, sourced from OptionsStrategyParams (OTA-770, OTA-778):
     - cushion_pct < severe_threshold: -20 points
     - cushion_pct < moderate_threshold: -10 points
     - cushion_pct >= moderate_threshold: 0 (no penalty)
@@ -284,10 +284,11 @@ def _score_credit_spread_strategy(
         breakdown.append({"key": k, "score": comp_score, "weight": w, "contribution": contribution})
 
     # Apply cushion penalty (post-scoring adjustment)
+    _opts = OPTIONS_STRATEGY_PARAMS.get(strategy_key, OptionsStrategyParams())
     _cushion_penalty, _cushion_pct = cushion_penalty(
         best, underlying_price,
-        severe_threshold=strategy.cushion_severe_threshold,
-        moderate_threshold=strategy.cushion_moderate_threshold,
+        severe_threshold=_opts.cushion_severe_threshold,
+        moderate_threshold=_opts.cushion_moderate_threshold,
     )
     score = raw_score
     penalty_reason = None
