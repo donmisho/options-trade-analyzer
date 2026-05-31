@@ -55,7 +55,8 @@ from app.ota_adapters._shared.black_scholes import (
 )
 from app.models.session import async_session
 from app.validators.narrative_grounding import EvaluationFields, validate_narrative
-from app.analysis.hard_gates import evaluate_hard_gates, GateTradeContext
+from app.analysis.hard_gates import ACTION_BLOCK, ACTION_DEFER, evaluate_hard_gates, GateTradeContext
+from app.insight_engine.models import Candidate
 from app.services.symbol_normalization import canonicalize
 from app.analysis.scoring_factors.asymmetry import (
     asymmetry_penalty as _asymmetry_penalty,
@@ -600,25 +601,40 @@ async def evaluate_structured(
         except (TypeError, ValueError):
             _gate_ev = None
 
+    # OTA-775: build a generic Candidate with named values for gates
+    _gate_candidate = Candidate(
+        candidate_id=str(run_id),
+        candidate_type="options_trade",
+        named_values={
+            "expiry_date": _expiry_date,
+            "dte": dte,
+            "expected_value": _gate_ev,
+        },
+        symbol=canonicalize(request.symbol),
+    )
     _gate_ctx = GateTradeContext(
         symbol=canonicalize(request.symbol),
         entry_date=date.today(),
-        expiry_date=_expiry_date,
-        dte=dte,
+        candidate=_gate_candidate,
         trade=request.trade,
         db=db,
-        expected_value=_gate_ev,
     )
     _gate_result = await evaluate_hard_gates(_gate_ctx)
-    _wait_for_earnings = False  # OTA-515: set when verdict is WAIT_FOR_EARNINGS
+    _wait_for_earnings = False  # OTA-515: set when action is DEFER
+
+    # OTA-776: domain mapping — action codes → OTA verdict strings
+    _ACTION_TO_VERDICT = {
+        ACTION_BLOCK: "PASS",
+        ACTION_DEFER: "WAIT_FOR_EARNINGS",
+    }
 
     if _gate_result and _gate_result.triggered:
-        if _gate_result.verdict == "WAIT_FOR_EARNINGS":
+        if _gate_result.action == ACTION_DEFER:
             # OTA-515: Route 2 or 3 — short-circuit with WAIT_FOR_EARNINGS cards
             _wait_for_earnings = True
             auto_pass_reason = _gate_result.reason
         else:
-            # Hard block (PASS) — feed into the existing auto-pass short-circuit
+            # Hard block (BLOCK) — feed into the existing auto-pass short-circuit
             auto_pass_reason = _gate_result.reason
     elif _gate_result and not _gate_result.triggered:
         # Modifier-only result (Route 4: pre-earnings momentum play)
@@ -668,7 +684,7 @@ async def evaluate_structured(
 
     # ─── Auto-PASS / WAIT_FOR_EARNINGS: return immediately, NO Claude API call ─
     if auto_pass_reason:
-        _verdict = "WAIT_FOR_EARNINGS" if _wait_for_earnings else "PASS"
+        _verdict = _ACTION_TO_VERDICT.get(_gate_result.action, "PASS") if _gate_result else "PASS"
         logger.info(
             f"Auto-{_verdict} for {request.symbol} (strategy_keys={request.strategy_keys}): {auto_pass_reason[:80]}"
         )
@@ -706,8 +722,8 @@ async def evaluate_structured(
                 auto_pass_reason=auto_pass_reason,
                 credit_pct_of_width=credit_pct_of_width,
                 debit_pct_of_width=debit_pct_of_width,
-                dte_after_earnings=_gate_result._dte_after_earnings if _wait_for_earnings and _gate_result else None,
-                reevaluate_on=_gate_result._reevaluate_on if _wait_for_earnings and _gate_result else None,
+                dte_after_earnings=_gate_result.metadata.get("dte_after_earnings") if _wait_for_earnings and _gate_result else None,
+                reevaluate_on=_gate_result.metadata.get("reevaluate_on") if _wait_for_earnings and _gate_result else None,
             ))
 
         db.add(AgentRunLog(

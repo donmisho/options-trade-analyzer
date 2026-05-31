@@ -20,12 +20,13 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.analysis.hard_gates import GateTradeContext
+from app.analysis.hard_gates import ACTION_BLOCK, ACTION_DEFER, GateTradeContext
 from app.analysis.hard_gates.earnings_gate import (
     EarningsInWindowGate,
     _business_days_between,
     _next_business_day,
 )
+from app.insight_engine.models import Candidate
 
 
 # ─── Helper to build context with a controlled earnings date ──────────────────
@@ -33,11 +34,16 @@ from app.analysis.hard_gates.earnings_gate import (
 
 def _make_context(entry: date, expiry: date) -> GateTradeContext:
     dte = _business_days_between(entry, expiry)
+    candidate = Candidate(
+        candidate_id="test",
+        candidate_type="options_trade",
+        named_values={"expiry_date": expiry, "dte": dte},
+        symbol="TEST",
+    )
     return GateTradeContext(
         symbol="TEST",
         entry_date=entry,
-        expiry_date=expiry,
-        dte=dte,
+        candidate=candidate,
         trade={"spread_label": "Test Spread"},
         db=None,
     )
@@ -58,17 +64,17 @@ def _date_plus_bdays(start: date, bdays: int) -> date:
 
 
 @pytest.mark.parametrize(
-    "dte_before,dte_after,expected_triggered,expected_verdict,route_label",
+    "dte_before,dte_after,expected_triggered,expected_action,route_label",
     [
-        # Route 1: dte_before <= 7 AND dte_after < 14 → PASS
-        (5, 10, True, "PASS", "Route 1: typical"),
-        (7, 13, True, "PASS", "Route 1: boundary"),
-        # Route 2: dte_before <= 7 AND dte_after >= 14 → WAIT_FOR_EARNINGS
-        (5, 14, True, "WAIT_FOR_EARNINGS", "Route 2: typical"),
-        (7, 20, True, "WAIT_FOR_EARNINGS", "Route 2: boundary"),
-        # Route 3: dte_before >= 8 AND dte_after >= 21 → WAIT_FOR_EARNINGS
-        (10, 21, True, "WAIT_FOR_EARNINGS", "Route 3: boundary"),
-        (15, 30, True, "WAIT_FOR_EARNINGS", "Route 3: typical"),
+        # Route 1: dte_before <= 7 AND dte_after < 14 → BLOCK
+        (5, 10, True, ACTION_BLOCK, "Route 1: typical"),
+        (7, 13, True, ACTION_BLOCK, "Route 1: boundary"),
+        # Route 2: dte_before <= 7 AND dte_after >= 14 → DEFER
+        (5, 14, True, ACTION_DEFER, "Route 2: typical"),
+        (7, 20, True, ACTION_DEFER, "Route 2: boundary"),
+        # Route 3: dte_before >= 8 AND dte_after >= 21 → DEFER
+        (10, 21, True, ACTION_DEFER, "Route 3: boundary"),
+        (15, 30, True, ACTION_DEFER, "Route 3: typical"),
         # Route 4: dte_before >= 8 AND dte_after < 21 → modifier (not triggered)
         (10, 15, False, None, "Route 4: typical"),
         (8, 20, False, None, "Route 4: boundary"),
@@ -76,7 +82,7 @@ def _date_plus_bdays(start: date, bdays: int) -> date:
 )
 @pytest.mark.asyncio
 async def test_earnings_gate_routing(
-    dte_before, dte_after, expected_triggered, expected_verdict, route_label
+    dte_before, dte_after, expected_triggered, expected_action, route_label
 ):
     """Verify each route in the earnings decision tree."""
     # Build dates: entry=Monday 2026-06-01, earnings after dte_before bdays,
@@ -96,10 +102,10 @@ async def test_earnings_gate_routing(
     assert result.triggered == expected_triggered, f"{route_label}: triggered mismatch"
 
     if expected_triggered:
-        assert result.verdict == expected_verdict, f"{route_label}: verdict mismatch"
-        if expected_verdict == "WAIT_FOR_EARNINGS":
-            assert result._dte_after_earnings == dte_after, f"{route_label}: dte_after mismatch"
-            assert result._reevaluate_on is not None, f"{route_label}: reevaluate_on should be set"
+        assert result.action == expected_action, f"{route_label}: action mismatch"
+        if expected_action == ACTION_DEFER:
+            assert result.metadata.get("dte_after_earnings") == dte_after, f"{route_label}: dte_after mismatch"
+            assert result.metadata.get("reevaluate_on") is not None, f"{route_label}: reevaluate_on should be set"
     else:
         # Route 4: modifier
         assert result.penalty_points == 15, f"{route_label}: expected 15-point penalty"

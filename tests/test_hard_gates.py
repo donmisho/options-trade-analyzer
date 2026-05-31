@@ -4,6 +4,7 @@ import pytest
 from datetime import date
 
 from app.analysis.hard_gates import (
+    ACTION_BLOCK,
     GateResult,
     GateTradeContext,
     HardGate,
@@ -11,14 +12,27 @@ from app.analysis.hard_gates import (
     evaluate_hard_gates,
     register_gate,
 )
+from app.insight_engine.models import Candidate
+
+
+def _candidate(**named_values) -> Candidate:
+    return Candidate(
+        candidate_id="test",
+        candidate_type="options_trade",
+        named_values={
+            "expiry_date": date(2026, 5, 15),
+            "dte": 23,
+            **named_values,
+        },
+        symbol="TEST",
+    )
 
 
 def _ctx(**kwargs) -> GateTradeContext:
     defaults = dict(
         symbol="TEST",
         entry_date=date(2026, 4, 22),
-        expiry_date=date(2026, 5, 15),
-        dte=23,
+        candidate=_candidate(),
         trade=None,
     )
     defaults.update(kwargs)
@@ -64,7 +78,7 @@ async def test_triggered_gate_short_circuits():
 
         async def evaluate(self, ctx):
             call_log.append("block")
-            return GateResult(triggered=True, verdict="PASS", reason="blocked", gate_id=self.gate_id)
+            return GateResult(triggered=True, action=ACTION_BLOCK, reason="blocked", gate_id=self.gate_id)
 
     class ShouldNotRunGate(HardGate):
         gate_id = "second"
@@ -80,7 +94,7 @@ async def test_triggered_gate_short_circuits():
 
     assert result is not None
     assert result.triggered is True
-    assert result.verdict == "PASS"
+    assert result.action == ACTION_BLOCK
     assert "second" not in call_log
 
 
@@ -118,7 +132,7 @@ async def test_failing_gate_is_skipped_fail_soft():
         gate_id = "good"
 
         async def evaluate(self, ctx):
-            return GateResult(triggered=True, verdict="PASS", reason="good gate fired", gate_id=self.gate_id)
+            return GateResult(triggered=True, action=ACTION_BLOCK, reason="good gate fired", gate_id=self.gate_id)
 
     register_gate(BrokenGate())
     register_gate(GoodGate())

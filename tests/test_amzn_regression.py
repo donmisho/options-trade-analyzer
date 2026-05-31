@@ -22,6 +22,7 @@ from datetime import date
 from unittest.mock import AsyncMock
 
 from app.analysis.hard_gates import (
+    ACTION_BLOCK,
     GateTradeContext,
     _clear_gates,
     evaluate_hard_gates,
@@ -30,6 +31,7 @@ from app.analysis.hard_gates import (
 from app.analysis.hard_gates.earnings_gate import EarningsInWindowGate
 from app.analysis.strategy_classifier import classify_best_strategy
 from app.analysis.strategy_scorer import StrategyScore
+from app.insight_engine.models import Candidate
 
 
 # ─── Fixture parameters ───────────────────────────────────────────────────────
@@ -55,12 +57,21 @@ def isolated_registry():
     _clear_gates()
 
 
+def _amzn_candidate(**overrides) -> Candidate:
+    nv = {"expiry_date": AMZN_EXPIRY, "dte": AMZN_DTE, **overrides}
+    return Candidate(
+        candidate_id="amzn-test",
+        candidate_type="options_trade",
+        named_values=nv,
+        symbol=AMZN_SYMBOL,
+    )
+
+
 def _amzn_ctx() -> GateTradeContext:
     return GateTradeContext(
         symbol=AMZN_SYMBOL,
         entry_date=AMZN_ENTRY,
-        expiry_date=AMZN_EXPIRY,
-        dte=AMZN_DTE,
+        candidate=_amzn_candidate(),
         trade={
             "buy_strike": 260,
             "sell_strike": 270,
@@ -93,7 +104,7 @@ async def test_amzn_regression_full_stack_verdict_is_pass():
 
     assert result is not None, "Gate should have returned a result"
     assert result.triggered is True, f"Gate should have triggered; got triggered={result.triggered}"
-    assert result.verdict == "PASS", f"Expected PASS, got {result.verdict!r}"
+    assert result.action == ACTION_BLOCK, f"Expected BLOCK, got {result.action!r}"
     assert result.gate_id == "earnings_in_window"
 
 
@@ -177,8 +188,7 @@ def _amzn_ctx_ev_only() -> GateTradeContext:
     return GateTradeContext(
         symbol=AMZN_SYMBOL,
         entry_date=AMZN_ENTRY,
-        expiry_date=AMZN_EXPIRY,
-        dte=AMZN_DTE,
+        candidate=_amzn_candidate(expected_value=AMZN_EV),
         trade={
             "buy_strike": 260,
             "sell_strike": 270,
@@ -186,7 +196,6 @@ def _amzn_ctx_ev_only() -> GateTradeContext:
             "total_ev": AMZN_EV,
         },
         db=None,
-        expected_value=AMZN_EV,    # -5.86
     )
 
 
@@ -212,7 +221,7 @@ async def test_amzn_ev_only_negative_ev_gate_fires():
     assert result.gate_id == "negative_ev", (
         f"Expected negative_ev gate; got {result.gate_id!r}"
     )
-    assert result.verdict == "PASS"
+    assert result.action == ACTION_BLOCK
     assert "Negative expected value" in result.reason
 
 
@@ -247,11 +256,9 @@ async def test_amzn_both_gates_earnings_reason_wins():
     ctx = GateTradeContext(
         symbol=AMZN_SYMBOL,
         entry_date=AMZN_ENTRY,
-        expiry_date=AMZN_EXPIRY,
-        dte=AMZN_DTE,
+        candidate=_amzn_candidate(expected_value=AMZN_EV),
         trade={"buy_strike": 260, "sell_strike": 270, "expiration": "2026-05-15", "total_ev": AMZN_EV},
         db=None,
-        expected_value=AMZN_EV,
     )
 
     earnings_gate = EarningsInWindowGate(source=object())
@@ -301,8 +308,7 @@ async def test_ota506_warning_band_gate_sets_effective_dte():
     ctx = GateTradeContext(
         symbol=AMZN_SYMBOL,
         entry_date=AMZN_ENTRY,
-        expiry_date=AMZN_EXPIRY,
-        dte=AMZN_DTE,
+        candidate=_amzn_candidate(),
         trade={"buy_strike": 260, "sell_strike": 270, "expiration": "2026-05-15"},
         db=None,
     )

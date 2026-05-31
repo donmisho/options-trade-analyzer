@@ -15,11 +15,12 @@ import pytest
 from datetime import date
 from unittest.mock import AsyncMock, patch
 
-from app.analysis.hard_gates import GateTradeContext, _clear_gates
+from app.analysis.hard_gates import ACTION_BLOCK, GateTradeContext, _clear_gates
 from app.analysis.hard_gates.earnings_gate import (
     EarningsInWindowGate,
     _business_days_between,
 )
+from app.insight_engine.models import Candidate
 
 ENTRY   = date(2026, 4, 22)   # Wednesday
 EXPIRY  = date(2026, 5, 15)   # Friday
@@ -27,14 +28,18 @@ EXPIRY  = date(2026, 5, 15)   # Friday
 
 def _ctx(entry=ENTRY, expiry=EXPIRY, symbol="TEST", **kwargs) -> GateTradeContext:
     dte = (expiry - entry).days if expiry is not None else 0
+    candidate = Candidate(
+        candidate_id="test",
+        candidate_type="options_trade",
+        named_values={"expiry_date": expiry, "dte": dte},
+        symbol=symbol,
+    )
     return GateTradeContext(
         symbol=symbol,
         entry_date=entry,
-        expiry_date=expiry,
-        dte=dte,
+        candidate=candidate,
         trade=None,
         db=None,
-        **kwargs,
     )
 
 
@@ -86,7 +91,7 @@ async def test_amzn_regression_triggered():
     result = await gate.evaluate(_ctx())
 
     assert result.triggered is True
-    assert result.verdict == "PASS"
+    assert result.action == ACTION_BLOCK
     assert result.gate_id == "earnings_in_window"
     assert "2026-04-29" in result.reason
     assert "5 trading days" in result.reason
@@ -102,7 +107,7 @@ async def test_boundary_exactly_7_business_days_triggers():
     result = await gate.evaluate(_ctx())
 
     assert result.triggered is True
-    assert result.verdict == "PASS"
+    assert result.action == ACTION_BLOCK
     assert "7 trading days" in result.reason
 
 
@@ -113,7 +118,7 @@ async def test_boundary_exactly_8_business_days_warning_band():
     result = await gate.evaluate(_ctx())
 
     assert result.triggered is False
-    assert result.verdict is None
+    assert result.action is None
     assert result.penalty_points == 15
     assert result.effective_dte_override == 7   # 8 - 1
 

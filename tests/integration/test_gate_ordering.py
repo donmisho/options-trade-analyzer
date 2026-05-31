@@ -13,6 +13,7 @@ from datetime import date
 from unittest.mock import AsyncMock
 
 from app.analysis.hard_gates import (
+    ACTION_BLOCK,
     GateTradeContext,
     _clear_gates,
     evaluate_hard_gates,
@@ -20,6 +21,7 @@ from app.analysis.hard_gates import (
 )
 from app.analysis.hard_gates.earnings_gate import EarningsInWindowGate
 from app.analysis.hard_gates.negative_ev_gate import NegativeEVGate
+from app.insight_engine.models import Candidate
 
 ENTRY  = date(2026, 4, 22)   # Wednesday
 EXPIRY = date(2026, 5, 15)   # Friday
@@ -54,14 +56,22 @@ def _ctx(ev, earnings_in_window: bool) -> GateTradeContext:
     """
     # Note: earnings date is controlled via the gate mock, not the ctx.
     # The ctx just needs valid entry/expiry so the window check can fire.
+    candidate = Candidate(
+        candidate_id="test",
+        candidate_type="options_trade",
+        named_values={
+            "expiry_date": EXPIRY,
+            "dte": (EXPIRY - ENTRY).days,
+            "expected_value": ev,
+        },
+        symbol="AMZN",
+    )
     return GateTradeContext(
         symbol="AMZN",
         entry_date=ENTRY,
-        expiry_date=EXPIRY,
-        dte=(EXPIRY - ENTRY).days,
+        candidate=candidate,
         trade={"total_ev": ev},
         db=None,
-        expected_value=ev,
     )
 
 
@@ -149,7 +159,7 @@ async def test_negative_ev_standalone_verdict_is_pass():
     result = await evaluate_hard_gates(_ctx(ev=-5.86, earnings_in_window=False))
 
     assert result is not None
-    assert result.verdict == "PASS"
+    assert result.action == ACTION_BLOCK
 
 
 # ─── Neither gate fires (positive EV, earnings out of window) ─────────────────

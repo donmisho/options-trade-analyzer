@@ -7,7 +7,7 @@ Per user framework: EV is the primary quality gate. A negative EV trade
 must never reach EXECUTE or WAIT.
 
 Rules:
-  EV < 0     → triggered=True, verdict=PASS
+  EV < 0     → triggered=True, action=BLOCK
   EV == 0    → triggered=False (strict <, not <=; zero-EV trades are poor
                 setups but do not violate the framework rule)
   EV is None → triggered=False (fail-soft; "not yet computed" ≠ negative)
@@ -26,7 +26,7 @@ Defense-in-depth with EarningsInWindowGate (OTA-502):
 
 import logging
 
-from app.analysis.hard_gates import GateResult, GateTradeContext, HardGate
+from app.analysis.hard_gates import ACTION_BLOCK, GateResult, GateTradeContext, HardGate
 
 logger = logging.getLogger(__name__)
 
@@ -35,9 +35,8 @@ class NegativeEVGate(HardGate):
     """
     Pre-scoring gate: block trades whose expected value is negative.
 
-    Stateless — no I/O, no injected dependencies. Reads only from
-    GateTradeContext.expected_value, which is populated by the scoring
-    pipeline from the trade's computed total_ev.
+    Stateless — no I/O, no injected dependencies. Reads expected_value
+    from the candidate's named values (OTA-775).
     """
 
     gate_id = "negative_ev"
@@ -60,7 +59,8 @@ class NegativeEVGate(HardGate):
             return GateResult(triggered=False, gate_id=self.gate_id)
 
     def _evaluate(self, ctx: GateTradeContext) -> GateResult:
-        ev = ctx.expected_value
+        # OTA-775: read expected_value from candidate named values
+        ev = ctx.candidate.named_values.get("expected_value") if ctx.candidate else None
 
         if ev is None:
             logger.debug(
@@ -75,7 +75,7 @@ class NegativeEVGate(HardGate):
             )
             return GateResult(
                 triggered=True,
-                verdict="PASS",
+                action=ACTION_BLOCK,
                 reason=(
                     f"Negative expected value ({ev:.2f}). "
                     f"Trade fails primary quality gate."

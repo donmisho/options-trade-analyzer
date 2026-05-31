@@ -7,11 +7,11 @@ User framework rule: never hold through earnings.
 
 OTA-515 Decision Tree (4 routes):
   Route 1 — dte_before ≤ 7 AND dte_after < 14:
-      verdict=PASS — no viable window on either side
+      action=BLOCK — no viable window on either side
   Route 2 — dte_before ≤ 7 AND dte_after >= 14:
-      verdict=WAIT_FOR_EARNINGS — can't enter pre-earnings, strong post window
+      action=DEFER — can't enter pre-earnings, strong post window
   Route 3 — dte_before >= 8 AND dte_after >= 21:
-      verdict=WAIT_FOR_EARNINGS — post-earnings entry likely better
+      action=DEFER — post-earnings entry likely better
   Route 4 — dte_before >= 8 AND dte_after < 21:
       score normally using effective_DTE = dte_before_earnings
       (pre-earnings momentum play)
@@ -30,7 +30,13 @@ import logging
 from datetime import date, timedelta
 from typing import Optional
 
-from app.analysis.hard_gates import GateResult, GateTradeContext, HardGate
+from app.analysis.hard_gates import (
+    ACTION_BLOCK,
+    ACTION_DEFER,
+    GateResult,
+    GateTradeContext,
+    HardGate,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -120,17 +126,20 @@ class EarningsInWindowGate(HardGate):
             )
             return GateResult(triggered=False, gate_id=self.gate_id)
 
+        # OTA-775: read expiry_date from the candidate's named values
+        expiry_date = ctx.candidate.named_values.get("expiry_date") if ctx.candidate else None
+
         # Gate only fires when earnings fall inside [entry_date, expiry_date]
-        if ctx.expiry_date is None or not (ctx.entry_date <= earnings_date <= ctx.expiry_date):
+        if expiry_date is None or not (ctx.entry_date <= earnings_date <= expiry_date):
             logger.debug(
                 f"EarningsInWindowGate: {ctx.symbol} earnings {earnings_date} "
-                f"outside window [{ctx.entry_date}, {ctx.expiry_date}] — not gating"
+                f"outside window [{ctx.entry_date}, {expiry_date}] — not gating"
             )
             return GateResult(triggered=False, gate_id=self.gate_id)
 
         # OTA-515: Compute both windows
         dte_before = _business_days_between(ctx.entry_date, earnings_date)
-        dte_after = _business_days_between(earnings_date, ctx.expiry_date) if ctx.expiry_date else 0
+        dte_after = _business_days_between(earnings_date, expiry_date) if expiry_date else 0
         earnings_str = earnings_date.isoformat()
 
         # Compute reevaluate_on: next business day after earnings
@@ -141,7 +150,7 @@ class EarningsInWindowGate(HardGate):
         if dte_before <= 7 and dte_after < 14:
             return GateResult(
                 triggered=True,
-                verdict="PASS",
+                action=ACTION_BLOCK,
                 reason=(
                     f"Earnings {earnings_str} — insufficient time both before "
                     f"({dte_before} trading days) and after ({dte_after} trading days) catalyst."
@@ -153,28 +162,31 @@ class EarningsInWindowGate(HardGate):
         if dte_before <= 7 and dte_after >= 14:
             return GateResult(
                 triggered=True,
-                verdict="WAIT_FOR_EARNINGS",
+                action=ACTION_DEFER,
                 reason=(
                     f"Re-evaluate {reeval_str}. {dte_after} DTE remaining post-IV crush."
                 ),
                 gate_id=self.gate_id,
-                # Stash routing metadata for the response builder
-                _dte_after_earnings=dte_after,
-                _reevaluate_on=reeval_str,
+                metadata={
+                    "dte_after_earnings": dte_after,
+                    "reevaluate_on": reeval_str,
+                },
             )
 
         # Route 3 — pre-earnings window viable, but post-earnings entry likely better
         if dte_after >= 21:
             return GateResult(
                 triggered=True,
-                verdict="WAIT_FOR_EARNINGS",
+                action=ACTION_DEFER,
                 reason=(
                     "Post-earnings entry likely better. Waiting preserves most of "
                     f"window ({dte_after} trading days post-earnings)."
                 ),
                 gate_id=self.gate_id,
-                _dte_after_earnings=dte_after,
-                _reevaluate_on=reeval_str,
+                metadata={
+                    "dte_after_earnings": dte_after,
+                    "reevaluate_on": reeval_str,
+                },
             )
 
         # Route 4 — pre-earnings window is the only viable one

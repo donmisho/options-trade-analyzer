@@ -4,8 +4,9 @@ Hard-gate scaffolding for the trade evaluation pipeline.
 Hard gates are pre-scoring filters that run before any Claude API call or
 scoring math. A gate can either:
 
-  1. Hard-block a trade (triggered=True, verdict="PASS") — the pipeline
-     short-circuits immediately and returns PASS without calling Claude.
+  1. Hard-block a trade (triggered=True, action=BLOCK/DEFER) — the pipeline
+     short-circuits immediately. The domain layer maps the action code to
+     its own verdict string.
 
   2. Inject scoring modifiers without blocking (triggered=False with
      penalty_points and/or effective_dte_override set) — the pipeline
@@ -31,6 +32,8 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, List, Optional
 
+from app.insight_engine.models import Candidate
+
 logger = logging.getLogger(__name__)
 
 
@@ -44,17 +47,27 @@ class GateTradeContext:
 
     Decouples gate logic from the route's StructuredEvaluationRequest schema
     so gates remain portable and independently testable.
+
+    OTA-775: Domain-specific fields (expected_value, expiry_date, dte) removed.
+    Gates access those values through the generic `candidate` reference, keyed
+    by named value (e.g. candidate.named_values["expected_value"]).
     """
     symbol: str
     entry_date: date                  # date.today() at evaluation time
-    expiry_date: Optional[date]       # parsed from trade["expiration"]; None if missing/unparseable
-    dte: int                          # already computed by evaluate_structured()
+    candidate: Optional[Candidate] = None  # generic candidate; gates read named values by key
     trade: Optional[dict] = None      # raw trade dict for gate-specific field access
     db: Optional[Any] = None          # AsyncSession from the request; gates use for ContextStore reads
-    expected_value: Optional[float] = None  # pre-computed EV in dollars; required by NegativeEVGate, populated from scoring pipeline's total_ev
 
 
 # ─── Gate result ──────────────────────────────────────────────────────────────
+
+
+# OTA-776: Generic action codes — the framework knows no domain verdict strings.
+# The consuming domain layer maps action codes to its own verdict vocabulary.
+ACTION_BLOCK = "BLOCK"    # hard-block: pipeline short-circuits, candidate rejected
+ACTION_DEFER = "DEFER"    # terminal halt: candidate deferred (e.g. wait for catalyst)
+ACTION_MODIFY = "MODIFY"  # pass-through with modifiers (penalty, DTE override)
+ACTION_OK = "OK"          # gate passed, no effect
 
 
 @dataclass
@@ -62,20 +75,26 @@ class GateResult:
     """
     Result returned by a single gate's evaluate() call.
 
-    triggered=True  → hard-block: pipeline short-circuits, verdict forced to
-                       the value in `verdict` (typically "PASS" or "WAIT_FOR_EARNINGS").
+    triggered=True  → hard-block or defer: pipeline short-circuits.
+                       `action` is BLOCK or DEFER.
     triggered=False → pass-through: pipeline continues, but may apply
                        penalty_points and/or effective_dte_override.
+                       `action` is MODIFY (with modifiers) or OK.
+
+    OTA-776: `action` replaces the former `verdict` field. Action codes are
+    generic (BLOCK/DEFER/MODIFY/OK); domain verdict strings are mapped by
+    the consuming domain layer.
+
+    OTA-777: Gate-specific metadata (e.g. dte_after_earnings, reevaluate_on)
+    lives in the generic `metadata` dict, not as named fields on GateResult.
     """
     triggered: bool
-    verdict: Optional[str] = None               # "PASS" or "WAIT_FOR_EARNINGS" when triggered
+    action: Optional[str] = None                # BLOCK | DEFER | MODIFY | OK
     reason: Optional[str] = None                # human-readable explanation
     penalty_points: int = 0                     # deducted from score post-parse
     effective_dte_override: Optional[int] = None  # replaces nominal DTE for scoring
     gate_id: str = ""                           # for audit trail
-    # OTA-515: earnings routing metadata (only set by EarningsInWindowGate)
-    _dte_after_earnings: Optional[int] = None
-    _reevaluate_on: Optional[str] = None        # mm-dd-yyyy
+    metadata: dict = field(default_factory=dict)  # gate-specific data (OTA-777)
 
 
 # ─── Abstract gate ────────────────────────────────────────────────────────────
@@ -154,7 +173,7 @@ async def evaluate_hard_gates(ctx: GateTradeContext) -> Optional[GateResult]:
         if result.triggered:
             logger.info(
                 f"Hard gate triggered: gate={gate.gate_id} symbol={ctx.symbol} "
-                f"verdict={result.verdict} reason={result.reason!r:.80}"
+                f"action={result.action} reason={result.reason!r:.80}"
             )
             return result
 

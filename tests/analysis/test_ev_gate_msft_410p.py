@@ -13,8 +13,9 @@ import pytest
 from datetime import date
 
 from app.api.evaluation_routes import _compute_naked_long_option_ev
-from app.analysis.hard_gates import GateTradeContext
+from app.analysis.hard_gates import ACTION_BLOCK, GateTradeContext
 from app.analysis.hard_gates.negative_ev_gate import NegativeEVGate
+from app.insight_engine.models import Candidate
 
 
 # ─── Repro case inputs from diagnostic report ────────────────────────────────
@@ -83,12 +84,20 @@ class TestNegativeEVGateWithMSFT410P:
     def test_gate_triggers_on_msft_410p(self):
         ev = _compute_naked_long_option_ev(**MSFT_410P)
 
+        candidate = Candidate(
+            candidate_id="msft-test",
+            candidate_type="options_trade",
+            named_values={
+                "expiry_date": date(2026, 7, 17),
+                "dte": 58,
+                "expected_value": ev,
+            },
+            symbol="MSFT",
+        )
         ctx = GateTradeContext(
             symbol="MSFT",
             entry_date=date(2026, 5, 19),
-            expiry_date=date(2026, 7, 17),
-            dte=58,
-            expected_value=ev,
+            candidate=candidate,
         )
         gate = NegativeEVGate()
         result = gate._evaluate(ctx)
@@ -96,18 +105,26 @@ class TestNegativeEVGateWithMSFT410P:
         assert result.triggered is True, (
             f"NegativeEVGate should trigger for EV={ev}"
         )
-        assert result.verdict == "PASS", (
-            f"Expected verdict='PASS', got '{result.verdict}'"
+        assert result.action == ACTION_BLOCK, (
+            f"Expected action='BLOCK', got '{result.action}'"
         )
 
     def test_gate_passes_through_when_ev_is_none(self):
         """Existing behavior: None EV → pass-through (fail-soft)."""
+        candidate = Candidate(
+            candidate_id="msft-test",
+            candidate_type="options_trade",
+            named_values={
+                "expiry_date": date(2026, 7, 17),
+                "dte": 58,
+                "expected_value": None,
+            },
+            symbol="MSFT",
+        )
         ctx = GateTradeContext(
             symbol="MSFT",
             entry_date=date(2026, 5, 19),
-            expiry_date=date(2026, 7, 17),
-            dte=58,
-            expected_value=None,
+            candidate=candidate,
         )
         gate = NegativeEVGate()
         result = gate._evaluate(ctx)
