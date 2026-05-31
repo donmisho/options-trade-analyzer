@@ -307,12 +307,31 @@ def parse_workbook(xlsx_path: Path):
             ]
 
     # ── Strategies ───────────────────────────────────────────────────────
-    # Verdict bands (rows 62-64)
-    verdict_bands = [
-        {"verdict": "EXECUTE", "min_score": 70, "max_score": 100},
-        {"verdict": "WAIT",    "min_score": 50, "max_score": 69.99},
-        {"verdict": "PASS",    "min_score": 0,  "max_score": 49.99},
-    ]
+    # Per-strategy verdict bands (OTA-773). Each strategy gets its own copy
+    # so bands can diverge independently. All start at 70/50 (matching
+    # _assign_verdict literals that OTA-761 will remove).
+    _SCREENING_VERDICT_BANDS = {
+        "steady_paycheck": [
+            {"verdict": "EXECUTE", "min_score": 70, "max_score": 100},
+            {"verdict": "WAIT",    "min_score": 50, "max_score": 69.99},
+            {"verdict": "PASS",    "min_score": 0,  "max_score": 49.99},
+        ],
+        "weekly_grind": [
+            {"verdict": "EXECUTE", "min_score": 70, "max_score": 100},
+            {"verdict": "WAIT",    "min_score": 50, "max_score": 69.99},
+            {"verdict": "PASS",    "min_score": 0,  "max_score": 49.99},
+        ],
+        "trend_rider": [
+            {"verdict": "EXECUTE", "min_score": 70, "max_score": 100},
+            {"verdict": "WAIT",    "min_score": 50, "max_score": 69.99},
+            {"verdict": "PASS",    "min_score": 0,  "max_score": 49.99},
+        ],
+        "lottery_ticket": [
+            {"verdict": "EXECUTE", "min_score": 70, "max_score": 100},
+            {"verdict": "WAIT",    "min_score": 50, "max_score": 69.99},
+            {"verdict": "PASS",    "min_score": 0,  "max_score": 49.99},
+        ],
+    }
 
     # Scan parameters (rows 69-72)
     scan_params_by_strategy = {}
@@ -353,7 +372,7 @@ def parse_workbook(xlsx_path: Path):
             "consumer_surface": "SCREENING",
             "description": None,
             "compatible_structures": compat if compat else None,
-            "verdict_band_set": verdict_bands,
+            "verdict_band_set": _SCREENING_VERDICT_BANDS[strat["key"]],
             "dte_min": int(dte_low) if dte_low else None,
             "dte_max": int(dte_high) if dte_high else None,
             "enabled": True,
@@ -834,16 +853,21 @@ def _decompose_cushion_penalty(rules):
         (_make_atomic(
             base,
             rule_key="adj_cushion_penalty_severe",
-            intent="Cushion < 1.0% of underlying price — severe proximity to short strike (-20 points)",
-            condition_expr="cushion_pct < 1.0",
-            ref_values=["stock_price", "short_strike"],
+            intent="Cushion below severe threshold — severe proximity to short strike (-20 points)",
+            condition_expr="<",
+            ref_values=["cushion_pct"],
+            param_schema={"threshold": {"type": "number", "min": 0, "max": 100}},
         ), {"score_penalty": -20.0}),
         (_make_atomic(
             base,
             rule_key="adj_cushion_penalty_moderate",
-            intent="Cushion >= 1.0% and < 2.0% of underlying price — moderate proximity to short strike (-10 points)",
+            intent="Cushion in moderate band — moderate proximity to short strike (-10 points)",
             formula_ref="formula:cushion_penalty_moderate",
-            ref_values=["stock_price", "short_strike"],
+            ref_values=["cushion_pct"],
+            param_schema={
+                "lower_threshold": {"type": "number", "min": 0, "max": 100},
+                "upper_threshold": {"type": "number", "min": 0, "max": 100},
+            },
         ), {"score_penalty": -10.0}),
     ]
 
@@ -950,6 +974,20 @@ def decompose_compound_rules(rules, junctions):
 _CUSHION_PENALTY_STRATEGIES = ["steady_paycheck", "weekly_grind"]
 
 
+# Per-strategy cushion penalty thresholds (OTA-770).
+# SP and WG start with identical values; junction independence lets them diverge later.
+_CUSHION_PENALTY_PARAMS = {
+    "adj_cushion_penalty_severe": {
+        "steady_paycheck": {"threshold": 1.0},
+        "weekly_grind":    {"threshold": 1.0},
+    },
+    "adj_cushion_penalty_moderate": {
+        "steady_paycheck": {"lower_threshold": 1.0, "upper_threshold": 2.0},
+        "weekly_grind":    {"lower_threshold": 1.0, "upper_threshold": 2.0},
+    },
+}
+
+
 def _inject_junctions(junctions, injections):
     """Create junction rows for freshly injected rules (no compound to expand from)."""
     for rule, overrides in injections:
@@ -957,6 +995,7 @@ def _inject_junctions(junctions, injections):
         if not key.startswith("adj_cushion_penalty_"):
             continue
         for strat_key in _CUSHION_PENALTY_STRATEGIES:
+            params = _CUSHION_PENALTY_PARAMS.get(key, {}).get(strat_key)
             j = {
                 "rule_key": key,
                 "strategy_key": strat_key,
@@ -964,7 +1003,7 @@ def _inject_junctions(junctions, injections):
                 "stop_if_fail": False,
                 "score_penalty": (overrides or {}).get("score_penalty"),
                 "weight": None,
-                "parameters": None,
+                "parameters": params,
                 "terminal_verdict": None,
                 "enabled": True,
             }

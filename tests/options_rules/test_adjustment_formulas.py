@@ -86,13 +86,11 @@ class TestCushionPenaltyModerate:
             {"cushion_pct": 1.5}, {"lower_threshold": 1.0, "upper_threshold": 2.0})
         assert isinstance(result, bool)
 
-    def test_default_params(self):
-        """Default thresholds match legacy: [1.0, 2.0)."""
+    def test_missing_params_raises(self):
+        """Params are required from junction (OTA-770); missing raises KeyError."""
         reg = get_registry()
-        # In band with defaults
-        assert reg.invoke("cushion_penalty_moderate", {"cushion_pct": 1.5}, {}) is False
-        # Outside band with defaults
-        assert reg.invoke("cushion_penalty_moderate", {"cushion_pct": 2.5}, {}) is True
+        with pytest.raises(KeyError):
+            reg.invoke("cushion_penalty_moderate", {"cushion_pct": 1.5}, {})
 
     def test_custom_thresholds(self):
         """Params override the band boundaries."""

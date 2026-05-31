@@ -111,23 +111,24 @@ def _get_atm_iv(contracts: list, underlying_price: float) -> float:
 
 # ─── Cushion Penalty ──────────────────────────────────────────────────────────
 
-def cushion_penalty(trade: dict, current_price: float) -> tuple:
+def cushion_penalty(
+    trade: dict,
+    current_price: float,
+    severe_threshold: float,
+    moderate_threshold: float,
+) -> tuple:
     """
     Deterministic scoring penalty for thin short strike cushion.
 
     cushion_pct = |current_price - short_strike| / current_price * 100
 
-    Penalties:
-    - cushion_pct < 1.0%: -20 points
-    - cushion_pct < 2.0%: -10 points
-    - cushion_pct >= 2.0%: 0 (no penalty)
+    Thresholds are per-strategy, sourced from StrategyDefinition (OTA-770):
+    - cushion_pct < severe_threshold: -20 points
+    - cushion_pct < moderate_threshold: -10 points
+    - cushion_pct >= moderate_threshold: 0 (no penalty)
 
     Only applies to trades with a short strike (credit spreads).
     Returns (penalty: int, cushion_pct: float).
-
-    # TODO: Phase 2.4.x — when ATR(14) is available, add flag:
-    # "Insufficient buffer — one average daily move breaches short strike"
-    # when cushion < 1.0 × ATR(14). This is a flag, not a gate.
     """
     short_strike = trade.get("short_strike") or trade.get("sell_strike")
     if short_strike is None or current_price is None or current_price == 0:
@@ -135,9 +136,9 @@ def cushion_penalty(trade: dict, current_price: float) -> tuple:
 
     pct = abs(current_price - short_strike) / current_price * 100
 
-    if pct < 1.0:
+    if pct < severe_threshold:
         return -20, pct
-    elif pct < 2.0:
+    elif pct < moderate_threshold:
         return -10, pct
     return 0, pct
 
@@ -283,7 +284,11 @@ def _score_credit_spread_strategy(
         breakdown.append({"key": k, "score": comp_score, "weight": w, "contribution": contribution})
 
     # Apply cushion penalty (post-scoring adjustment)
-    _cushion_penalty, _cushion_pct = cushion_penalty(best, underlying_price)
+    _cushion_penalty, _cushion_pct = cushion_penalty(
+        best, underlying_price,
+        severe_threshold=strategy.cushion_severe_threshold,
+        moderate_threshold=strategy.cushion_moderate_threshold,
+    )
     score = raw_score
     penalty_reason = None
     if _cushion_penalty != 0:

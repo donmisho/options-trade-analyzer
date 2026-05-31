@@ -50,21 +50,19 @@ def cushion_penalty_moderate(named_values: dict, params: dict) -> bool:
     moderate band. Returns False (triggers junction score_penalty)
     when cushion_pct IS in [lower_threshold, upper_threshold).
 
-    Legacy bands from strategy_scorer.py:138-142:
-      cushion_pct < 1.0  → severe (handled by condition_expression rule)
-      cushion_pct in [1.0, 2.0) → moderate (THIS formula)
-      cushion_pct >= 2.0 → no penalty
+    The severe band (cushion_pct < severe_threshold) is handled by
+    the adj_cushion_penalty_severe condition_expression rule.
 
-    Params (from junction):
-      lower_threshold: float (default 1.0) — inclusive lower bound
-      upper_threshold: float (default 2.0) — exclusive upper bound
+    Params (required, from junction — OTA-770):
+      lower_threshold: float — inclusive lower bound of moderate band
+      upper_threshold: float — exclusive upper bound of moderate band
     """
     cushion_pct = named_values.get("cushion_pct")
     if cushion_pct is None:
         return True  # missing data → no penalty
 
-    lower = params.get("lower_threshold", 1.0)
-    upper = params.get("upper_threshold", 2.0)
+    lower = params["lower_threshold"]
+    upper = params["upper_threshold"]
 
     in_moderate_band = lower <= cushion_pct < upper
     return not in_moderate_band  # False when in band → triggers penalty

@@ -20,6 +20,8 @@ class StrategyDefinition:
     label: str
     description: str
     compatible_structures: List[str]    # e.g. ['bull_put_credit', 'bear_call_credit']
+    # dte_min / dte_max: interim in-code canonical source for both the scorer
+    # and the classifier. Pending engine_strategies read-side repoint (OTA-757 / OTA-779).
     dte_min: int
     dte_max: int
     scoring_weights: dict   # metric_name → weight (must sum to 1.0)
@@ -33,6 +35,10 @@ class StrategyDefinition:
     credit_pct_max: float = 1.0         # max credit as % of spread width
     exit_profit_pct: float = 0.50       # take profit target as % of max profit
     exit_loss_multiplier: float = 2.0   # stop loss as multiple of credit received
+    # Per-strategy cushion penalty thresholds (OTA-770).
+    # Only meaningful for credit-spread strategies (SP, WG).
+    cushion_severe_threshold: float = 1.0   # cushion_pct below this → severe penalty
+    cushion_moderate_threshold: float = 2.0 # cushion_pct below this → moderate penalty
 
 
 STRATEGIES = {
