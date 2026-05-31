@@ -143,3 +143,109 @@ async def test_config_slice_reaches_scorer():
     assert captured_configs["trend-rider"] == {"dte_min": 35, "dte_max": 55}
     assert captured_configs["steady-paycheck"] == {}
     assert captured_configs["lottery-ticket"] == {}
+
+
+# ── OTA-771: Normalization isolation parity tests ─────────────────────
+
+
+def _wg_only_contracts(price=100.0):
+    """Contracts that only fit Weekly Grind DTE (14-21d), not Steady Paycheck."""
+    from datetime import date, timedelta
+
+    contracts = []
+    for dte_offset in [15, 18, 20]:
+        exp = (date.today() + timedelta(days=dte_offset)).strftime("%Y-%m-%d")
+        for strike_offset in [-8, -3, 0, 3, 8]:
+            strike = price + strike_offset
+            for opt_type in ["call", "put"]:
+                contracts.append({
+                    "strike": strike,
+                    "option_type": opt_type,
+                    "expiration": exp,
+                    "bid": 1.80,
+                    "ask": 2.20,
+                    "mid": 2.00,
+                    "last": 2.00,
+                    "volume": 200,
+                    "open_interest": 1000,
+                    "implied_volatility": 0.45,
+                    "delta": 0.40 if opt_type == "call" else -0.40,
+                    "gamma": 0.06,
+                    "theta": -0.04,
+                    "vega": 0.12,
+                })
+    return contracts
+
+
+def _sp_only_contracts(price=100.0):
+    """Contracts that only fit Steady Paycheck DTE (14-45d)."""
+    from datetime import date, timedelta
+
+    contracts = []
+    for dte_offset in [25, 35, 42]:
+        exp = (date.today() + timedelta(days=dte_offset)).strftime("%Y-%m-%d")
+        for strike_offset in [-10, -5, 0, 5, 10]:
+            strike = price + strike_offset
+            for opt_type in ["call", "put"]:
+                contracts.append({
+                    "strike": strike,
+                    "option_type": opt_type,
+                    "expiration": exp,
+                    "bid": 3.00,
+                    "ask": 3.50,
+                    "mid": 3.25,
+                    "last": 3.25,
+                    "volume": 150,
+                    "open_interest": 800,
+                    "implied_volatility": 0.35,
+                    "delta": 0.55 if opt_type == "call" else -0.55,
+                    "gamma": 0.04,
+                    "theta": -0.02,
+                    "vega": 0.08,
+                })
+    return contracts
+
+
+@pytest.mark.asyncio
+async def test_sp_normalization_independent_of_wg_candidates():
+    """OTA-771: SP normalized scores must be identical whether WG-eligible
+    candidates are present or absent in the same chain.
+
+    Run 1: SP contracts only.
+    Run 2: SP contracts + WG-only contracts mixed together.
+    SP scores must be byte-identical across both runs.
+    """
+    price = 100.0
+    sp_contracts = _sp_only_contracts(price)
+    wg_contracts = _wg_only_contracts(price)
+    combined = sp_contracts + wg_contracts
+
+    # Run 1: SP contracts only
+    provider1 = AsyncMock()
+    provider1.get_chain.return_value = {
+        "contracts": sp_contracts,
+        "underlying_price": price,
+    }
+    scores1, _ = await score_all_strategies("TEST", provider1)
+    sp_score1 = next(s for s in scores1 if s.strategy_key == "steady-paycheck")
+
+    # Run 2: SP + WG contracts combined
+    provider2 = AsyncMock()
+    provider2.get_chain.return_value = {
+        "contracts": combined,
+        "underlying_price": price,
+    }
+    scores2, _ = await score_all_strategies("TEST", provider2)
+    sp_score2 = next(s for s in scores2 if s.strategy_key == "steady-paycheck")
+
+    # SP scores must be identical — normalization is per-strategy
+    assert sp_score1.score == sp_score2.score, (
+        f"SP score changed: {sp_score1.score} (alone) vs {sp_score2.score} (with WG)"
+    )
+    assert sp_score1.metric_scores == sp_score2.metric_scores, (
+        "SP metric_scores changed when WG candidates were added"
+    )
+    if sp_score1.component_breakdown and sp_score2.component_breakdown:
+        assert sp_score1.component_breakdown == sp_score2.component_breakdown, (
+            "SP component_breakdown changed when WG candidates were added"
+        )
