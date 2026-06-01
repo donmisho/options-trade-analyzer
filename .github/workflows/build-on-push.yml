@@ -19,12 +19,22 @@ jobs:
 
       - name: Verify Alembic migration accompanies any database.py change
         run: |
+          # Escape hatch: a commit that only touches non-schema content in
+          # database.py (docstrings, comments, type-only edits) may bypass the
+          # gate by including [skip-migration] in its message. Use sparingly —
+          # any real ORM/schema change still requires an Alembic revision.
+          MSG=$(git log -1 --format=%B)
+          if echo "$MSG" | grep -qF '[skip-migration]'; then
+            echo "[skip-migration] marker present in HEAD commit message; bypassing Alembic gate."
+            exit 0
+          fi
           DB_CHANGED=$(git diff --name-only HEAD~1 HEAD | grep -c "app/models/database.py" || true)
           MIGRATION_ADDED=$(git diff --name-only HEAD~1 HEAD | grep -c "^alembic/versions/" || true)
           if [ "$DB_CHANGED" -gt 0 ] && [ "$MIGRATION_ADDED" -eq 0 ]; then
             echo "ERROR: app/models/database.py changed but no Alembic revision added"
             echo "All schema changes must be expressed as Alembic migrations following expand/contract discipline."
             echo "Run: alembic revision --autogenerate -m \"description\""
+            echo "If this change does NOT alter the schema (docstring/comment only), add [skip-migration] to the commit message."
             exit 1
           fi
 
