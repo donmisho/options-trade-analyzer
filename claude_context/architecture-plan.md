@@ -1,6 +1,6 @@
 # architecture-plan.md
 
-**Last Updated:** 2026-05-19 UTC
+**Last Updated:** 2026-06-01 17:20 UTC
 **Instigating Ticket:** OTA-535 (Architecture Optimization Framework v1 Epic; absorbs cancelled OTA-244, OTA-246, OTA-247, OTA-474, OTA-475, OTA-521; merges and supersedes project-hierarchy.md; incorporates findings from the 2026-04-30 GPT-5.4 and Opus-4.7 architectural reviews; adds OTAR roadmap reference per OTA-495; links to OTAR-24 and OTAR-27)
 
 ---
@@ -41,7 +41,7 @@ The architectural patterns and engines documented in this file map onto OTAR Cat
 - **Trade Evaluation flow, Black-Scholes Probability Matrix** → OTAR-7 (Trade Evaluation Quality), OTAR-8 (Trade-to-Strategy Journey)
 - **Positions System (Pattern 4), Position Monitor Agent** → OTAR-10 (Position Management & Monitoring)
 - **Hard Gates Pipeline, Validation Baseline** → OTAR-7 (Trade Evaluation Quality), OTAR-21 (Backtesting & Strategy Validation)
-- **Insight Engine (Pattern 5), Multi-Agent Future, Agent 365 Readiness** → OTAR-16 (Insights & Agentic Platform)
+- **Insight Engine (Pattern 5), Insight Communicator, Multi-Agent Future, Agent 365 Readiness** → OTAR-16 (Insights & Agentic Platform)
 - **Pattern 7 (deployment topology), Schema Migration Strategy, Resource Shutdown Discipline, Two-Track Observability (Pattern 3), `azure-naming-conventions.md`** → OTAR-24 (Platform Architecture, Operations, and Observability)
 - **Backtesting Engine (planned)** → OTAR-21 (Backtesting & Strategy Validation)
 - **UX Foundation, `UI-GUIDANCE.md`** → OTAR-23 (UX Foundation & Design System)
@@ -76,7 +76,17 @@ Paper follows and live trades share an identical data model. The only distinguis
 
 ### Pattern 5 — Generic Insight Engine
 
-The Insight Engine is a domain-agnostic detect → score → communicate pattern. It is deployed first in the options domain but is designed for reuse in manufacturing, customer health, and any other monitoring scenario. Domain-specific behavior lives in per-domain `SKILL.md` files (`app/skills/insight-engine/domains/{domain}/SKILL.md`) and per-domain `ObservationSource` adapters. The deviation detection, insight data model, dashboard rendering, and dismissal flow are generic. See §5 for the full architecture and §1 Cross-App Reuse Plane for the multi-app strategy.
+The Insight Engine is a domain-agnostic, **deterministic, LLM-free evaluation framework**. It takes a stream of candidates (records of any shape, produced by a consumer-specific input adapter) and a strategy (a named selection of rules parametrised through a strategy×rule junction) and runs them through a fixed pipeline — gates → scoring → adjustments → verdict — emitting a per-candidate verdict plus a full per-rule decision trace. It has no built-in knowledge of any domain: it moves named values through rules that reference them by name, and the names, values, rules, thresholds, weights, and verdict bands all come from runtime configuration tables, never from code. The full mechanism specification is `insight_engine.md`; this document covers only where the engine lives in the deployed system and how OTA wires it.
+
+The engine lives in three package families with a hard boundary between generic and domain code:
+
+- `app/insight_engine/` — the generic engine core (config loader, rule evaluator, pipeline orchestrator, verdict assignment, result builder, persistence-sink interface). Imports nothing from any domain module, no LLM client, no DB driver — enforced at import time and in CI.
+- `app/ota_adapters/*` — OTA's input adapters, one per evaluation surface (`options_chain` for trade screening, `position_health` for health grading, `directional` for thesis comparison). The only place domain knowledge lives on the input side.
+- `app/options_rules/*` — OTA's registered `formula:<name>` rule-library implementations operating on options named values (`screening`, `position_health`, `directional`).
+
+Every `engine.evaluate(...)` call carries a `source_app_id` (`OTA`, `FFL`, `STK`, …) that the engine stamps onto every record it emits, so one shared bronze zone can hold the evaluation history of many applications. All rule-based evaluation in OTA flows through this one engine; there is no second evaluation path.
+
+This is distinct from the **Insight Communicator** (`app/agents/insight_communicator.py`, renamed from the former `insight_engine.py`): the Communicator is the Claude-based component that turns detected anomalies into human-readable `Insight` records on the dashboard. The Engine produces deterministic verdicts; the Communicator produces prose, and may consume the Engine's verdicts as one of its trigger signals. See §5 for both, and §1 Cross-App Reuse Plane for the multi-app strategy.
 
 ### Pattern 6 — Backend-for-Frontend Identity
 
@@ -103,7 +113,7 @@ The system is conceptually three layers, each with a different cadence and a dif
 
 **Layer 2 — Orchestration.** Scheduled and event-driven background work: position monitoring, daily snapshots, insight generation, scheduled re-evaluation. The user is not waiting. Latency budget is minutes. This is the APScheduler-driven background job path.
 
-**Layer 3 — Management (Agent 365).** Long-running, cross-cutting agents that observe, summarize, and escalate. Today this is the Insight Engine and the Position Monitor Agent. Future agents (the Multi-Agent Future, see §4) live here. Latency budget is hours-to-days. The audience is Don, not the immediate user session.
+**Layer 3 — Management (Agent 365).** Long-running, cross-cutting agents that observe, summarize, and escalate. Today this is the Insight Communicator and the Position Monitor Agent. Future agents (the Multi-Agent Future, see §4) live here. Latency budget is hours-to-days. The audience is Don, not the immediate user session.
 
 The layers communicate through the SQL database. They do not call each other directly. A Layer 2 monitor that detects a deviation writes to `insights`; the next Layer 1 page load reads from `insights`. This decoupling means a slow agent never blocks a user request, and a misbehaving agent doesn't take down the request path.
 
@@ -115,13 +125,13 @@ OTA is the first application in a planned TMTC ecosystem of AI-driven applicatio
 
 **Per-app storage accounts.** OTA's unstructured storage lives in `otaunstructured` (Standard LRS, West US 2, in `options-analyzer-rg`). The manufacturing app will get its own `mfgunstructured` account in its own resource group. One storage account per application domain — never a shared "tmtc-shared-storage" pattern.
 
-**Insight Engine as cross-domain.** Pattern 5 is intentionally domain-agnostic. The options-domain `SKILL.md` and `ObservationSource` adapters are isolated under `app/skills/insight-engine/domains/options/`. When the manufacturing app ships, its insight engine reuses the same generic core with `domains/manufacturing/` SKILL.md files and adapters. Domain-specific options logic must never leak into the generic engine; if it would, it gets refactored before merge.
+**Insight Engine as cross-domain.** Pattern 5 is intentionally domain-agnostic. The generic engine core lives in `app/insight_engine/` and imports nothing from any domain module; OTA's domain logic is isolated in its input adapters (`app/ota_adapters/*`) and rule libraries (`app/options_rules/*`). When a second application ships, it reuses the identical engine core, supplies its own adapters, rule-library formulas, and runtime configuration tables, stamps its own `source_app_id`, and points its persistence sink at the same shared bronze zone. Domain-specific options logic must never leak into the generic engine; the import-time guard and CI fail the build if it does.
 
 **Framework-portable component tagging.** Components in `web/src/` that are intended for cross-app reuse are tagged `framework-portable` (e.g., `SymbolSearch`). The tag is a signal to maintainers that the component should not absorb OTA-specific assumptions. Same convention applies to backend modules where appropriate.
 
 What is *not* cross-app: scoring engines (`app/analysis/`), strategy definitions, hard gates, the Schwab adapter, the trade evaluation prompt schema, and anything in `app/skills/claude-trade-agent/`. These are options-domain logic and will not appear in the manufacturing app.
 
-The cross-app boundary is enforced by the SKILL.md domain split, the `framework-portable` tag, and per-app storage accounts. There is no formal package boundary today; if the cross-app surface grows large enough to warrant one (e.g., extracting the Insight Engine into a Python package), that's an explicit future decision.
+The cross-app boundary is enforced by the `app/insight_engine/` package boundary (import-time guard + CI), the `framework-portable` tag, and per-app storage accounts. Lifting `app/insight_engine/` out of OTA into its own installable package or repo is the explicit final step, taken once the engine has parity across all OTA consumers and a second application is ready to adopt it.
 
 ---
 
@@ -150,8 +160,8 @@ The user clicks a candidate to evaluate it.
 The user clicks "Follow this trade."
 
 13. **Position created.** `/api/v1/positions/follow` writes a row to `positions` with `source=PAPER`, `status=FOLLOWING`, the entry price, the strikes, the expiration, and Claude's exit levels (target, stop, time-stop). Same table that holds live positions (Pattern 4).
-14. **Position Monitor Agent picks it up.** Layer 2. The next scheduled run of the monitor (daily after market close, or on-demand) reads the position, computes the current health grade against the deterministic math in `app/analysis/health_grade.py`, and if a threshold is crossed (e.g., grade drops to D), calls the Insight Engine.
-15. **Insight Engine generates.** `app/agents/insight_engine.py` calls Claude with the deviation context plus the options-domain SKILL.md, gets a structured insight, writes it to the `insights` table with `domain='options'`. Pattern 5.
+14. **Position Monitor Agent picks it up.** Layer 2. The next scheduled run of the monitor (daily after market close, or on-demand) reads the position, computes the current health grade against the deterministic math in `app/analysis/health_grade.py`, and if a threshold is crossed (e.g., grade drops to D), calls the Insight Communicator.
+15. **Insight Communicator generates.** `app/agents/insight_communicator.py` (the renamed Claude-based component, formerly `insight_engine.py`) calls Claude with the deviation context plus the options-domain SKILL.md, gets a structured insight, writes it to the `insights` table with `domain='options'`. This is the Communicator, not the deterministic Insight Engine of Pattern 5 — see §5.
 16. **Dashboard reads.** Next time the user loads the dashboard, the InsightCard component pulls from `insights` filtered by `domain='options'` and renders the alert.
 
 End to end: user action → Layer 1 sync work → Layer 2 background monitoring → Layer 3 cross-cutting insights → user sees the result. The patterns interlock; pulling any one out breaks the chain.
@@ -176,7 +186,7 @@ The active entities by functional area:
 
 **Symbol reference and provider state.** `symbol_reference` (8,568 rows of symbol metadata including `apiSymbol` mappings for index symbols; lives in SQL because loading into browser memory was rejected as an architectural decision — too much data, slow page loads), `provider_state` (lifecycle state per provider per environment; populated under OTA-525).
 
-**Insights.** `insights` (the generic Insight Engine output — domain, severity, title, body, source position_id, dismissed_at, surfaced_at).
+**Insights.** `insights` (the Insight Communicator output — domain, severity, title, body, source position_id, dismissed_at, surfaced_at). Distinct from `bronze_evaluations`, the Insight Engine's deterministic evaluation store (see Bronze Evaluation Store below).
 
 **Watchlists.** `watchlists` and `watchlist_items` — backend is the sole source of truth (the previous "localStorage only" claim in older docs is wrong and was removed in the CLAUDE.md rewrite).
 
@@ -222,6 +232,16 @@ Deferred contract migrations are tracked perpetually under OTA-523 (Database Con
 The one-time production stamping procedure (for existing databases transitioning from `create_all()` to Alembic) is documented in `docs/runbooks/alembic-stamp-prod.md`.
 
 The legacy `app/models/migrations.py` hand-written migration runner is superseded by Alembic for all new schema changes. It remains in place only for reference; it no longer runs at startup.
+
+## Bronze Evaluation Store and the Read-Path
+
+The Insight Engine (Pattern 5; full spec in `insight_engine.md`) persists every deterministic evaluation it runs into a **bronze** landing zone. This is the OLTP write-path; the analytics read-path is a separate, downstream concern documented here because it is out of scope for the engine itself.
+
+**Write-path — a single `bronze_evaluations` table.** The engine emits two logical record streams per run — candidate snapshots (one per candidate) and evaluation decisions (one per rule evaluation) — through its sink interface (`write_snapshots`, `write_decisions`). The **as-built OTA sink lands both streams into one physical Azure SQL table, `dbo.bronze_evaluations`, discriminated by a `record_type` column (`SNAPSHOT` | `DECISION`)**, append-only, no foreign keys. The table follows a **hybrid OLTP + schema-on-read** shape: any field used in a `WHERE`/`JOIN`/`GROUP BY` is promoted to a typed column (`source_app_id`, `record_type`, `run_id`, `snapshot_id`, `evaluated_at`, `candidate_type`, `symbol`, `user_id`, `subject_type`/`subject_id`, `final_score`, `verdict`, `rule_key`, `phase`, `passed`, …); everything else — decision reasons, parameters evaluated, formula traces, the full named-value set — lives in a versioned `payload_json` (`nvarchar(max)`). A companion `bronze_payload_contract` registry self-describes each `(record_type, discriminator_value, payload_version)` payload shape for read-path tooling. The as-built DDL is the source of truth for column definitions (`insight_engine-schema-ddl.md`).
+
+> **Reconciliation note.** `insight_engine.md` §4.3 illustrates the persisted contract as *two logical streams* and renders them as two example tables (`candidate_snapshots`, `evaluation_decisions`). The as-built OTA sink collapses both streams into the single `bronze_evaluations` table discriminated by `record_type`. The two-stream **contract** is unchanged (it is the sink's choice how to physicalise it); the as-built **storage** is one table. Where the two differ, the DDL and this section win.
+
+**Read-path — Databricks bronze → silver → gold (Phase 2/3, planned).** The relational core columns serve operational queries directly (per-position trace, per-symbol history, per-app audit) via typed projection views over `bronze_evaluations`. Beyond that, the analytics expansion of `payload_json` is a downstream Databricks medallion pipeline: **bronze** ingests the append-only `bronze_evaluations` rows as-is; **silver** flattens and types the `payload_json` (resolving `payload_version` in the context of `candidate_type` for snapshots and `phase` for decisions, per the `bronze_payload_contract` registry) into normalised analytics tables; **gold** aggregates into the metrics that feed strategy-performance and rule-efficacy analysis. This medallion read-path is Phase 2/3 of the hybrid pattern and is **not built or owned by the engine** — the engine's responsibility ends at driving the sink write. It is documented here so the write-path shape is understood as the deliberate foundation for the later analytics expansion.
 
 ---
 
@@ -330,7 +350,7 @@ Routes live under `app/api/`. Current route file inventory:
 | `agent_routes.py` | `/agent` | Trade agent triage / deep-dive / followup pipeline. Uses the SDK-based AI stack (legacy). Scheduled for rename to `trade_evaluation_routes.py` and migration to the unified AI adapter. | Active but drift |
 | `agents_routes.py` | `/agents` | Position monitor scheduled-job status and on-demand runs. Scheduled for rename to `position_monitor_routes.py` to eliminate the singular/plural confusion. | Active |
 | `position_routes.py` | `/positions` | Position CRUD, follow, take, close. | Active |
-| `insight_routes.py` | `/insights` | Insight Engine output for the dashboard. | Active |
+| `insight_routes.py` | `/insights` | Insight Communicator output for the dashboard. | Active |
 | `dashboard_routes.py` | `/dashboard` | Dashboard layout, widget config, media SAS URL generation. | Active |
 | `watchlist_routes.py` | `/watchlist` | Flat watchlist CRUD. | Active — overlaps with named_watchlist_routes; consolidation pending |
 | `named_watchlist_routes.py` | `/watchlists` | Multi-list watchlist with scan sources. | Active — overlaps with watchlist_routes; consolidation pending |
@@ -359,7 +379,7 @@ app/skills/
 │   └── SKILL.md             # BATCH_TRIAGE_SYSTEM, DEEP_DIVE_SYSTEM, FOLLOWUP_SYSTEM
 ├── position-monitor/
 │   └── SKILL.md             # MONITOR_SYSTEM, DEVIATION_REPORT
-└── insight-engine/
+└── insight-communicator/   # renamed from insight-engine/
     ├── SKILL.md             # generic INSIGHT_SYSTEM
     └── domains/
         └── options/
@@ -427,8 +447,8 @@ Agents in the Layer 2/3 sense (background, scheduled, autonomous) live in `app/a
 
 | Agent | File | Purpose | Layer |
 |---|---|---|---|
-| Position Monitor | `position_monitor.py` | Daily health-grade refresh on every active position; threshold-crossing escalation to Insight Engine | 2 |
-| Insight Engine | `insight_engine.py` | Generic detect → score → communicate; called by Position Monitor on threshold crossings | 2 / 3 |
+| Position Monitor | `position_monitor.py` | Daily health-grade refresh on every active position; threshold-crossing escalation to the Insight Communicator | 2 |
+| Insight Communicator | `insight_communicator.py` | Claude-based anomaly → human-readable `Insight` prose (renamed from `insight_engine.py`); called by Position Monitor on threshold crossings. Distinct from the deterministic Insight Engine (`app/insight_engine/`, §5). | 2 / 3 |
 | Deviation Detector | `deviation_detector.py` | Identifies deviations from Claude's stored exit thesis. Currently not imported anywhere; needs verification of intent (alive vs abandoned) | needs verification |
 | Context Store | `context_store.py` | Symbol Context Store for caching ContextSource signals | 2 |
 | Telemetry | `telemetry.py` | `invoke_with_tracing()` context manager bridging OTel and `agent_run_log` | cross-cutting |
@@ -439,7 +459,7 @@ There is also a separate concept of "agents" — development tooling agents (UX 
 
 ## The Multi-Agent Future
 
-Today the agent layer is single-agent-per-task. Each agent (Position Monitor, Insight Engine) is a Python module with a `run()` method invoked by the scheduler. Communication between agents is via the SQL database.
+Today the agent layer is single-agent-per-task. Each agent (Position Monitor, Insight Communicator) is a Python module with a `run()` method invoked by the scheduler. Communication between agents is via the SQL database.
 
 The forward direction is multi-agent orchestration: a coordinator agent that decomposes a high-level user goal ("review my entire portfolio") into specialized sub-agent invocations (per-position monitor, cross-position correlation analysis, market-context summary, recommendation synthesis). The coordinator does not exist today. When it ships, it will live alongside the existing agents in `app/agents/coordinator.py` and use the same SKILL.md prompt convention.
 
@@ -491,7 +511,7 @@ Position lifecycle transitions:
 
 1. User clicks "Follow this trade" on an evaluated trade → row created with `source=PAPER`, `status=FOLLOWING`, exit levels populated.
 2. Position Monitor Agent picks it up → updates `health_grade` and `last_monitored_at` daily.
-3. Threshold crossings → Insight Engine called → insight written to `insights` table.
+3. Threshold crossings → Insight Communicator called → insight written to `insights` table.
 4. User clicks "Take Position" → status flips to `LIVE` (Phase 5 will additionally trigger brokerage order entry; today it records intent only).
 5. User clicks "Close" or position expires → status flips to `CLOSED`.
 
@@ -519,7 +539,57 @@ Adding a new gate is a single file plus one `register_gate(...)` call. Tests for
 
 ## The Insight Engine
 
-The Insight Engine (`app/agents/insight_engine.py`) is a generic detect → score → communicate pattern. It is invoked by other agents (today, the Position Monitor) when a threshold crossing or deviation is detected. It calls Claude with a generic system prompt (`app/skills/insight-engine/SKILL.md`), loads a domain-specific user-message template (`app/skills/insight-engine/domains/options/SKILL.md`), gets a structured insight back, validates it against the `Insight` Pydantic schema, and writes it to the `insights` table with `domain='options'`.
+The Insight Engine is OTA's generic, deterministic, LLM-free evaluation framework (Pattern 5). It is **not** the Claude-based component that the dashboard insight feed depends on — that is the Insight Communicator, documented separately below. The naming was deliberately reassigned: the new framework is the *Insight Engine*; the former `app/agents/insight_engine.py` was renamed *Insight Communicator*. The complete mechanism specification lives in `insight_engine.md`; this section covers only how the engine is structured and deployed inside OTA.
+
+**Package structure and boundary.** The engine is three package families with a hard generic/domain boundary:
+
+```
+app/insight_engine/        # generic core — config loader, rule evaluator, pipeline
+                           #   orchestrator, verdict assignment, result builder, sink
+                           #   interface. No domain imports, no LLM, no DB driver.
+                           #   Enforced at import time (_guard.py) and in CI.
+app/ota_adapters/          # OTA input adapters (the §5 contract) — domain knowledge
+│   ├── options_chain/     #   trade-screening candidates
+│   ├── position_health/   #   open-position candidates for health grading
+│   ├── directional/       #   directional thesis-comparison candidates
+│   └── _shared/           #   shared providers (Schwab client, Black-Scholes) reused
+│                          #   across adapters
+app/options_rules/         # OTA registered formula:<name> rule libraries
+    ├── screening/
+    ├── position_health/
+    └── directional/
+```
+
+**One engine, many consumers.** Every rule-based evaluation surface in OTA — trade screening, position-health grading, and directional thesis comparison — is a *consumer* of the same engine, each with its own input adapter, rule library, strategies, and verdict bands. There is no second evaluation path; duplicative rule logic across consumers is a design defect, not a shortcut. The engine resolves strategies by config lookup only — no `if strategy_id == …` branches — and reads all rule content (thresholds, weights, gate behaviour, ordering, bands) from the runtime configuration tables. `Scoring Parameters.xlsx` is a build-time seed for those tables only; after import the tables are authoritative.
+
+**The bronze contract.** The engine owns the *shape* of what gets persisted and *drives* the write, but never owns the write mechanics. It stamps `source_app_id`, `config_version`, and `evaluated_at` onto every record and emits two logical streams per run (candidate snapshots, evaluation decisions) through a sink interface. The as-built physical store is the single `bronze_evaluations` table discriminated by `record_type` — see §2 *Bronze Evaluation Store and the Read-Path* for the storage shape and the downstream Databricks read-path.
+
+### Engine-Sink Wiring
+
+The engine depends on a sink **interface**, never on a database:
+
+```python
+sink.write_snapshots(records: list[CandidateSnapshot]) -> None
+sink.write_decisions(records: list[EvaluationDecision]) -> None
+```
+
+At startup OTA injects a concrete sink — the Azure SQL sink that writes both record streams into `bronze_evaluations` (the same Entra-ID async engine described in §2; the sink owns connection, transactions, and retry, none of which the engine sees). The test harness injects an in-memory sink instead, so the engine can be exercised end-to-end with no database.
+
+This injection point is what makes the **shared cross-app bronze zone** physically possible. Today only OTA runs the engine, writing rows stamped `source_app_id='OTA'`. When a second application (STK, FFL, …) adopts the engine, it injects its own sink pointed at the **same** bronze zone and stamps its own `source_app_id`; the evaluation histories of all applications then coexist in one append-only store, queryable per-app or across apps. A hardcoded per-app write path would fragment the zone and defeat the cross-app analysis goal — which is precisely why the engine refuses to know about the physical store at all.
+
+## The LLM-Orchestration Contract
+
+This is a **consumer-side** orchestration principle governing OTA's use of Claude. It is explicitly *not* an engine concern — the engine is deterministic and LLM-agnostic (it has no LLM dependency). It is documented here because it constrains how the application layer wraps the engine.
+
+- **Determinism precedes the LLM.** The engine runs to completion — every disqualifying rule included — *before* any LLM call. An LLM must never be the thing that discovers a candidate violates a rule. The engine produces the verdict; the LLM, if used at all, only explains or elaborates on survivors.
+- **Minimise the number of calls, not the depth of each.** Cost is dominated by call count, not tokens per call. Prefer one rich, precise call over several thin ones — spend tokens within a call freely, save tokens by making fewer calls.
+- **Model selection is deliberate.** Match the model to the task: Opus (or the strongest available tier) for complex analytical narrative; Haiku for simple, mechanical text responses. The choice is made per call, not globally.
+
+These rules apply to the trade-evaluation path, the Insight Communicator, and any future agent that wraps engine output with Claude. They do not appear inside `app/insight_engine/`.
+
+## The Insight Communicator
+
+The Insight Communicator (`app/agents/insight_communicator.py`, renamed from the former `insight_engine.py`) is the Claude-based component that turns detected anomalies into human-readable dashboard insights. It is invoked by other agents (today, the Position Monitor) when a threshold crossing or deviation is detected — and may take the deterministic Insight Engine's verdicts as one of its trigger signals. It calls Claude with a generic system prompt (`app/skills/insight-communicator/SKILL.md`), loads a domain-specific user-message template (`app/skills/insight-communicator/domains/options/SKILL.md`), gets a structured insight back, validates it against the `Insight` Pydantic schema, and writes it to the `insights` table with `domain='options'`. Its Claude usage follows the LLM-Orchestration Contract above.
 
 The data model:
 
@@ -537,11 +607,9 @@ insights
 └── trace_id                # OTel link
 ```
 
-The dashboard reads from this table filtered by `domain`. The `InsightCard` component renders any insight regardless of domain.
+The dashboard reads from this table filtered by `domain`. The `InsightCard` component renders any insight regardless of domain. The `insights` table name is unchanged by the rename — it stores Communicator output, distinct from the engine's `bronze_evaluations`.
 
-The architectural commitment: any options-specific assumption stays in the options SKILL.md or the OptionsObservationSource adapter. The generic core (deviation detector, scorer, communicator, schema validator) does not import anything from `app/analysis/`. Violation of this rule is a code-review fail.
-
-The "Today's Actions" widget on the dashboard is currently a placeholder that will be wired to the Insight Engine output once the engine is processing live data flow. Until then, the widget shows static example content.
+The "Today's Actions" widget on the dashboard is currently a placeholder that will be wired to the Communicator output once it is processing live data flow. Until then, the widget shows static example content.
 
 ## Market Intelligence Aggregator
 
@@ -653,9 +721,24 @@ app/
 │   ├── health_grade.py           # Position health grade computation
 │   ├── hard_gates/               # Registered hard gates sub-package (EarningsInWindowGate, NegativeEVGate)
 │   └── scoring_factors/          # Per-metric scoring factor implementations
+├── insight_engine/               # Generic deterministic evaluation engine (Pattern 5)
+│   ├── _guard.py                 # Import-time guard — no domain/LLM/DB imports
+│   ├── loader.py                 # Config-table loader + startup validation
+│   ├── pipeline.py               # Fixed-order orchestrator (gates → score → adjust → verdict)
+│   ├── result.py                 # ResultRecord builder (full per-rule trace)
+│   └── sink.py                   # Persistence sink interface (injected at startup)
+├── ota_adapters/                 # OTA input adapters (§5 contract) — domain side
+│   ├── options_chain/            # Trade-screening candidates
+│   ├── position_health/          # Open-position candidates for health grading
+│   ├── directional/              # Directional thesis-comparison candidates
+│   └── _shared/                  # Shared providers (Schwab client, Black-Scholes)
+├── options_rules/                # Registered formula:<name> rule libraries
+│   ├── screening/
+│   ├── position_health/
+│   └── directional/
 ├── agents/
 │   ├── position_monitor.py       # Daily position health refresh, threshold escalation
-│   ├── insight_engine.py         # Generic detect → score → communicate
+│   ├── insight_communicator.py   # Claude-based anomaly → Insight prose (renamed from insight_engine.py)
 │   ├── deviation_detector.py     # Deviation-from-thesis detection (alive-or-abandoned needs verification)
 │   ├── context_store.py          # Symbol Context Store
 │   └── telemetry.py              # invoke_with_tracing(), Application Insights bridge
@@ -666,7 +749,7 @@ app/
 │   ├── skill_loader.py           # Template engine ({{var}} + {{#if}})
 │   ├── claude-trade-agent/SKILL.md
 │   ├── position-monitor/SKILL.md
-│   └── insight-engine/
+│   └── insight-communicator/     # Renamed from insight-engine/
 │       ├── SKILL.md
 │       └── domains/options/SKILL.md
 └── validators/
@@ -893,6 +976,7 @@ The Architecture Optimization Epic (OTA-535) tracks the active drift items ident
 
 | Date | Ticket | Change |
 |---|---|---|
+| 2026-06-01 17:20 UTC | OTA-808 | Migrated-engine architecture. (1) Reframed Pattern 5 to the generic, deterministic, LLM-free Insight Engine with its three package families (`app/insight_engine/` core, `app/ota_adapters/*` input adapters, `app/options_rules/*` rule libraries) and the `source_app_id` stamp. (2) Split the former §5 "The Insight Engine" section into **The Insight Engine** (generic framework: package structure, one-engine-many-consumers, bronze contract, **Engine-Sink Wiring** subsection) and **The Insight Communicator** (the Claude-based component renamed from `insight_engine.py`, still writing the `insights` table). (3) Added the **LLM-Orchestration Contract** section (consumer-side: determinism precedes the LLM; minimise call count not depth; deliberate model selection — explicitly not an engine concern). (4) Added §2 **Bronze Evaluation Store and the Read-Path**: the as-built **single `bronze_evaluations` table discriminated by `record_type`** (`SNAPSHOT`/`DECISION`), hybrid OLTP + schema-on-read, feeding a planned Databricks bronze/silver/gold read-path (Phase 2/3, out of engine scope) — with a reconciliation note that `insight_engine.md` §4.3's two-table illustration is the logical contract, while the as-built storage is one table (DDL wins). (5) Updated the §7 backend directory map with the three engine packages and renamed `insight_engine.py`→`insight_communicator.py` / `skills/insight-engine/`→`skills/insight-communicator/`. (6) Swept Communicator references (Three-Layer Architecture, End-to-End Data Flow, §2 Insights model, Key API Endpoints, §4 skills tree + Agent Inventory + Multi-Agent Future, Positions lifecycle, Cross-App Reuse Plane, OTAR mapping). **Note:** OTA-808 authored the generic-engine/Communicator split and the LLM-orchestration contract that OTA-812 was scoped to add — OTA-812's commit (`08f3133`) landed only a SKILL.md heading rename and never edited this file; consolidated here per Don's direction. |
 | 2026-05-19 UTC | OTA-672 | Pattern 1: added contract note — providers consume api_symbol-form strings; canonical-to-API translation is the caller's responsibility via `to_api_symbol_cached`. |
 | 2026-05-11 UTC | OTA-635 | Strategy System section amended. Removed the "Strategy identity is not tied to credit vs debit structure" framing, which proved trading-incorrect in production: bear_put debit spreads were scored against Steady Paycheck (a credit-focused strategy) producing scores like 57.00 while the narrative simultaneously rejected them as structurally incompatible — generating contradictory verdicts (WAIT pill with PASS narrative). New framing: strategy and structure remain technically orthogonal axes, but each strategy declares an explicit `compatible_structures` map. The scorer gates at pipeline entry; incompatible pairs return null and never reach Foundry. Canonical compatibility map lives in `business-rules.md` → Strategy Scoring. This decision is also a prerequisite for the future strategy-taxonomy redesign (mechanics-based names cannot replace cute names while pretending strategies are structure-agnostic). |
 | 2026-05-06 UTC | OTA-601 | Added § Deployment Architecture subsection "Cold-start and runtime OS dependencies" recording the OTA-553 Option B decision: ODBC Driver 18 install in `app/main.py` lifespan is the intentional pattern. Documents the ~90s cold-start cost mitigated by Always On, the deferred Option A alternative (custom container image), and the explicit prohibition against retrying the user-supplied `startup.sh` approach (OTA-545 Phase 2, reverted 2026-05-02). |
