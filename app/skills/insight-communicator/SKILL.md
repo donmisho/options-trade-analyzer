@@ -8,7 +8,7 @@ description: >
   domain_context field.
 ---
 
-# Insight Engine — Generic Pattern
+# Insight Communicator — Generic Pattern
 
 ---
 
