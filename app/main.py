@@ -36,6 +36,7 @@ from app.auth.dependencies import init_auth
 from app.providers.factory import ProviderRegistry
 from app.api.market_routes import router as market_router, init_market_routes
 from app.api.config_routes import router as config_router
+from app.api.engine_config_routes import router as engine_config_router
 from app.api.analysis_routes import router as analysis_router, init_analysis_routes
 from app.api.schwab_auth_routes import router as schwab_auth_router, init_schwab_auth_routes
 from app.providers.schwab_token_manager import SchwabTokenManager
@@ -494,6 +495,7 @@ app.add_middleware(CSRFMiddleware)
 app.include_router(identity_router, prefix="/api/v1")
 app.include_router(market_router, prefix="/api/v1")
 app.include_router(config_router, prefix="/api/v1")
+app.include_router(engine_config_router, prefix="/api/v1")
 app.include_router(analysis_router, prefix="/api/v1")
 app.include_router(schwab_auth_router, prefix="/api/v1")
 app.include_router(evaluation_router, prefix="/api/v1")
