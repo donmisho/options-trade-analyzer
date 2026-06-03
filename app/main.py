@@ -313,6 +313,27 @@ async def lifespan(app: FastAPI):
     register_gate(CreditDebitQualityGate())    # OTA-780: credit/debit quality gate
     logger.info("Hard gates registered: earnings_in_window, negative_ev, dte_filter, credit_debit_quality")
 
+    # 6d. Hydrate the Insight Engine config from Azure SQL + wire the bronze sink
+    #     (OTA-818 + OTA-758). Reads the five engine_* tables once, runs the
+    #     OTA-699 fail-closed validator, captures the config-version hash, and
+    #     stashes the resolved per-strategy RuleSets + injected sink behind a
+    #     module-level accessor (get_engine_runtime). Mirrors the hard-gate
+    #     registry pattern above.
+    #
+    #     A validation failure here is LOUD and FATAL by design (insight_engine.md
+    #     §6.6) — it is intentionally NOT swallowed, unlike the init_db() guard at
+    #     step 1. The engine refuses to evaluate on invalid config. Per OTA-818,
+    #     a live-seed validation failure is OTA-815 territory: do not patch config
+    #     in code to make validation pass.
+    from app.models.session import async_session as _engine_session_factory
+    from app.ota_adapters.engine_runtime import init_engine_runtime
+    _engine_runtime = await init_engine_runtime(_engine_session_factory)
+    logger.info(
+        "Insight Engine config hydrated: config_version=%s, %d strategies resolved",
+        _engine_runtime.config_version,
+        len(_engine_runtime.config.rule_sets),
+    )
+
     # 7. Initialize OpenTelemetry → Application Insights (agent observability)
     appinsights_cs = secrets_manager.get("applicationinsights-connection-string")
     init_agent_telemetry(appinsights_cs)
