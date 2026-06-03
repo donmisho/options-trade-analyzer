@@ -9,9 +9,14 @@ Create the two bronze persistence tables per insight_engine-schema-ddl.md §3:
 
 Additive only — no ALTER/DROP on any pre-existing table.
 
-Revision ID: a1b2c3d4e5f6
+Revision ID: ff832488933d
 Revises: 47c970f0a1f2
 Create Date: 2026-05-29 15:00:00.000000
+
+Note (OTA-819): revision id corrected from the original 'a1b2c3d4e5f6', which
+collided with the deploy_log migration (20260506_1400) and broke `alembic
+upgrade head`, leaving these bronze tables uncreated in dev. The id below is
+unique; down_revision is unchanged.
 """
 from typing import Sequence, Union
 
@@ -20,7 +25,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'a1b2c3d4e5f6'
+revision: str = 'ff832488933d'
 down_revision: Union[str, Sequence[str], None] = '47c970f0a1f2'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
