@@ -47,6 +47,7 @@ from app.api.engine_config_store import (
     NotFoundError,
     SharedRowError,
 )
+from app.api.engine_config_validation import ConfigSaveValidationError
 from app.auth.dependencies import require_read, require_write
 from app.insight_engine.models import Phase
 from app.models.session import get_db
@@ -331,11 +332,18 @@ def _http(exc: EngineConfigError) -> NoReturn:
 async def _run(coro) -> Any:
     """Await a store coroutine, mapping its typed errors to HTTP responses.
 
-    EngineConfigError subclasses map to 403/404/409; a JSON ``ValueError`` from
-    the write path maps to 422 — a bad payload never reaches the DB CHECK as a 500.
+    EngineConfigError subclasses map to 403/404/409. A save that would fail
+    engine load (OTA-783) maps to 422 carrying the loader/validator's structured
+    error identity (same codes/messages OTA-699 emits) — not a re-spelled copy.
+    A JSON ``ValueError`` from the write path also maps to 422.
     """
     try:
         return await coro
+    except ConfigSaveValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"message": "Config validation failed", "errors": exc.errors},
+        )
     except EngineConfigError as exc:
         _http(exc)
     except ValueError as exc:

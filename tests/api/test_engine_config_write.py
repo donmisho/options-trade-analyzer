@@ -120,14 +120,16 @@ _STRATEGY = {
     "dte_max": 45,
 }
 
+# Loadable by the engine: condition_expression is in the closed set (§6.3) and
+# the schema's single param is supplied by any junction that binds it.
 _RULE = {
     "rule_key": "delta_band",
     "phase": "gate",
     "tier": "RAW",
-    "intent": "Delta within band",
-    "condition_expression": "delta BETWEEN low AND high",
+    "intent": "Delta at or above floor",
+    "condition_expression": ">=",
     "referenced_named_values": ["delta"],
-    "parameter_schema": {"low": {"type": "number"}, "high": {"type": "number"}},
+    "parameter_schema": {"threshold": {"type": "number"}},
 }
 
 
@@ -177,7 +179,7 @@ async def test_rule_crud_roundtrip(client):
     body = r.json()
     assert body["rule_key"] == "delta_band"
     assert body["owner_app_id"] == "OTA"
-    assert body["parameter_schema"] == {"low": {"type": "number"}, "high": {"type": "number"}}
+    assert body["parameter_schema"] == {"threshold": {"type": "number"}}
 
     r = await client.put(
         "/api/v1/config/rules/delta_band",
@@ -205,7 +207,7 @@ async def test_junction_crud_roundtrip_and_param_storage(client):
         "stop_if_fail": True,
         "score_penalty": -10.0,
         "weight": 0.25,
-        "parameters": {"low": 0.2, "high": 0.35},
+        "parameters": {"threshold": 0.2},
         "rationale": "core gate",
     }
     r = await client.post("/api/v1/config/junction", json=payload)
@@ -217,7 +219,7 @@ async def test_junction_crud_roundtrip_and_param_storage(client):
     assert body["score_penalty"] == -10.0
     assert body["weight"] == 0.25
     # Variable params round-trip from the JSON column as an object
-    assert body["parameters"] == {"low": 0.2, "high": 0.35}
+    assert body["parameters"] == {"threshold": 0.2}
     assert body["strategy_key"] == "steady_paycheck"
     assert body["rule_key"] == "delta_band"
 
@@ -227,7 +229,7 @@ async def test_junction_crud_roundtrip_and_param_storage(client):
 
         raw = await s.scalar(select(store.engine_junction.c.parameters))
         assert isinstance(raw, str)
-        assert json.loads(raw) == {"low": 0.2, "high": 0.35}
+        assert json.loads(raw) == {"threshold": 0.2}
 
     r = await client.put(
         "/api/v1/config/junction/steady_paycheck/delta_band",
@@ -318,7 +320,7 @@ async def test_duplicate_natural_key_conflict(client):
 
     assert (await client.post("/api/v1/config/rules", json=_RULE)).status_code == 201
     j = {"strategy_key": "steady_paycheck", "rule_key": "delta_band",
-         "evaluation_order": 1, "stop_if_fail": False}
+         "evaluation_order": 1, "stop_if_fail": False, "parameters": {"threshold": 0.2}}
     assert (await client.post("/api/v1/config/junction", json=j)).status_code == 201
     assert (await client.post("/api/v1/config/junction", json=j)).status_code == 409
 
@@ -327,7 +329,7 @@ async def test_duplicate_natural_key_conflict(client):
 async def test_delete_rule_in_use_conflict(client):
     await _seed_strategy_and_rule(client)
     j = {"strategy_key": "steady_paycheck", "rule_key": "delta_band",
-         "evaluation_order": 1, "stop_if_fail": False}
+         "evaluation_order": 1, "stop_if_fail": False, "parameters": {"threshold": 0.2}}
     assert (await client.post("/api/v1/config/junction", json=j)).status_code == 201
 
     # rule is bound → delete blocked with a clear conflict, not an FK 500

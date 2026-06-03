@@ -4,8 +4,12 @@ Engine config write store (OTA-782).
 The durable maintenance surface for the four editable ``engine_*`` configuration
 tables — ``engine_strategies``, ``engine_rules``, ``engine_strategy_rule_junction``,
 ``engine_lookups`` — that replaces spreadsheet edits (``insight_engine.md`` §6.2).
-This is the **write transport only**; save-time engine-load validation is OTA-783
-and is wired here as a seam (:func:`run_save_validation`) but not implemented.
+
+Each write is staged, then validated against the engine-load path before commit
+(:func:`_commit_with_validation` → ``engine_config_validation.validate_pending``,
+OTA-783): a write that would prevent a clean engine load is rejected and rolled
+back, so the tables never hold a non-loadable state. The validation reuses the
+OTA-699 checks — it is not a parallel validator.
 
 Why SQLAlchemy Core, not ORM
 ----------------------------
@@ -238,22 +242,30 @@ def _row_to_dict(row: Any, table_name: str) -> RawRow:
     return data
 
 
-# ── Validation seam (OTA-783) ─────────────────────────────────────────────
+# ── Save-time validation (OTA-783) ────────────────────────────────────────
 
 
-async def run_save_validation(
-    session: AsyncSession, *, entity: str, action: str, data: RawRow
-) -> None:
-    """Save-time engine-load validation seam.
+async def _commit_with_validation(session: AsyncSession) -> None:
+    """Flush the staged write, validate via the OTA-699 engine-load path, commit.
 
-    OTA-782 ships the write transport only. OTA-783 implements the save-time
-    validation that mirrors engine load (weight-sum, monotonic bands, formula
-    coverage, parameter conformance, junction FK integrity, …) and will run
-    here, inside the same transaction, before commit. Until then this is a no-op.
+    This is the OTA-782 validation seam, now realized (OTA-783). The DML is
+    already staged on ``session``; we flush so the change is visible inside the
+    transaction, run ``engine_config_validation.validate_pending`` (which reuses
+    ``load_config`` + ``validate_config``), and commit only if it passes. A
+    validation failure rolls back — no partial / non-loadable state is persisted.
 
-    ``entity`` ∈ {strategy, rule, junction, lookup}; ``action`` ∈ {create, update}.
+    Imported lazily to avoid a module-level cycle (the validation module imports
+    this module's Table objects).
     """
-    return None
+    from app.api import engine_config_validation  # lazy: breaks import cycle
+
+    await session.flush()
+    try:
+        await engine_config_validation.validate_pending(session)
+    except engine_config_validation.ConfigSaveValidationError:
+        await session.rollback()
+        raise
+    await session.commit()
 
 
 # ── Strategies ────────────────────────────────────────────────────────────
@@ -268,7 +280,6 @@ async def create_strategy(session: AsyncSession, data: RawRow) -> RawRow:
         engine_strategies.c.strategy_key == payload["strategy_key"],
         what=f"strategy {payload['strategy_key']!r}",
     )
-    await run_save_validation(session, entity="strategy", action="create", data=payload)
     await _insert(session, engine_strategies, payload)
     return await _get_strategy(session, payload["strategy_key"])
 
@@ -279,14 +290,13 @@ async def update_strategy(session: AsyncSession, strategy_key: str, data: RawRow
     payload = _strategy_values({**data, "strategy_key": strategy_key})
     payload.pop("strategy_key")  # natural key is immutable via PUT path
     payload["updated_at"] = _utcnow()
-    await run_save_validation(session, entity="strategy", action="update", data=payload)
     await session.execute(
         update(engine_strategies)
         .where(engine_strategies.c.owner_app_id == OTA_APP_ID)
         .where(engine_strategies.c.strategy_key == strategy_key)
         .values(**payload)
     )
-    await session.commit()
+    await _commit_with_validation(session)
     return await _get_strategy(session, strategy_key)
 
 
@@ -306,7 +316,7 @@ async def delete_strategy(session: AsyncSession, strategy_key: str) -> RawRow:
         .where(engine_strategies.c.owner_app_id == OTA_APP_ID)
         .where(engine_strategies.c.strategy_key == strategy_key)
     )
-    await session.commit()
+    await _commit_with_validation(session)
     return existing
 
 
@@ -352,7 +362,6 @@ async def create_rule(session: AsyncSession, data: RawRow) -> RawRow:
         engine_rules.c.rule_key == payload["rule_key"],
         what=f"rule {payload['rule_key']!r}",
     )
-    await run_save_validation(session, entity="rule", action="create", data=payload)
     await _insert(session, engine_rules, payload)
     return await _get_rule(session, payload["rule_key"])
 
@@ -363,14 +372,13 @@ async def update_rule(session: AsyncSession, rule_key: str, data: RawRow) -> Raw
     payload = _rule_values({**data, "rule_key": rule_key})
     payload.pop("rule_key")
     payload["updated_at"] = _utcnow()
-    await run_save_validation(session, entity="rule", action="update", data=payload)
     await session.execute(
         update(engine_rules)
         .where(engine_rules.c.owner_app_id == OTA_APP_ID)
         .where(engine_rules.c.rule_key == rule_key)
         .values(**payload)
     )
-    await session.commit()
+    await _commit_with_validation(session)
     return await _get_rule(session, rule_key)
 
 
@@ -391,7 +399,7 @@ async def delete_rule(session: AsyncSession, rule_key: str) -> RawRow:
         .where(engine_rules.c.owner_app_id == OTA_APP_ID)
         .where(engine_rules.c.rule_key == rule_key)
     )
-    await session.commit()
+    await _commit_with_validation(session)
     return existing
 
 
@@ -448,7 +456,6 @@ async def create_junction(session: AsyncSession, data: RawRow) -> RawRow:
             f"junction ({strategy_key!r}, {rule_key!r}) already exists"
         )
     payload = _junction_values(strat["strategy_id"], rule["rule_id"], data)
-    await run_save_validation(session, entity="junction", action="create", data=payload)
     await _insert(session, engine_junction, payload)
     return await _get_junction(session, strategy_key, rule_key)
 
@@ -463,14 +470,13 @@ async def update_junction(
     payload.pop("strategy_id")  # binding identity is immutable via PUT path
     payload.pop("rule_id")
     payload["updated_at"] = _utcnow()
-    await run_save_validation(session, entity="junction", action="update", data=payload)
     await session.execute(
         update(engine_junction)
         .where(engine_junction.c.strategy_id == strat["strategy_id"])
         .where(engine_junction.c.rule_id == rule["rule_id"])
         .values(**payload)
     )
-    await session.commit()
+    await _commit_with_validation(session)
     return await _get_junction(session, strategy_key, rule_key)
 
 
@@ -483,7 +489,7 @@ async def delete_junction(
             engine_junction.c.junction_id == existing["junction_id"]
         )
     )
-    await session.commit()
+    await _commit_with_validation(session)
     return existing
 
 
@@ -546,7 +552,6 @@ async def create_lookup(session: AsyncSession, data: RawRow) -> RawRow:
         engine_lookups.c.lookup_key == payload["lookup_key"],
         what=f"lookup {payload['lookup_set']!r}/{payload['lookup_key']!r}",
     )
-    await run_save_validation(session, entity="lookup", action="create", data=payload)
     await _insert(session, engine_lookups, payload)
     return await _get_lookup(session, payload["lookup_set"], payload["lookup_key"])
 
@@ -561,7 +566,6 @@ async def update_lookup(
     )
     payload.pop("lookup_set")  # natural key is immutable via PUT path
     payload.pop("lookup_key")
-    await run_save_validation(session, entity="lookup", action="update", data=payload)
     await session.execute(
         update(engine_lookups)
         .where(engine_lookups.c.owner_app_id == OTA_APP_ID)
@@ -569,7 +573,7 @@ async def update_lookup(
         .where(engine_lookups.c.lookup_key == lookup_key)
         .values(**payload)
     )
-    await session.commit()
+    await _commit_with_validation(session)
     return await _get_lookup(session, lookup_set, lookup_key)
 
 
@@ -583,7 +587,7 @@ async def delete_lookup(
         .where(engine_lookups.c.lookup_set == lookup_set)
         .where(engine_lookups.c.lookup_key == lookup_key)
     )
-    await session.commit()
+    await _commit_with_validation(session)
     return existing
 
 
@@ -636,10 +640,15 @@ async def _ensure_absent(session: AsyncSession, table: Table, *conditions, what:
 
 
 async def _insert(session: AsyncSession, table: Table, payload: RawRow) -> None:
-    """Insert one row, translating a unique-constraint race into DuplicateKeyError."""
+    """Stage an insert, validate the resulting config, then commit.
+
+    A unique-constraint race surfaces as DuplicateKeyError; a config that would
+    not load cleanly surfaces as ConfigSaveValidationError (both before commit,
+    so nothing partial is persisted).
+    """
     try:
         await session.execute(insert(table).values(**payload))
-        await session.commit()
     except IntegrityError as exc:  # natural-key race or FK miss → clear conflict
         await session.rollback()
         raise DuplicateKeyError(f"write to {table.name} violated a constraint") from exc
+    await _commit_with_validation(session)
