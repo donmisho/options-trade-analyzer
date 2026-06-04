@@ -7,6 +7,7 @@
 > **Change Log**
 > | Date | Change |
 > |---|---|
+> | 2026-06-03 | Added status lifecycle column (varchar(16) NOT NULL DEFAULT 'active'; active\|inactive\|deprecated\|draft) to engine_strategies; domain enforced at write/model layer, not a DB CHECK; status<->enabled invariant documented; runtime loader unchanged (OTA-822). |
 > | 2026-05-28 | Added terminal_verdict column to engine_strategy_rule_junction (OTA-709). |
 > | 2026-05-22 | Initial schema established. |
 
@@ -91,6 +92,12 @@ CREATE TABLE dbo.engine_strategies (
     verdict_band_set        nvarchar(MAX)  NOT NULL,          -- JSON: score->verdict/grade bands (EXECUTE/WAIT/PASS or A..F)
     dte_min                 int            NULL,
     dte_max                 int            NULL,
+    status                  varchar(16)    NOT NULL CONSTRAINT DF_engine_strat_status DEFAULT 'active',
+                                                                -- lifecycle: active|inactive|deprecated|draft.
+                                                                -- Domain enforced at write/model layer (OTA-824), NOT a DB CHECK
+                                                                -- (mirrors OTA-709). Invariant: 'active' <=> enabled=1;
+                                                                -- inactive/deprecated/draft => enabled=0. Loader still filters
+                                                                -- enabled=1, so non-active/draft rows stay out of the live engine.
     enabled                 bit            NOT NULL CONSTRAINT DF_engine_strat_enabled DEFAULT 1,
     created_at              datetime2      NOT NULL CONSTRAINT DF_engine_strat_created DEFAULT (getutcdate()),
     updated_at              datetime2      NULL,
