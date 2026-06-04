@@ -182,6 +182,11 @@ class AdminStrategyRow(BaseModel):
     owner_app_id: str
     strategy_key: str
     display_name: str
+    # description rides on the admin row so the strategy-admin editor (OTA-784)
+    # can round-trip it on a header save. update_strategy is a full-row replace,
+    # so omitting description from the PUT body would null it; the store already
+    # returns it (_row_to_dict) — surfacing it here makes the save non-destructive.
+    description: str | None = None
     enabled: bool
     status: str
     consumer_surface: str

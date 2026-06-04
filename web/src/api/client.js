@@ -324,6 +324,42 @@ export async function updateUserConfig(configData) {
   });
 }
 // ═══════════════════════════════════════════════════════════════════
+// ENGINE CONFIG — Strategy Admin (OTA-784 / OTA-823 / OTA-782)
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * List every engine strategy across all owners and surfaces (OTA-823).
+ * Reads current DB state (not the restart-gated runtime projection), so
+ * just-saved writes appear immediately. Each row carries owner_app_id so the
+ * editor renders OTA rows editable and SHARED rows read-only.
+ * @returns AdminStrategyRow[] — { owner_app_id, strategy_key, display_name,
+ *   description, enabled, status, consumer_surface, compatible_structures,
+ *   dte_min, dte_max, verdict_band_set }
+ */
+export async function getAdminStrategies() {
+  return apiFetch('/config/strategies/admin');
+}
+
+/**
+ * Update one engine strategy (OTA-782, validated by OTA-783).
+ * The PUT is a full-row replace — pass every persisted field, not just edits,
+ * or omitted fields are nulled. `enabled` is derived from `status` server-side
+ * and must not be sent. SHARED rows are rejected (403).
+ * @param {string} strategyKey
+ * @param {Object} body — StrategyUpdate: { display_name, consumer_surface,
+ *   verdict_band_set (required); description, compatible_structures, dte_min,
+ *   dte_max, status (optional) }
+ * @returns StrategyRow — the persisted row
+ */
+export async function updateEngineStrategy(strategyKey, body) {
+  return apiFetch(`/config/strategies/${encodeURIComponent(strategyKey)}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}
+
+
+// ═══════════════════════════════════════════════════════════════════
 // USER PREFERENCES — Favorites
 // ═══════════════════════════════════════════════════════════════════
 

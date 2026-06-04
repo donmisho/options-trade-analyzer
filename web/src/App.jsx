@@ -20,6 +20,7 @@ import StrategyPage from './pages/StrategyPage';
 import PositionsPage from './pages/PositionsPage';
 import DashboardPage from './pages/DashboardPage';
 import SecurityStrategiesPage from './pages/SecurityStrategiesPage';
+import StrategyAdminPage from './pages/StrategyAdminPage';
 import BrokerConnectPage from './pages/BrokerConnectPage';
 import ChangeLogPage from './pages/ChangeLogPage';
 
@@ -60,6 +61,9 @@ export default function App() {
 
             {/* Strategy pages */}
             <Route path="/strategies/:key" element={<StrategyPage />} />
+
+            {/* Strategy admin — editor shell + selector (OTA-784) */}
+            <Route path="/strategy-admin" element={<StrategyAdminPage />} />
 
             {/* Other pages */}
             <Route path="/directional" element={<Navigate to="/dashboard" replace />} />
