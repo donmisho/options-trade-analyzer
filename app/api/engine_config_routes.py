@@ -171,6 +171,25 @@ class StrategyRow(BaseModel):
     updated_at: datetime | None = None
 
 
+class AdminStrategyRow(BaseModel):
+    """Current-state admin view of one ``engine_strategies`` row (OTA-823).
+
+    Spans all owners and all consumer surfaces. ``owner_app_id`` drives the
+    selector's editable (OTA) vs read-only (SHARED) treatment.
+    """
+
+    owner_app_id: str
+    strategy_key: str
+    display_name: str
+    enabled: bool
+    status: str
+    consumer_surface: str
+    compatible_structures: Any | None = None
+    dte_min: int | None = None
+    dte_max: int | None = None
+    verdict_band_set: Any
+
+
 class RuleRow(BaseModel):
     rule_id: int
     owner_app_id: str
@@ -353,6 +372,21 @@ async def _run(coro) -> Any:
 
 
 # ── Strategies ────────────────────────────────────────────────────────────
+
+
+@router.get("/strategies/admin", response_model=list[AdminStrategyRow])
+async def list_strategies_admin(
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_read),
+) -> Any:
+    """List every strategy (all owners + surfaces) from CURRENT DB state.
+
+    Distinct from ``GET /config/strategies`` (OTA-762: hydrated, restart-gated,
+    SCREENING-only). This reads ``engine_strategies`` directly via the injected
+    session, so just-saved writes appear without a restart, and tags each row by
+    ``owner_app_id`` for the editor (OTA editable, SHARED read-only).
+    """
+    return await store.list_strategies_admin(db)
 
 
 @router.post("/strategies", response_model=StrategyRow, status_code=status.HTTP_201_CREATED)

@@ -155,6 +155,11 @@ engine_strategies = Table(
     Column("verdict_band_set", Text, nullable=False),
     Column("dte_min", Integer),
     Column("dte_max", Integer),
+    # status: lifecycle column (OTA-822). Declared here so the admin read
+    # (OTA-823) can SELECT it and the SQLite test schema carries it. Wiring it
+    # into create/update + the status<->enabled invariant is OTA-824; this
+    # column's default mirrors the migration's server_default.
+    Column("status", String(16), nullable=False, default="active"),
     Column("enabled", Boolean, nullable=False, default=True),
     Column("created_at", DateTime, nullable=False, default=_utcnow),
     Column("updated_at", DateTime),
@@ -348,6 +353,30 @@ async def _get_strategy(session: AsyncSession, strategy_key: str) -> RawRow:
     if row is None:
         raise NotFoundError(f"strategy {strategy_key!r} not found")
     return _row_to_dict(row, "engine_strategies")
+
+
+# ── Admin read (OTA-823) ──────────────────────────────────────────────────
+#
+# Owner-scoped admin listing for the strategy selector (OTA-784). Returns the
+# CURRENT engine_strategies state across ALL owners (OTA + SHARED) and ALL
+# consumer surfaces, read straight from the table via the injected session, so a
+# just-saved write shows immediately. This is deliberately a different read path
+# from the OTA-762 hydrated runtime projection (restart-gated, SCREENING-only,
+# owner-blind) — it reuses no engine-load accessor. owner_app_id rides on every
+# row so the UI renders OTA rows editable and SHARED rows read-only; SHARED rows
+# are returned, never filtered out.
+
+
+async def list_strategies_admin(session: AsyncSession) -> list[RawRow]:
+    """Return every ``engine_strategies`` row (all owners + surfaces), current state."""
+    rows = (
+        await session.execute(
+            select(engine_strategies).order_by(
+                engine_strategies.c.owner_app_id, engine_strategies.c.strategy_key
+            )
+        )
+    ).mappings().all()
+    return [_row_to_dict(row, "engine_strategies") for row in rows]
 
 
 # ── Rules ─────────────────────────────────────────────────────────────────
