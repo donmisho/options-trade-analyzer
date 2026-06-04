@@ -166,6 +166,7 @@ class StrategyRow(BaseModel):
     verdict_band_set: Any
     dte_min: int | None = None
     dte_max: int | None = None
+    status: str
     enabled: bool
     created_at: datetime
     updated_at: datetime | None = None
@@ -251,7 +252,9 @@ class StrategyCreate(BaseModel):
     verdict_band_set: Any
     dte_min: int | None = None
     dte_max: int | None = None
-    enabled: bool = True
+    # status is the lifecycle input of record (OTA-824). enabled is NOT a
+    # client field — it is derived from status server-side. Omitted → 'active'.
+    status: str | None = None
 
 
 class StrategyUpdate(BaseModel):
@@ -263,7 +266,8 @@ class StrategyUpdate(BaseModel):
     verdict_band_set: Any
     dte_min: int | None = None
     dte_max: int | None = None
-    enabled: bool = True
+    # status drives enabled (derived server-side). Omitted → 'active'.
+    status: str | None = None
 
 
 class RuleCreate(BaseModel):

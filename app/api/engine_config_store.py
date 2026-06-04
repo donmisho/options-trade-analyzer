@@ -155,10 +155,9 @@ engine_strategies = Table(
     Column("verdict_band_set", Text, nullable=False),
     Column("dte_min", Integer),
     Column("dte_max", Integer),
-    # status: lifecycle column (OTA-822). Declared here so the admin read
-    # (OTA-823) can SELECT it and the SQLite test schema carries it. Wiring it
-    # into create/update + the status<->enabled invariant is OTA-824; this
-    # column's default mirrors the migration's server_default.
+    # status: lifecycle column (OTA-822). Read by the admin list (OTA-823) and
+    # written by the CRUD (OTA-824) — enabled is derived from it via
+    # _status_and_enabled(). Default mirrors the migration's server_default.
     Column("status", String(16), nullable=False, default="active"),
     Column("enabled", Boolean, nullable=False, default=True),
     Column("created_at", DateTime, nullable=False, default=_utcnow),
@@ -325,7 +324,32 @@ async def delete_strategy(session: AsyncSession, strategy_key: str) -> RawRow:
     return existing
 
 
+# The status lifecycle domain (OTA-824 §4). enabled is DERIVED from status, so
+# the status<->enabled invariant cannot be written inconsistently.
+_STRATEGY_STATUSES = frozenset({"active", "inactive", "deprecated", "draft"})
+
+
+def _status_and_enabled(data: RawRow) -> tuple[str, bool]:
+    """Resolve status (validated, default 'active') and derive enabled from it.
+
+    status is the input of record (OTA-824 §3): ``enabled`` is not a caller
+    input on the write path — it is derived so the invariant holds by
+    construction. ``active`` ⇔ enabled=1; ``inactive``/``deprecated``/``draft``
+    ⇒ enabled=0. An out-of-domain status raises ``ValueError`` (→ 422).
+    """
+    status = data.get("status")
+    if status is None:
+        status = "active"
+    if status not in _STRATEGY_STATUSES:
+        raise ValueError(
+            f"Invalid status {status!r}; must be one of "
+            f"{', '.join(sorted(_STRATEGY_STATUSES))}"
+        )
+    return status, status == "active"
+
+
 def _strategy_values(data: RawRow) -> RawRow:
+    status, enabled = _status_and_enabled(data)
     return {
         "owner_app_id": OTA_APP_ID,
         "strategy_key": data["strategy_key"],
@@ -338,7 +362,8 @@ def _strategy_values(data: RawRow) -> RawRow:
         "verdict_band_set": _dump_json(data["verdict_band_set"], "verdict_band_set"),
         "dte_min": data.get("dte_min"),
         "dte_max": data.get("dte_max"),
-        "enabled": data.get("enabled", True),
+        "status": status,
+        "enabled": enabled,
     }
 
 
