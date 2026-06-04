@@ -49,8 +49,10 @@ from app.api.engine_config_store import (
 )
 from app.api.engine_config_validation import ConfigSaveValidationError
 from app.auth.dependencies import require_read, require_write
+from app.insight_engine.expressions import extract_formula_name, is_formula_ref
 from app.insight_engine.models import Phase
 from app.models.session import get_db
+from app.options_rules.screening import get_registry
 from app.ota_adapters.engine_runtime import get_engine_runtime
 
 router = APIRouter(prefix="/config", tags=["Engine Config"])
@@ -211,6 +213,18 @@ class RuleRow(BaseModel):
     enabled: bool
     created_at: datetime
     updated_at: datetime | None = None
+
+
+class RuleAdminRow(RuleRow):
+    """Owner-spanning rule-catalog row (OTA-825): the full ``engine_rules`` row
+    plus a computed formula-registry status. Derives from ``RuleRow`` so the
+    column set is single-sourced and never drifts from the canonical shape.
+
+    ``formula_registered`` is tri-state (see the route): ``None`` when the rule
+    carries no ``formula_ref`` (n/a, not an error), ``True``/``False`` otherwise.
+    """
+
+    formula_registered: bool | None = None
 
 
 class JunctionRow(BaseModel):
@@ -427,6 +441,43 @@ async def delete_strategy(
 
 
 # ── Rules ─────────────────────────────────────────────────────────────────
+
+
+def _formula_registered(formula_ref: str | None) -> bool | None:
+    """Tri-state formula-registry status for one rule's ``formula_ref``.
+
+    - ``None``  — no ``formula_ref`` (a pure condition-expression rule; n/a, not
+      an error).
+    - ``True``  — a ``formula:<name>`` ref whose ``<name>`` is in the live
+      screening registry.
+    - ``False`` — a ref that is present but unresolvable: unregistered name, or
+      malformed (not a ``formula:`` ref at all).
+
+    Queries the live ``get_registry()`` (the same object the engine-load
+    validator checks against); read-only — no engine state is mutated.
+    """
+    if formula_ref is None:
+        return None
+    if not is_formula_ref(formula_ref):
+        return False  # present but malformed
+    return get_registry().has(extract_formula_name(formula_ref))
+
+
+@router.get("/rules/admin", response_model=list[RuleAdminRow])
+async def list_rules_admin(
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_read),
+) -> Any:
+    """List the OTA + SHARED rule catalog from CURRENT DB state (OTA-825).
+
+    Owner-spanning over OTA's bindable rule set (OTA-or-SHARED, OTA-782), read
+    straight from ``engine_rules`` via the injected session — no ``enabled``
+    filter (disabled rules surface as unavailable), and distinct from the
+    restart-gated runtime reader. Each row is the full canonical rule row plus a
+    computed ``formula_registered`` status (see ``_formula_registered``).
+    """
+    rows = await store.list_rules_admin(db)
+    return [{**row, "formula_registered": _formula_registered(row.get("formula_ref"))} for row in rows]
 
 
 @router.post("/rules", response_model=RuleRow, status_code=status.HTTP_201_CREATED)

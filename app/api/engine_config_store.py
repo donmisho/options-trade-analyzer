@@ -488,6 +488,36 @@ async def _get_rule(session: AsyncSession, rule_key: str) -> RawRow:
     return _row_to_dict(row, "engine_rules")
 
 
+# ── Admin read (OTA-825) ──────────────────────────────────────────────────
+#
+# Owner-spanning rule catalog for the rule-catalog browser (OTA-789). Like
+# list_strategies_admin (OTA-823) this reads CURRENT engine_rules state via the
+# injected session (so a just-saved write shows immediately), carries no
+# `enabled` filter (disabled rules must surface so the catalog can show them as
+# unavailable), and reuses no engine-load accessor — it is a separate read path
+# from the restart-gated AzureSqlConfigSource runtime reader, which is untouched.
+#
+# DELIBERATE DIVERGENCE from list_strategies_admin: that sibling applies no owner
+# filter (true all-owner mirror). This one restricts to owner_app_id IN
+# ('OTA','SHARED') because it surfaces OTA's *bindable* rule set — bindings are
+# OTA-or-SHARED only (OTA-782) — not every owner the engine_rules table might
+# someday hold (future STK/FFL rules are not part of OTA's catalog).
+
+_BINDABLE_OWNERS = (OTA_APP_ID, "SHARED")
+
+
+async def list_rules_admin(session: AsyncSession) -> list[RawRow]:
+    """Return every OTA + SHARED ``engine_rules`` row, current state, no filters."""
+    rows = (
+        await session.execute(
+            select(engine_rules)
+            .where(engine_rules.c.owner_app_id.in_(_BINDABLE_OWNERS))
+            .order_by(engine_rules.c.owner_app_id, engine_rules.c.rule_key)
+        )
+    ).mappings().all()
+    return [_row_to_dict(row, "engine_rules") for row in rows]
+
+
 # ── Junction ──────────────────────────────────────────────────────────────
 #
 # Identified by the natural (strategy_key, rule_key) pair, both resolved within
