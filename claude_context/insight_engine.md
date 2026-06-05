@@ -384,6 +384,7 @@ The loader rejects the configuration with a loud, structured error report if any
 - a junction row references a rule_id or strategy_id that does not exist
 - a junction row does not supply every parameter in the rule's schema
 - a gate junction row omits `evaluation_order` or `stop_if_fail`
+- two enabled junction rows for the same strategy and phase share an `evaluation_order` (ordering within a `(strategy, rule.phase)` must be unique — phase lives on the rule, not the junction, so this is enforced at engine load, not by a DB constraint)
 - a strategy's active scoring criteria do not have junction weights summing to 1.0 (within a documented tolerance)
 - a verdict band set is not monotonic
 - a condition expression references a named formula not in the registered rule library
@@ -497,3 +498,4 @@ Resolved (in the body):
 | 2026-05-21 | v2.1. All evaluation flows through the engine; health grading and directional comparison as additional consumers. Candidate definition broadened. | Don + Claude |
 | 2026-05-21 | v2.2. Naming resolved (Insight Engine vs. Insight Communicator). Health-grade decomposition captured in plan. | Don + Claude |
 | 2026-05-21 | v3. Runtime tables are source of truth; sheet is build-time seed (2.1, 6.2). Gate categories collapsed into stop_if_fail + score_penalty + evaluation_order in the junction (3.4, 3.6). LLM-precedence principle added (2.6). Persistence contract added: engine owns bronze shape and stamps source_app_id; injected sink writes to a shared bronze zone; two-table Phase-1 schema (4.3). business-rules.md restructured to a rule catalog grouped by type; strategies not documented there (9). | Don + Claude |
+| 2026-06-05 | OTA-826. §6.6 startup-validation list now enumerates the `evaluation_order` uniqueness check (two enabled junction rows in the same `(strategy, rule.phase)` may not share an order — enforced at load, not by a DB constraint). Resolves the prior contradiction where the schema-DDL doc claimed this check existed but the §6.6 prose did not list it; the check itself was already implemented (`validation.py::_check_eval_order_uniqueness`, code `EVAL_ORDER_DUPLICATE`) and enforced at startup — this is a doc-parity fix, no engine behaviour change. | Don + Claude |

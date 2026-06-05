@@ -247,6 +247,38 @@ class JunctionRow(BaseModel):
     updated_at: datetime | None = None
 
 
+class StrategyJunctionRow(BaseModel):
+    """One junction binding for a strategy, joined to its rule's display metadata
+    (OTA-826).
+
+    The full junction shape (the editable mechanical fields + the variable
+    ``parameters`` JSON) plus the bound rule's ``phase`` / ``intent`` /
+    ``parameter_schema`` so the editor's Hard Gates / Scoring / Adjustments tabs
+    can group, label, and form-render each binding without a second fetch. The
+    rule fields are joined read-only context — not part of the binding itself.
+    """
+
+    junction_id: int
+    strategy_id: int
+    strategy_key: str
+    rule_id: int
+    rule_key: str
+    evaluation_order: int
+    stop_if_fail: bool
+    score_penalty: float | None = None
+    weight: float | None = None
+    parameters: Any | None = None
+    terminal_verdict: str | None = None
+    rationale: str | None = None
+    enabled: bool
+    created_at: datetime
+    updated_at: datetime | None = None
+    # Joined rule display metadata (read-only).
+    phase: str
+    intent: str | None = None
+    parameter_schema: Any | None = None
+
+
 class LookupRow(BaseModel):
     lookup_id: int
     owner_app_id: str
@@ -474,6 +506,28 @@ async def delete_strategy(
     user: dict = Depends(require_write),
 ) -> Any:
     return await _run(store.delete_strategy(db, strategy_key))
+
+
+@router.get(
+    "/strategies/{strategy_key}/junctions",
+    response_model=list[StrategyJunctionRow],
+)
+async def list_strategy_junctions(
+    strategy_key: str,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_read),
+) -> Any:
+    """List every junction binding for a strategy (live key or ``<key>__draft``).
+
+    Resolves the strategy within OTA scope (404 if absent), then returns its
+    bindings ordered by ``evaluation_order``, each joined to its rule's
+    ``phase`` / ``intent`` / ``parameter_schema``. Reads
+    ``engine_strategy_rule_junction`` directly via the injected session — NOT the
+    restart-gated ``AzureSqlConfigSource`` — so just-saved bindings and freshly
+    cloned drafts (OTA-791) appear without a restart. No ``enabled`` filter:
+    disabled bindings surface so the editor can show them. Read-only.
+    """
+    return await _run(store.list_strategy_junctions(db, strategy_key))
 
 
 # ── Draft substrate + live preview (OTA-791) ──────────────────────────────

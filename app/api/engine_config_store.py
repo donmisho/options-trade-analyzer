@@ -788,6 +788,73 @@ async def _get_junction(
     return _row_to_dict(row, "engine_strategy_rule_junction")
 
 
+# ── Admin read (OTA-826) ──────────────────────────────────────────────────
+#
+# Owner-scoped per-strategy junction listing for the editor's Hard Gates /
+# Scoring / Adjustments tabs (OTA-785+). Like list_strategies_admin (OTA-823)
+# and list_rules_admin (OTA-825) it reads CURRENT DB state via the injected
+# session (so a just-saved binding — or a freshly cloned draft, OTA-791 — shows
+# immediately), carries NO `enabled` filter (disabled bindings must surface so
+# the editor can show them), and reuses no engine-load accessor — it is a
+# separate read path from the restart-gated AzureSqlConfigSource, which is
+# untouched.
+#
+# The strategy is resolved within OTA scope, so a live key OR its `<key>__draft`
+# both resolve (drafts are OTA-owned); a missing key → NotFoundError → 404. The
+# join to engine_rules is on the rule_id FK with no rule-owner filter, so a
+# binding to a SHARED rule still surfaces its display metadata. Ordered by
+# evaluation_order so the tabs render the pipeline sequence directly.
+
+
+async def list_strategy_junctions(
+    session: AsyncSession, strategy_key: str
+) -> list[RawRow]:
+    """Return every junction binding for *strategy_key*, joined to rule metadata.
+
+    Resolves the strategy within OTA owner scope (a live key or its
+    ``<key>__draft`` both resolve; 404 if neither exists), then returns its
+    junction rows ordered by ``evaluation_order`` — each the full junction shape
+    plus the bound rule's ``rule_key`` / ``phase`` / ``intent`` /
+    ``parameter_schema`` for display. Read-only; current DB state via *session*.
+    """
+    strat = await _get_strategy(session, strategy_key)  # 404 if absent / not OTA
+    j = engine_junction
+    r = engine_rules
+    rows = (
+        await session.execute(
+            select(
+                j,
+                r.c.rule_key.label("rule_key"),
+                r.c.phase.label("phase"),
+                r.c.intent.label("intent"),
+                r.c.parameter_schema.label("parameter_schema"),
+            )
+            .select_from(j.join(r, j.c.rule_id == r.c.rule_id))
+            .where(j.c.strategy_id == strat["strategy_id"])
+            .order_by(j.c.evaluation_order)
+        )
+    ).mappings().all()
+    return [_junction_with_rule_to_dict(row, strategy_key) for row in rows]
+
+
+def _junction_with_rule_to_dict(row: Any, strategy_key: str) -> RawRow:
+    """Map a junction⨝rule result row to a dict, parsing both JSON columns.
+
+    ``_row_to_dict`` parses the junction's own ``parameters`` JSON; the joined
+    ``parameter_schema`` belongs to ``engine_rules`` so it is parsed here. The
+    resolved ``strategy_key`` is injected (the join does not carry it).
+    """
+    data = _row_to_dict(row, "engine_strategy_rule_junction")
+    data["strategy_key"] = strategy_key
+    schema = data.get("parameter_schema")
+    if isinstance(schema, str):
+        try:
+            data["parameter_schema"] = json.loads(schema)
+        except (json.JSONDecodeError, TypeError):
+            pass  # leave as-is; write-path validation makes this unreachable
+    return data
+
+
 # ── Lookups ───────────────────────────────────────────────────────────────
 
 
