@@ -384,6 +384,51 @@ class TestJunctionFKMissing:
         assert len(errors) == 1
         assert errors[0].context["strategy_id"] == 999
 
+    def test_junction_to_disabled_but_existing_strategy_is_valid_fk(self):
+        """FK integrity is existence, not enablement (§3.4 audit preservation /
+        OTA-791 draft): a junction binding a present-but-disabled strategy is a
+        valid FK, not a dangling one — only a strategy_id with no row is missing.
+        """
+        strategies = _base_strategies()
+        strategies.append({
+            "strategy_id": 2,
+            "owner_app_id": "OTA",
+            "strategy_key": "test_strategy__draft",
+            "display_name": "Test Strategy (draft)",
+            "consumer_surface": "SCREENING",
+            "description": None,
+            "compatible_structures": None,
+            "verdict_band_set": [
+                {"verdict": "EXECUTE", "min_score": 70, "max_score": 100},
+                {"verdict": "PASS", "min_score": 0, "max_score": 69.99},
+            ],
+            "dte_min": None,
+            "dte_max": None,
+            "enabled": False,   # disabled (draft) — excluded from load, still a real FK target
+        })
+        junction = _base_junction()
+        junction.append({
+            "junction_id": 50,
+            "strategy_id": 2,        # → the disabled draft strategy
+            "rule_id": 1,
+            "evaluation_order": 1,
+            "stop_if_fail": True,
+            "score_penalty": None,
+            "weight": None,
+            "parameters": {"min_price": 5.0},
+            "terminal_verdict": None,
+            "rationale": "draft clone",
+            "enabled": True,
+        })
+        report = _load_and_validate(
+            strategies=strategies,
+            junction=junction,
+            input_catalog=_base_input_catalog(),
+            formula_registry=_base_formula_registry(),
+            use_source_for_fk=True,
+        )
+        assert report.errors_by_code("JUNCTION_FK_STRATEGY_MISSING") == []
+
     def test_junction_references_missing_rule(self):
         junction = _base_junction()
         junction.append({

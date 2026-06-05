@@ -583,11 +583,19 @@ def _check_junction_fks(
     raw_rules = source.fetch_rules()
     raw_junction = source.fetch_junction()
 
-    # Build sets of loaded IDs (from raw rows, matching the scope used by the loader)
-    loaded_strategy_ids: set[int] = set()
-    for row in raw_strategies:
-        if row.get("owner_app_id") in config.apps and _is_enabled(row):
-            loaded_strategy_ids.add(row["strategy_id"])
+    # FK integrity is EXISTENCE, not load-participation. A junction may bind a
+    # strategy that exists but is currently disabled — the enabled flag
+    # "preserves audit trail without deletion" (§3.4), e.g. a disabled strategy
+    # whose bindings are retained, or an OTA-791 draft strategy (enabled=0). That
+    # is a valid FK, not a dangling one; only a strategy_id with NO row at all is
+    # missing. So strategy existence is checked against all in-scope rows
+    # regardless of enabled. (Rules keep the enabled filter: a binding to a
+    # switched-off rule is a real load problem.)
+    existing_strategy_ids: set[int] = {
+        row["strategy_id"]
+        for row in raw_strategies
+        if row.get("owner_app_id") in config.apps
+    }
 
     loaded_rule_ids: set[int] = set()
     for row in raw_rules:
@@ -600,7 +608,7 @@ def _check_junction_fks(
         strat_id = row.get("strategy_id")
         rule_id = row.get("rule_id")
 
-        if strat_id not in loaded_strategy_ids:
+        if strat_id not in existing_strategy_ids:
             report.add(
                 "JUNCTION_FK_STRATEGY_MISSING",
                 f"Junction row (strategy_id={strat_id}, rule_id={rule_id}): "

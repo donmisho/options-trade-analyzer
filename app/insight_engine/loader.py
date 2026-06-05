@@ -179,6 +179,7 @@ def load_config(
     source: ConfigSource,
     *,
     app_ids: tuple[str, ...] = ("SHARED", "OTA"),
+    include_draft_key: str | None = None,
 ) -> EngineConfig:
     """Load engine_* tables from *source* and resolve into an EngineConfig.
 
@@ -188,6 +189,16 @@ def load_config(
         Injected table reader.
     app_ids : tuple[str, ...]
         Which owner_app_id values to include. Defaults to SHARED + OTA.
+    include_draft_key : str | None
+        A single ``status=draft`` (``enabled=0``) strategy key to admit into the
+        load even though it is disabled — for the OTA-791 live-preview path only.
+        This relaxes the enabled filter for **exactly this one named strategy
+        key** (NOT a blanket include-disabled): every other disabled row stays
+        excluded. The draft's own junction rows are ``enabled=1`` and bind
+        normally once the draft strategy is loaded. The resulting config is for a
+        LOCAL preview only — it must never be stamped onto the running runtime
+        (never passed to ``set_engine_runtime``). Draft rows still run the full
+        §6.6 validation like any other strategy.
     """
     scope = set(app_ids)
 
@@ -224,7 +235,13 @@ def load_config(
     for row in raw_strategies:
         if row.get("owner_app_id") not in scope:
             continue
-        if not _is_enabled(row):
+        # Relax the enabled filter for exactly the one named draft key (OTA-791
+        # preview); every other disabled strategy stays excluded.
+        is_preview_draft = (
+            include_draft_key is not None
+            and row.get("strategy_key") == include_draft_key
+        )
+        if not _is_enabled(row) and not is_preview_draft:
             continue
         strat_id, _owner, strategy = _row_to_strategy(row)
         strategies_by_id[strat_id] = strategy

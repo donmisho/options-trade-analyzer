@@ -358,6 +358,46 @@ export async function updateEngineStrategy(strategyKey, body) {
   });
 }
 
+/**
+ * Draft substrate (OTA-791). Editing targets a reserved `<key>__draft` row; the
+ * live strategy is untouched until Apply (OTA-790).
+ */
+
+/** Create the draft from live, or resume an existing draft (no overwrite). */
+export async function createOrResumeDraft(strategyKey) {
+  return apiFetch(`/config/strategies/${encodeURIComponent(strategyKey)}/draft`, {
+    method: 'POST',
+  });
+}
+
+/** Discard the draft and re-clone it fresh from the live strategy. */
+export async function refreshDraftFromLive(strategyKey) {
+  return apiFetch(`/config/strategies/${encodeURIComponent(strategyKey)}/draft/refresh`, {
+    method: 'POST',
+  });
+}
+
+/** Discard the draft (404 if none exists). */
+export async function discardDraft(strategyKey) {
+  return apiFetch(`/config/strategies/${encodeURIComponent(strategyKey)}/draft`, {
+    method: 'DELETE',
+  });
+}
+
+/**
+ * Evaluate the strategy's draft against one symbol's chain → ranked scores/verdicts.
+ * Loads a fresh local config server-side; the running engine config is untouched.
+ * @returns { draft_key, config_version, underlying_price, candidates_evaluated,
+ *   results: [{ candidate_id, symbol, structure, structure_label, strikes,
+ *   expiration, dte, score, verdict, terminal_phase }] }
+ */
+export async function previewDraft(strategyKey, symbol) {
+  return apiFetch(`/config/strategies/${encodeURIComponent(strategyKey)}/preview`, {
+    method: 'POST',
+    body: JSON.stringify({ symbol }),
+  });
+}
+
 
 // ═══════════════════════════════════════════════════════════════════
 // USER PREFERENCES — Favorites

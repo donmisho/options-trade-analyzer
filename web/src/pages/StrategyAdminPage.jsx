@@ -21,8 +21,15 @@
  */
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { getAdminStrategies, updateEngineStrategy } from '../api/client';
+import {
+  getAdminStrategies,
+  updateEngineStrategy,
+  createOrResumeDraft,
+  refreshDraftFromLive,
+  previewDraft,
+} from '../api/client';
 import { useToast } from '../components/Toast';
+import { formatDate } from '../utils/formatDate';
 import './PageShared.css';
 
 // ─── Domain constants ───────────────────────────────────────────────────────
@@ -129,6 +136,14 @@ export default function StrategyAdminPage() {
   const structMenuRef                 = useRef(null);
   const [structMenuOpen, setStructMenuOpen] = useState(false);
 
+  // ── Live preview (OTA-791): evaluate the draft against a symbol's chain ──
+  const [previewSymbol, setPreviewSymbol]   = useState('');
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewResults, setPreviewResults] = useState(null);  // null = not run
+  const [previewMeta, setPreviewMeta]       = useState(null);
+  const [previewError, setPreviewError]     = useState(null);
+  const [draftBusy, setDraftBusy]           = useState(false);
+
   // ── Load the admin strategy list ──────────────────────────────────────────
   const load = useCallback(async () => {
     setLoading(true);
@@ -158,10 +173,13 @@ export default function StrategyAdminPage() {
   );
   const editable = selected?.owner_app_id === OTA_OWNER;
 
-  // Reset the editable form whenever the selection changes.
+  // Reset the editable form + preview whenever the selection changes.
   useEffect(() => {
     setForm(selected ? toForm(selected) : null);
     setStructMenuOpen(false);
+    setPreviewResults(null);
+    setPreviewMeta(null);
+    setPreviewError(null);
   }, [selected]);
 
   // Dirty check — does the form differ from the persisted row?
@@ -223,6 +241,52 @@ export default function StrategyAdminPage() {
       showToast({ type: 'error', message: `Save failed: ${err.message}` });
     } finally {
       setSaving(false);
+    }
+  };
+
+  // ── Live preview handlers (OTA-791) ─────────────────────────────────────────
+  // "Find trades →": ensure a draft exists (create-or-resume), then evaluate it
+  // against the symbol's chain. The draft is the write target for editing; until
+  // the section editors (OTA-785–788) land it mirrors live, so preview reflects
+  // the live config until edits are applied to the draft.
+  const handleFindTrades = async () => {
+    const sym = previewSymbol.trim().toUpperCase();
+    if (!selected || !editable || !sym) return;
+    setPreviewLoading(true);
+    setPreviewError(null);
+    try {
+      await createOrResumeDraft(selected.strategy_key);
+      const resp = await previewDraft(selected.strategy_key, sym);
+      setPreviewResults(resp.results || []);
+      setPreviewMeta({
+        underlying_price: resp.underlying_price,
+        candidates_evaluated: resp.candidates_evaluated,
+        config_version: resp.config_version,
+      });
+    } catch (err) {
+      setPreviewError(err.message);
+      setPreviewResults(null);
+      setPreviewMeta(null);
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  // "Refresh from live": discard the draft and re-clone from the live strategy
+  // (OTA-790 Reset reuses this). Clears any stale preview.
+  const handleRefreshFromLive = async () => {
+    if (!selected || !editable) return;
+    setDraftBusy(true);
+    try {
+      await refreshDraftFromLive(selected.strategy_key);
+      showToast({ type: 'success', message: 'Draft reset to live config' });
+      setPreviewResults(null);
+      setPreviewMeta(null);
+      setPreviewError(null);
+    } catch (err) {
+      showToast({ type: 'error', message: `Refresh failed: ${err.message}` });
+    } finally {
+      setDraftBusy(false);
     }
   };
 
@@ -461,6 +525,21 @@ export default function StrategyAdminPage() {
                 </div>
                 <VerdictBands bands={selected.verdict_band_set} />
               </div>
+
+              {/* ── Live preview (OTA-791) — editable strategies only ── */}
+              {editable && (
+                <PreviewPanel
+                  symbol={previewSymbol}
+                  onSymbol={setPreviewSymbol}
+                  onFindTrades={handleFindTrades}
+                  onRefreshFromLive={handleRefreshFromLive}
+                  loading={previewLoading}
+                  draftBusy={draftBusy}
+                  results={previewResults}
+                  meta={previewMeta}
+                  error={previewError}
+                />
+              )}
             </>
           )}
         </div>
@@ -624,6 +703,129 @@ function VerdictBands({ bands }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// ─── Live preview panel (OTA-791) ───────────────────────────────────────────
+//
+// "Find trades →" evaluates the strategy's DRAFT against one symbol's chain,
+// loading the draft fresh from the tables through the engine. Results render as
+// scores (##.00) + verdicts (verdict colors); expiry via formatDate; no `$`.
+
+const verdictColor = (verdict) =>
+  (GRADE_FOR_VERDICT[String(verdict || '').toUpperCase()] || {}).color
+  || 'var(--text, #e6edf3)';
+
+function PreviewPanel({
+  symbol, onSymbol, onFindTrades, onRefreshFromLive,
+  loading, draftBusy, results, meta, error,
+}) {
+  const canRun = symbol.trim().length > 0 && !loading;
+  return (
+    <div style={{ marginTop: 28 }}>
+      <div style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12,
+      }}>
+        <div style={sectionTitleStyle}>Live Preview · evaluate draft against a symbol</div>
+        <button
+          onClick={onRefreshFromLive}
+          disabled={draftBusy}
+          title="Discard the draft and re-clone it from the live strategy"
+          style={{ ...mutedBtn, opacity: draftBusy ? 0.4 : 1, cursor: draftBusy ? 'default' : 'pointer' }}
+        >
+          {draftBusy ? 'Refreshing…' : 'Refresh from live'}
+        </button>
+      </div>
+
+      {/* Callout box — var(--bg2) is permitted on inset/callout boxes (UI Part 3a) */}
+      <div style={{
+        border: '1px solid var(--border, #30363d)', borderRadius: 6, padding: 16,
+        background: 'var(--bg2, #161b22)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <input
+            value={symbol}
+            onChange={e => onSymbol(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && canRun) onFindTrades(); }}
+            placeholder="Symbol (e.g. AAPL)"
+            aria-label="Preview symbol"
+            style={{ ...inputStyle, width: 160, textTransform: 'uppercase' }}
+          />
+          <button
+            onClick={onFindTrades}
+            disabled={!canRun}
+            style={{ ...tealBtn, opacity: canRun ? 1 : 0.35, cursor: canRun ? 'pointer' : 'default' }}
+          >
+            {loading ? 'Evaluating…' : 'Find trades →'}
+          </button>
+          {meta && (
+            <span style={{ fontSize: 10, color: 'var(--muted, #8b949e)' }}>
+              {meta.underlying_price > 0 ? `underlying ${Number(meta.underlying_price).toFixed(2)} · ` : ''}
+              {meta.candidates_evaluated} candidates · config {String(meta.config_version).slice(0, 8)}
+            </span>
+          )}
+        </div>
+
+        {error && (
+          <div style={{ marginTop: 12, fontSize: 11, color: 'var(--red, #f87171)' }}>
+            {error}
+          </div>
+        )}
+
+        {results && <PreviewResults results={results} />}
+      </div>
+    </div>
+  );
+}
+
+function PreviewResults({ results }) {
+  if (!results.length) {
+    return (
+      <div style={{ marginTop: 14, fontSize: 11, color: 'var(--muted, #8b949e)' }}>
+        No candidates surfaced for this symbol and strategy.
+      </div>
+    );
+  }
+  const cell = { padding: '6px 10px', fontSize: 11, textAlign: 'left', whiteSpace: 'nowrap' };
+  const head = { ...cell, fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--muted, #8b949e)' };
+  // Cap rendered rows; the backend already ranks by score descending.
+  const shown = results.slice(0, 50);
+  return (
+    <div style={{ marginTop: 14, overflowX: 'auto' }}>
+      <table style={{ borderCollapse: 'collapse', width: '100%', fontFamily: MONO }}>
+        <thead>
+          <tr style={{ borderBottom: '1px solid var(--border, #30363d)' }}>
+            <th style={head}>Structure</th>
+            <th style={head}>Strikes</th>
+            <th style={head}>Expiry</th>
+            <th style={{ ...head, textAlign: 'right' }}>DTE</th>
+            <th style={{ ...head, textAlign: 'right' }}>Score</th>
+            <th style={head}>Verdict</th>
+          </tr>
+        </thead>
+        <tbody>
+          {shown.map(r => (
+            <tr key={r.candidate_id} style={{ borderBottom: '1px solid rgba(48,54,61,0.5)' }}>
+              <td style={{ ...cell, color: 'var(--text, #e6edf3)' }}>{r.structure_label || r.structure || '—'}</td>
+              <td style={{ ...cell, color: 'var(--muted, #8b949e)' }}>{r.strikes || '—'}</td>
+              <td style={{ ...cell, color: 'var(--muted, #8b949e)' }}>{r.expiration ? formatDate(r.expiration) : '—'}</td>
+              <td style={{ ...cell, textAlign: 'right', color: 'var(--muted, #8b949e)' }}>{r.dte ?? '—'}</td>
+              <td style={{ ...cell, textAlign: 'right', color: 'var(--text, #e6edf3)' }}>
+                {r.score != null ? Number(r.score).toFixed(2) : '—'}
+              </td>
+              <td style={{ ...cell, color: verdictColor(r.verdict), fontWeight: 600 }}>
+                {r.verdict || r.terminal_phase}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {results.length > shown.length && (
+        <div style={{ marginTop: 8, fontSize: 10, color: 'var(--muted, #8b949e)' }}>
+          Showing top {shown.length} of {results.length} evaluated.
+        </div>
+      )}
     </div>
   );
 }

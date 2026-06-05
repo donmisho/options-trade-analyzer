@@ -404,6 +404,171 @@ async def list_strategies_admin(session: AsyncSession) -> list[RawRow]:
     return [_row_to_dict(row, "engine_strategies") for row in rows]
 
 
+# ── Draft strategy substrate (OTA-791) ────────────────────────────────────
+#
+# The save-to-draft mechanism (OTA-781 key design decision): editing targets a
+# reserved ``<key>__draft`` strategy row (status='draft' ⇒ enabled=0), leaving
+# the live row untouched until Apply (OTA-790). Because the draft is enabled=0,
+# the runtime loader skips it (loader.py ``_is_enabled``) — it never enters the
+# running config and cannot affect startup validation. The OTA-791 preview path
+# is the ONLY reader that admits it, via ``load_config(include_draft_key=...)``.
+#
+# Lifecycle (decision B, this story):
+#   - create_or_resume_draft: clone live header + junctions onto the draft ONLY
+#     if no draft exists; if one exists, RESUME it (no silent overwrite).
+#   - refresh_draft_from_live: explicit re-clone (discard the draft, clone fresh).
+#     OTA-790 Reset reuses this.
+#   - delete_draft: discard the draft (consumed on Apply / discarded on Reset).
+# Stale-draft detection is deferred (single-user) — not built here.
+
+DRAFT_SUFFIX = "__draft"
+
+
+def draft_key_for(live_key: str) -> str:
+    """The reserved draft strategy_key for a live strategy_key."""
+    return f"{live_key}{DRAFT_SUFFIX}"
+
+
+def is_draft_key(key: str) -> bool:
+    """True if *key* is itself a reserved draft key (cannot draft a draft)."""
+    return key.endswith(DRAFT_SUFFIX)
+
+
+async def create_or_resume_draft(session: AsyncSession, live_key: str) -> RawRow:
+    """Create the draft from the live strategy, or resume an existing draft.
+
+    Clones the live header + every junction binding (repointed to the draft's
+    ``strategy_id``) ONLY when no ``<live_key>__draft`` exists. If a draft is
+    already present it is RESUMED verbatim — never silently overwritten
+    (decision B). Raises :class:`NotFoundError` if the live strategy is missing
+    (or is SHARED, which is not OTA-owned and so not draftable here).
+    """
+    if is_draft_key(live_key):
+        raise ValueError(f"{live_key!r} is already a draft key; cannot draft a draft")
+    live = await _get_strategy(session, live_key)  # 404 if missing / not OTA-owned
+    existing = await _get_strategy_optional(session, draft_key_for(live_key))
+    if existing is not None:
+        return existing  # resume
+    return await _clone_strategy_to_draft(session, live)
+
+
+async def refresh_draft_from_live(session: AsyncSession, live_key: str) -> RawRow:
+    """Discard any existing draft and re-clone it fresh from the live strategy.
+
+    The explicit "Refresh from live" action (decision B); OTA-790 Reset reuses
+    it. Atomic: the discard and the re-clone share one transaction.
+    """
+    if is_draft_key(live_key):
+        raise ValueError(f"{live_key!r} is already a draft key")
+    live = await _get_strategy(session, live_key)  # 404 if missing / not OTA-owned
+    existing = await _get_strategy_optional(session, draft_key_for(live_key))
+    if existing is not None:
+        await _stage_draft_deletion(session, existing)
+    return await _clone_strategy_to_draft(session, live)
+
+
+async def delete_draft(session: AsyncSession, live_key: str) -> RawRow:
+    """Discard the draft for *live_key*. 404 if no draft exists.
+
+    Used when a draft is consumed (Apply) or discarded (Reset) — both OTA-790.
+    """
+    if is_draft_key(live_key):
+        raise ValueError(f"{live_key!r} is already a draft key")
+    draft = await _get_strategy(session, draft_key_for(live_key))  # 404 if absent
+    await _stage_draft_deletion(session, draft)
+    await _commit_with_validation(session)
+    return draft
+
+
+async def _get_strategy_optional(
+    session: AsyncSession, strategy_key: str
+) -> RawRow | None:
+    """Like ``_get_strategy`` but returns None instead of raising when absent."""
+    row = (
+        await session.execute(
+            select(engine_strategies)
+            .where(engine_strategies.c.owner_app_id == OTA_APP_ID)
+            .where(engine_strategies.c.strategy_key == strategy_key)
+        )
+    ).mappings().first()
+    return _row_to_dict(row, "engine_strategies") if row is not None else None
+
+
+async def _clone_strategy_to_draft(session: AsyncSession, live_row: RawRow) -> RawRow:
+    """Stage the draft header + cloned junctions, validate once, commit.
+
+    All inserts are staged on one transaction and validated by a single
+    ``_commit_with_validation`` pass. The draft strategy is enabled=0, so the
+    runtime loader excludes it (and its junctions) — the validation pass cannot
+    be tripped by a partially-built draft.
+    """
+    draft_key = draft_key_for(live_row["strategy_key"])
+    payload = _strategy_values(
+        {
+            "strategy_key": draft_key,
+            "display_name": live_row["display_name"],
+            "consumer_surface": live_row["consumer_surface"],
+            "description": live_row.get("description"),
+            "compatible_structures": live_row.get("compatible_structures"),
+            "verdict_band_set": live_row["verdict_band_set"],
+            "dte_min": live_row.get("dte_min"),
+            "dte_max": live_row.get("dte_max"),
+            "status": "draft",
+        }
+    )
+    await session.execute(insert(engine_strategies).values(**payload))
+    await session.flush()
+    draft = await _get_strategy(session, draft_key)
+    await _clone_junctions(session, live_row["strategy_id"], draft["strategy_id"])
+    await _commit_with_validation(session)
+    return await _get_strategy(session, draft_key)
+
+
+async def _clone_junctions(
+    session: AsyncSession, src_strategy_id: int, dst_strategy_id: int
+) -> None:
+    """Copy every junction binding of *src_strategy_id* onto *dst_strategy_id*.
+
+    Mechanical fields and the ``parameters`` JSON column are copied verbatim
+    (the source value is already a stored JSON string); only the strategy_id is
+    repointed. rule_id is preserved so the draft binds the same rules.
+    """
+    rows = (
+        await session.execute(
+            select(engine_junction).where(
+                engine_junction.c.strategy_id == src_strategy_id
+            )
+        )
+    ).mappings().all()
+    for r in rows:
+        await session.execute(
+            insert(engine_junction).values(
+                strategy_id=dst_strategy_id,
+                rule_id=r["rule_id"],
+                evaluation_order=r["evaluation_order"],
+                stop_if_fail=r["stop_if_fail"],
+                score_penalty=r["score_penalty"],
+                weight=r["weight"],
+                parameters=r["parameters"],
+                terminal_verdict=r["terminal_verdict"],
+                rationale=r["rationale"],
+                enabled=r["enabled"],
+                created_at=_utcnow(),
+            )
+        )
+
+
+async def _stage_draft_deletion(session: AsyncSession, draft_row: RawRow) -> None:
+    """Stage deletion of a draft's junctions then the draft row (no commit)."""
+    draft_id = draft_row["strategy_id"]
+    await session.execute(
+        delete(engine_junction).where(engine_junction.c.strategy_id == draft_id)
+    )
+    await session.execute(
+        delete(engine_strategies).where(engine_strategies.c.strategy_id == draft_id)
+    )
+
+
 # ── Rules ─────────────────────────────────────────────────────────────────
 
 

@@ -39,7 +39,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api import engine_config_preview as preview
 from app.api import engine_config_store as store
+from app.api.engine_config_preview import PreviewError, PreviewValidationError
 from app.api.engine_config_store import (
     DuplicateKeyError,
     EngineConfigError,
@@ -356,6 +358,40 @@ class LookupUpdate(BaseModel):
     enabled: bool = True
 
 
+# ── Draft preview shapes (OTA-791) ────────────────────────────────────────
+
+
+class PreviewRequest(BaseModel):
+    """Evaluate the strategy's draft against one symbol's option chain."""
+
+    symbol: str
+
+
+class PreviewResultItem(BaseModel):
+    """One evaluated candidate from a draft preview, ranked by score."""
+
+    candidate_id: str
+    symbol: str | None = None
+    structure: str | None = None
+    structure_label: str | None = None
+    strikes: str | None = None
+    expiration: str | None = None
+    dte: int | None = None
+    score: float | None = None
+    verdict: str | None = None
+    terminal_phase: str
+
+
+class PreviewResponse(BaseModel):
+    """Draft preview output: ranked candidates + run metadata."""
+
+    draft_key: str
+    config_version: str
+    underlying_price: float
+    candidates_evaluated: int
+    results: list[PreviewResultItem]
+
+
 # ── Store-error → HTTP-status mapping ─────────────────────────────────────
 
 _STATUS_BY_ERROR: dict[type[EngineConfigError], int] = {
@@ -438,6 +474,89 @@ async def delete_strategy(
     user: dict = Depends(require_write),
 ) -> Any:
     return await _run(store.delete_strategy(db, strategy_key))
+
+
+# ── Draft substrate + live preview (OTA-791) ──────────────────────────────
+#
+# The draft is the write target for all editing (OTA-781 save-to-draft); the
+# live row is untouched until Apply (OTA-790). Draft rows are status='draft'
+# (enabled=0) so the runtime loader skips them — they never enter the running
+# config. ``preview`` is the ONLY reader that admits the draft, via a fresh
+# LOCAL config load that never touches the running runtime (restart-only).
+
+
+@router.post(
+    "/strategies/{strategy_key}/draft",
+    response_model=StrategyRow,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_or_resume_draft(
+    strategy_key: str,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_write),
+) -> Any:
+    """Create the draft from the live strategy, or resume an existing one.
+
+    Clones the live header + junctions onto ``<key>__draft`` only if no draft
+    exists; otherwise resumes the existing draft (no silent overwrite).
+    """
+    return await _run(store.create_or_resume_draft(db, strategy_key))
+
+
+@router.post("/strategies/{strategy_key}/draft/refresh", response_model=StrategyRow)
+async def refresh_draft_from_live(
+    strategy_key: str,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_write),
+) -> Any:
+    """Discard the existing draft and re-clone it fresh from the live strategy."""
+    return await _run(store.refresh_draft_from_live(db, strategy_key))
+
+
+@router.delete("/strategies/{strategy_key}/draft", response_model=StrategyRow)
+async def delete_draft(
+    strategy_key: str,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_write),
+) -> Any:
+    """Discard the draft for a strategy (404 if none exists)."""
+    return await _run(store.delete_draft(db, strategy_key))
+
+
+@router.post("/strategies/{strategy_key}/preview", response_model=PreviewResponse)
+async def preview_draft(
+    strategy_key: str,
+    body: PreviewRequest,
+    user: dict = Depends(require_read),
+) -> Any:
+    """Evaluate the strategy's draft against one symbol's chain → scores/verdicts.
+
+    Loads a fresh LOCAL config that admits only this draft key, validates it,
+    and runs the engine. The running runtime config is never mutated
+    (restart-only, insight_engine.md §6.5). A missing draft → 409; a config that
+    fails §6.6 validation → 422 with structured errors.
+    """
+    try:
+        results, meta = await preview.preview_draft(
+            live_key=strategy_key,
+            symbol=body.symbol,
+            user_id=user.get("sub"),
+        )
+    except PreviewValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"message": "Draft failed config validation", "errors": exc.errors},
+        )
+    except PreviewError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+
+    return PreviewResponse(
+        draft_key=meta["draft_key"],
+        config_version=meta["config_version"],
+        underlying_price=meta["underlying_price"],
+        candidates_evaluated=meta["candidates_evaluated"],
+        results=[PreviewResultItem(**vars(r)) for r in results],
+    )
 
 
 # ── Rules ─────────────────────────────────────────────────────────────────
