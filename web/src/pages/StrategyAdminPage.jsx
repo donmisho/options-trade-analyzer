@@ -30,6 +30,7 @@ import {
 } from '../api/client';
 import { useToast } from '../components/Toast';
 import { formatDate } from '../utils/formatDate';
+import HardGatesSection from '../components/HardGatesSection';
 import './PageShared.css';
 
 // ─── Domain constants ───────────────────────────────────────────────────────
@@ -51,11 +52,14 @@ const AVAILABLE_STRUCTURES = [
 ];
 
 // Stacked config sections — bodies are their own stories; this shell mounts them.
+// Story tags corrected per OTA-785 Phase 0 finding #4 (the OTA-784 shell shipped
+// with the tags shifted by one slot): Parameters=OTA-827, Scoring=OTA-786,
+// Hard Gates=OTA-785 (built here), Adjustments=OTA-787.
 const SECTIONS = [
-  { key: 'parameters', title: 'Parameters', story: 'OTA-785', catalog: null },
+  { key: 'parameters', title: 'Parameters', story: 'OTA-827', catalog: null },
   { key: 'scoring',    title: 'Scoring Weights', story: 'OTA-786', catalog: 'scoring' },
-  { key: 'gates',      title: 'Additional Hard Gates · beyond core parameters', story: 'OTA-787', catalog: 'gates', addLabel: '+ Add hard gate from catalog' },
-  { key: 'adjustments', title: 'Post-Scoring Adjustments · penalties & bonuses', story: 'OTA-788', catalog: 'adjustments', addLabel: '+ Add adjustment from catalog' },
+  { key: 'gates',      title: 'Additional Hard Gates · beyond core parameters', story: 'OTA-785', catalog: 'gates', addLabel: '+ Add hard gate from catalog' },
+  { key: 'adjustments', title: 'Post-Scoring Adjustments · penalties & bonuses', story: 'OTA-787', catalog: 'adjustments', addLabel: '+ Add adjustment from catalog' },
 ];
 
 const DRAWER_TABS = [
@@ -508,14 +512,25 @@ export default function StrategyAdminPage() {
                 </div>
               </div>
 
-              {/* ── Stacked config sections (bodies are OTA-785/786/787/788) ── */}
+              {/* ── Stacked config sections ── */}
+              {/* Hard Gates (OTA-785) is built; the others remain scaffolds until
+                  their stories land (Parameters OTA-827, Scoring OTA-786,
+                  Adjustments OTA-787). */}
               {SECTIONS.map(sec => (
-                <SectionScaffold
-                  key={sec.key}
-                  section={sec}
-                  editable={editable}
-                  onOpenCatalog={sec.catalog ? () => setDrawerTab(sec.catalog) : null}
-                />
+                sec.key === 'gates' ? (
+                  <HardGatesSection
+                    key={sec.key}
+                    strategyKey={selected.strategy_key}
+                    editable={editable}
+                  />
+                ) : (
+                  <SectionScaffold
+                    key={sec.key}
+                    section={sec}
+                    editable={editable}
+                    onOpenCatalog={sec.catalog ? () => setDrawerTab(sec.catalog) : null}
+                  />
+                )
               ))}
 
               {/* ── Verdict Bands panel ── */}

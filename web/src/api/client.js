@@ -398,6 +398,87 @@ export async function previewDraft(strategyKey, symbol) {
   });
 }
 
+/**
+ * Junction + rule-catalog reads/writes for the section editors (OTA-785 Hard
+ * Gates; reused by OTA-786 Scoring / OTA-787 Adjustments). These are GENERIC over
+ * rule phase — gate-specific filtering happens at the call site (filter the
+ * catalog to phase === 'gate'). All writes target the DRAFT key (`<key>__draft`);
+ * the caller ensures the draft exists first via createOrResumeDraft.
+ */
+
+/**
+ * List every junction binding for a strategy, joined to each rule's display
+ * metadata (OTA-826). Draft-aware: pass the live key to read live bindings, or
+ * `<key>__draft` to read the draft's. Reads current DB state (not the
+ * restart-gated runtime), so freshly cloned drafts and just-saved writes appear
+ * without a restart. No `enabled` filter — disabled bindings surface.
+ * @param {string} strategyKey — live key or `<key>__draft`
+ * @returns StrategyJunctionRow[] — { junction_id, strategy_id, strategy_key,
+ *   rule_id, rule_key, evaluation_order, stop_if_fail, score_penalty, weight,
+ *   parameters, terminal_verdict, rationale, enabled, created_at, updated_at,
+ *   phase, intent, parameter_schema } ordered by evaluation_order
+ */
+export async function getStrategyJunctions(strategyKey) {
+  return apiFetch(`/config/strategies/${encodeURIComponent(strategyKey)}/junctions`);
+}
+
+/**
+ * Owner-spanning rule catalog (OTA-825) — the full OTA+SHARED bindable rule set,
+ * read from current DB state, no `enabled` filter (disabled rules surface as
+ * unavailable). Each row carries a computed `formula_registered` tri-state.
+ * Callers filter by phase (e.g. phase === 'gate' for the Hard Gates picker).
+ * @returns RuleAdminRow[] — RuleRow + { formula_registered: bool|null }
+ */
+export async function getRulesAdmin() {
+  return apiFetch('/config/rules/admin');
+}
+
+/**
+ * Create one junction binding (OTA-782, validated by OTA-783). Binds a rule to a
+ * strategy. Target the DRAFT key via body.strategy_key to keep live untouched.
+ * @param {Object} body — JunctionCreate: { strategy_key, rule_key,
+ *   evaluation_order, stop_if_fail (required); score_penalty, weight, parameters,
+ *   terminal_verdict, rationale, enabled (optional) }
+ * @returns JunctionRow — the persisted binding
+ */
+export async function createJunction(body) {
+  return apiFetch('/config/junction', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * Update one junction binding by natural key (OTA-782). The binding identity
+ * (strategy + rule) is immutable; pass the full mechanical+parameters body.
+ * @param {string} strategyKey — live key or `<key>__draft`
+ * @param {string} ruleKey
+ * @param {Object} body — JunctionUpdate: { evaluation_order, stop_if_fail
+ *   (required); score_penalty, weight, parameters, terminal_verdict, rationale,
+ *   enabled (optional) }
+ * @returns JunctionRow — the persisted binding
+ */
+export async function updateJunction(strategyKey, ruleKey, body) {
+  return apiFetch(
+    `/config/junction/${encodeURIComponent(strategyKey)}/${encodeURIComponent(ruleKey)}`,
+    { method: 'PUT', body: JSON.stringify(body) },
+  );
+}
+
+/**
+ * Delete one junction binding by natural key (OTA-782). Removes only the binding,
+ * never the rule. Target the DRAFT key to keep live untouched.
+ * @param {string} strategyKey — live key or `<key>__draft`
+ * @param {string} ruleKey
+ * @returns JunctionRow — the deleted binding
+ */
+export async function deleteJunction(strategyKey, ruleKey) {
+  return apiFetch(
+    `/config/junction/${encodeURIComponent(strategyKey)}/${encodeURIComponent(ruleKey)}`,
+    { method: 'DELETE' },
+  );
+}
+
 
 // ═══════════════════════════════════════════════════════════════════
 // USER PREFERENCES — Favorites
