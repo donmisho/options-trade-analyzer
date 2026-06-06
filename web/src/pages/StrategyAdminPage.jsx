@@ -32,6 +32,7 @@ import { useToast } from '../components/Toast';
 import { formatDate } from '../utils/formatDate';
 import HardGatesSection from '../components/HardGatesSection';
 import ScoringSection from '../components/ScoringSection';
+import AdjustmentsSection from '../components/AdjustmentsSection';
 import './PageShared.css';
 
 // ─── Domain constants ───────────────────────────────────────────────────────
@@ -514,9 +515,9 @@ export default function StrategyAdminPage() {
               </div>
 
               {/* ── Stacked config sections ── */}
-              {/* Hard Gates (OTA-785) and Scoring Weights (OTA-786) are built; the
-                  others remain scaffolds until their stories land (Parameters
-                  OTA-827, Adjustments OTA-787). */}
+              {/* Hard Gates (OTA-785), Scoring Weights (OTA-786), and Adjustments
+                  (OTA-787) are built; Parameters (OTA-827) remains a scaffold until
+                  its story lands. */}
               {SECTIONS.map(sec => {
                 if (sec.key === 'gates') {
                   return (
@@ -530,6 +531,15 @@ export default function StrategyAdminPage() {
                 if (sec.key === 'scoring') {
                   return (
                     <ScoringSection
+                      key={sec.key}
+                      strategyKey={selected.strategy_key}
+                      editable={editable}
+                    />
+                  );
+                }
+                if (sec.key === 'adjustments') {
+                  return (
+                    <AdjustmentsSection
                       key={sec.key}
                       strategyKey={selected.strategy_key}
                       editable={editable}
