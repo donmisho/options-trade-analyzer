@@ -23,6 +23,8 @@
  * scores/penalties/weights formatted by the host where displayed read-only.
  */
 
+import { useState } from 'react';
+
 const MONO = "'JetBrains Mono', monospace";
 
 const lblStyle = {
@@ -139,6 +141,42 @@ export function ParameterEditor({ schema, parameters, editable, onChange, onComm
 }
 
 /**
+ * PercentWeightInput — edits the junction `weight` as a PERCENT (OTA-786) while
+ * the stored value stays a FRACTION (numeric(7,4), summing to 1.0 server-side).
+ * Displays/edits e.g. `30.00 %`; emits the fraction (raw/100) on each keystroke
+ * so the host's live sum indicator stays current, and the host rounds to 4dp on
+ * write. Local string state echoes exactly what the user types (no mid-type
+ * rounding jank); it initialises from the prop at mount only — new rows remount
+ * via their junction_id key, so reloads pick up server values.
+ */
+function PercentWeightInput({ weight, disabled, onChange, onCommit }) {
+  const toPct = w => (w === '' || w == null ? '' : String(+(Number(w) * 100).toFixed(2)));
+  const [str, setStr] = useState(() => toPct(weight));
+
+  return (
+    <div>
+      <div style={lblStyle}>Weight</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        <input
+          type="number"
+          value={str}
+          disabled={disabled}
+          step={0.01}
+          onChange={e => {
+            const raw = e.target.value;
+            setStr(raw);
+            onChange({ weight: raw === '' ? '' : Number(raw) / 100 });
+          }}
+          onBlur={() => onCommit && onCommit()}
+          style={{ ...inputStyle, width: 76, textAlign: 'right' }}
+        />
+        <span style={{ fontSize: 11, color: 'var(--muted)' }}>%</span>
+      </div>
+    </div>
+  );
+}
+
+/**
  * JunctionRowEditor — one junction binding as an editable row.
  *
  * @param {Object}  junction          — StrategyJunctionRow (OTA-826 shape)
@@ -146,6 +184,7 @@ export function ParameterEditor({ schema, parameters, editable, onChange, onComm
  * @param {boolean} showEvaluationOrder — render the evaluation_order input (default true)
  * @param {boolean} showStopIfFail      — render the stop_if_fail toggle (gates)
  * @param {boolean} showWeight          — render the weight input (scoring)
+ * @param {boolean} weightAsPercent     — display/edit weight as percent (OTA-786); stored as fraction
  * @param {boolean} showScorePenalty    — render the score_penalty input (adjustments)
  * @param {boolean} showParameters      — render the ParameterEditor (default true)
  * @param {boolean} duplicateOrder      — advisory: this row's evaluation_order collides
@@ -160,6 +199,7 @@ export default function JunctionRowEditor({
   showEvaluationOrder = true,
   showStopIfFail = false,
   showWeight = false,
+  weightAsPercent = false,
   showScorePenalty = false,
   showParameters = true,
   duplicateOrder = false,
@@ -255,7 +295,9 @@ export default function JunctionRowEditor({
       {/* ── Mechanical fields + remove ── */}
       <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', flexShrink: 0 }}>
         {showEvaluationOrder && numberField('Order', 'evaluation_order', j.evaluation_order, { isInt: true, width: 60 })}
-        {showWeight && numberField('Weight', 'weight', j.weight, { step: 0.01, width: 76 })}
+        {showWeight && (weightAsPercent
+          ? <PercentWeightInput weight={j.weight} disabled={disabled} onChange={onChange} onCommit={onCommit} />
+          : numberField('Weight', 'weight', j.weight, { step: 0.01, width: 76 }))}
         {showScorePenalty && numberField('Penalty', 'score_penalty', j.score_penalty, { step: 0.01, width: 76 })}
         {showStopIfFail && (
           <div>

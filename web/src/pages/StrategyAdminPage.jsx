@@ -31,6 +31,7 @@ import {
 import { useToast } from '../components/Toast';
 import { formatDate } from '../utils/formatDate';
 import HardGatesSection from '../components/HardGatesSection';
+import ScoringSection from '../components/ScoringSection';
 import './PageShared.css';
 
 // ─── Domain constants ───────────────────────────────────────────────────────
@@ -513,25 +514,37 @@ export default function StrategyAdminPage() {
               </div>
 
               {/* ── Stacked config sections ── */}
-              {/* Hard Gates (OTA-785) is built; the others remain scaffolds until
-                  their stories land (Parameters OTA-827, Scoring OTA-786,
-                  Adjustments OTA-787). */}
-              {SECTIONS.map(sec => (
-                sec.key === 'gates' ? (
-                  <HardGatesSection
-                    key={sec.key}
-                    strategyKey={selected.strategy_key}
-                    editable={editable}
-                  />
-                ) : (
+              {/* Hard Gates (OTA-785) and Scoring Weights (OTA-786) are built; the
+                  others remain scaffolds until their stories land (Parameters
+                  OTA-827, Adjustments OTA-787). */}
+              {SECTIONS.map(sec => {
+                if (sec.key === 'gates') {
+                  return (
+                    <HardGatesSection
+                      key={sec.key}
+                      strategyKey={selected.strategy_key}
+                      editable={editable}
+                    />
+                  );
+                }
+                if (sec.key === 'scoring') {
+                  return (
+                    <ScoringSection
+                      key={sec.key}
+                      strategyKey={selected.strategy_key}
+                      editable={editable}
+                    />
+                  );
+                }
+                return (
                   <SectionScaffold
                     key={sec.key}
                     section={sec}
                     editable={editable}
                     onOpenCatalog={sec.catalog ? () => setDrawerTab(sec.catalog) : null}
                   />
-                )
-              ))}
+                );
+              })}
 
               {/* ── Verdict Bands panel ── */}
               <div style={{ marginTop: 24 }}>
