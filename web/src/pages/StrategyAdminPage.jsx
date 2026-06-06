@@ -33,6 +33,7 @@ import { formatDate } from '../utils/formatDate';
 import HardGatesSection from '../components/HardGatesSection';
 import ScoringSection from '../components/ScoringSection';
 import AdjustmentsSection from '../components/AdjustmentsSection';
+import VerdictBandsSection from '../components/VerdictBandsSection';
 import './PageShared.css';
 
 // ─── Domain constants ───────────────────────────────────────────────────────
@@ -556,13 +557,12 @@ export default function StrategyAdminPage() {
                 );
               })}
 
-              {/* ── Verdict Bands panel ── */}
-              <div style={{ marginTop: 24 }}>
-                <div style={{ ...sectionTitleStyle, marginBottom: 12 }}>
-                  Verdict Bands · final score → grade
-                </div>
-                <VerdictBands bands={selected.verdict_band_set} />
-              </div>
+              {/* ── Verdict Bands editor (OTA-788) ── */}
+              <VerdictBandsSection
+                strategyKey={selected.strategy_key}
+                editable={editable}
+                liveBands={selected.verdict_band_set}
+              />
 
               {/* ── Live preview (OTA-791) — editable strategies only ── */}
               {editable && (
@@ -704,46 +704,6 @@ const GRADE_FOR_VERDICT = {
   CAUTION: { grade: 'D', color: '#f97316' },
   PASS:    { grade: 'F', color: 'var(--red, #f87171)' },
 };
-
-function VerdictBands({ bands }) {
-  const list = Array.isArray(bands) ? bands : [];
-  if (!list.length) {
-    return (
-      <div style={{
-        border: '1px solid var(--border, #30363d)', borderRadius: 6, padding: 16,
-        fontSize: 11, color: 'var(--muted, #8b949e)', fontFamily: MONO,
-      }}>
-        No verdict bands configured.
-      </div>
-    );
-  }
-  return (
-    <div style={{
-      border: '1px solid var(--border, #30363d)', borderRadius: 6, padding: 16,
-      display: 'grid', gridTemplateColumns: `repeat(${Math.min(list.length, 5)}, 1fr)`, gap: 8,
-    }}>
-      {list.map((b, i) => {
-        const meta = GRADE_FOR_VERDICT[String(b.verdict || '').toUpperCase()]
-          ?? { grade: b.verdict, color: 'var(--text, #e6edf3)' };
-        return (
-          <div key={i} style={{
-            border: '1px solid var(--border, #30363d)', borderRadius: 4, padding: '10px 12px',
-          }}>
-            <div style={{ fontSize: 16, fontWeight: 600, color: meta.color, marginBottom: 4 }}>
-              {meta.grade}
-            </div>
-            <div style={{ fontSize: 11, color: 'var(--muted, #8b949e)' }}>
-              {Number(b.min_score).toFixed(2)} – {Number(b.max_score).toFixed(2)}
-            </div>
-            <div style={{ fontSize: 10, color: 'var(--muted, #8b949e)', textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: 6 }}>
-              {b.verdict}
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
 
 // ─── Live preview panel (OTA-791) ───────────────────────────────────────────
 //
