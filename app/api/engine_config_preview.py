@@ -118,13 +118,19 @@ def evaluate_screening(
     config: EngineConfig,
     registry: FormulaRegistry,
     adapter: Any,
+    sink: Any = None,
 ) -> list[ScreeningResult]:
     """Evaluate *candidates* against one strategy's rule_set → ranked results.
 
-    Wraps the engine's single public ``evaluate`` (sink=None — preview/screening
-    runs are not persisted to bronze), then joins each ResultRecord back to its
-    candidate by id (``run_batch`` does not preserve input order) and ranks by
-    score descending, halted candidates last.
+    Wraps the engine's single public ``evaluate``, then joins each ResultRecord
+    back to its candidate by id (``run_batch`` does not preserve input order) and
+    ranks by score descending, halted candidates last.
+
+    ``sink`` defaults to ``None`` so preview/draft and live-scorecard screening
+    runs are NOT persisted to bronze (unchanged behaviour). OTA-760's
+    ``/evaluate/structured`` rewire passes the live runtime bronze sink so its
+    engine evaluations land in ``bronze_evaluations`` — the single decision-C
+    screening path, now with optional persistence.
     """
     records: list[ResultRecord] = evaluate(
         candidates=candidates,
@@ -133,7 +139,7 @@ def evaluate_screening(
         config=config,
         registry=registry,
         adapter=adapter,
-        sink=None,
+        sink=sink,
     )
     by_id = {c.candidate_id: c for c in candidates}
     results = [_to_screening_result(r, by_id.get(r.candidate_id)) for r in records]

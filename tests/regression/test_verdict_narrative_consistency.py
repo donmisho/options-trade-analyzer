@@ -9,12 +9,19 @@ This file locks in regression coverage so the contradiction cannot return.
 Three test categories:
   2a. Structural-incompatibility short-circuit — 9 (structure, strategy)
       cells assert is_compatible returns False and classifier produces no best_fit.
-  2b. Verdict consistency invariant — _assign_verdict matches score band,
-      TradeEvaluationCard validates verdict enum, and 24 compatible
-      (structure × strategy × score-band) cases produce consistent results.
+  2b. Verdict consistency invariant — TradeEvaluationCard validates the verdict
+      enum, and the compatible (structure × strategy) pairs are accepted by the
+      classifier across score bands.
   2c. MMM Bear Put canary — eligible_strategies=[trend-rider], no SP entry.
 
 Depends on OTA-636 (structural gating) and OTA-637 (pill/prose unification).
+
+OTA-760: the in-route ``_assign_verdict`` 70/50 band literal was DELETED — the
+verdict is now produced by the engine's per-strategy ``verdict_band_set``
+(Phase-7 band lookup), not by route code. The score→verdict band-mapping
+assertions that exercised ``_assign_verdict`` are removed here; band correctness
+is now owned by the engine config + engine pipeline tests. The structural-gating
+and classifier coverage (the actual OTA-636/637 regression surface) is unchanged.
 """
 
 import pytest
@@ -23,7 +30,6 @@ from app.analysis.strategy_routing import is_compatible, get_compatible_strategi
 from app.analysis.strategy_classifier import classify_best_strategy
 from app.analysis.strategy_definitions import StrategyScore
 from app.analysis.strategy_definitions import STRATEGIES
-from app.api.evaluation_routes import _assign_verdict
 from app.models.schemas import TradeEvaluationCard
 
 
@@ -104,38 +110,10 @@ COMPATIBLE_PAIRS = [
     ("long_put",         "lottery-ticket"),
 ]
 
-# Score bands: {score_range: expected_verdict}
-SCORE_BAND_SAMPLES = [
-    (0,   "PASS"),
-    (25,  "PASS"),
-    (49,  "PASS"),
-    (50,  "WAIT"),
-    (55,  "WAIT"),
-    (69,  "WAIT"),
-    (70,  "EXECUTE"),
-    (85,  "EXECUTE"),
-    (100, "EXECUTE"),
-]
-
-
-class TestAssignVerdictScoreBands:
-    """_assign_verdict deterministically maps scores to verdict strings."""
-
-    @pytest.mark.parametrize("score,expected", SCORE_BAND_SAMPLES)
-    def test_score_to_verdict_mapping(self, score, expected):
-        assert _assign_verdict(score) == expected
-
-    def test_boundary_49_is_pass(self):
-        assert _assign_verdict(49) == "PASS"
-
-    def test_boundary_50_is_wait(self):
-        assert _assign_verdict(50) == "WAIT"
-
-    def test_boundary_69_is_wait(self):
-        assert _assign_verdict(69) == "WAIT"
-
-    def test_boundary_70_is_execute(self):
-        assert _assign_verdict(70) == "EXECUTE"
+# OTA-760: the score→verdict band-mapping table (and the TestAssignVerdictScoreBands
+# suite that exercised the deleted in-route ``_assign_verdict``) is removed. Band
+# correctness now lives in the engine's per-strategy ``verdict_band_set`` and is
+# covered by the engine pipeline/config tests, not by route-level coverage.
 
 
 class TestTradeEvaluationCardVerdictValidator:
@@ -182,8 +160,10 @@ VERDICT_INVARIANT_CASES = [
 
 
 class TestVerdictConsistencyInvariant:
-    """For every compatible (structure, strategy) pair, the verdict produced by
-    _assign_verdict matches the score band, and the classifier accepts the pair."""
+    """For every compatible (structure, strategy) pair, the classifier accepts the
+    pair across score bands. (OTA-760: the score→verdict band assertion is removed
+    — the verdict is now the engine's per-strategy band lookup, not _assign_verdict.)
+    """
 
     @pytest.mark.parametrize(
         "structure,strategy_key,score,expected_verdict,dte",
@@ -193,18 +173,11 @@ class TestVerdictConsistencyInvariant:
             for struct, strat, score, _, _ in VERDICT_INVARIANT_CASES
         ],
     )
-    def test_compatible_pair_verdict_matches_score_band(
+    def test_compatible_pair_accepted_by_classifier(
         self, structure, strategy_key, score, expected_verdict, dte
     ):
         # Compatibility holds
         assert is_compatible(strategy_key, structure) is True
-
-        # Verdict deterministically follows score
-        verdict = _assign_verdict(score)
-        assert verdict == expected_verdict, (
-            f"_assign_verdict({score}) = {verdict}, expected {expected_verdict} "
-            f"for ({structure}, {strategy_key})"
-        )
 
         # Classifier accepts the compatible pair with strategy-appropriate DTE
         candidate = _make_score(strategy_key, score)

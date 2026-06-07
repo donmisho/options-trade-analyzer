@@ -55,16 +55,21 @@ from app.ota_adapters._shared.black_scholes import (
 )
 from app.models.session import async_session
 from app.validators.narrative_grounding import EvaluationFields, validate_narrative
-from app.analysis.hard_gates import ACTION_BLOCK, ACTION_DEFER, evaluate_hard_gates, GateTradeContext
+from app.analysis.hard_gates import ACTION_BLOCK, ACTION_DEFER, GateTradeContext
+from app.analysis.hard_gates.earnings_gate import EarningsInWindowGate
 from app.insight_engine.models import Candidate
 from app.services.symbol_normalization import canonicalize
 from app.analysis.scoring_factors.asymmetry import (
-    asymmetry_penalty as _asymmetry_penalty,
     asymmetry_ratio as _asymmetry_ratio,
 )
 from app.analysis.strategy_classifier import classify_best_strategy
 from app.analysis.strategy_routing import normalize_to_structure
 from app.analysis.strategy_definitions import StrategyScore
+# OTA-760: engine-precedence rewire — engine produces verdict+score, Claude narrates survivors.
+from app.ota_adapters.engine_runtime import get_engine_runtime
+from app.ota_adapters.options_chain.adapter import OptionsChainAdapter
+from app.options_rules.screening import get_registry as get_screening_registry
+from app.api.engine_config_preview import evaluate_screening
 
 router = APIRouter(prefix="/evaluate", tags=["Trade Evaluation"])
 
@@ -177,14 +182,165 @@ def _try_parse_cards(raw: str) -> Optional[List[TradeEvaluationCard]]:
         return None
 
 
-def _assign_verdict(score: float) -> str:
-    """Enforce strict score band → verdict mapping. This is the ONLY place verdicts are assigned from scores."""
-    if score >= 70:
-        return "EXECUTE"
-    elif score >= 50:
-        return "WAIT"
-    else:
-        return "PASS"
+# ─── OTA-760: engine-rewire helpers ──────────────────────────────────────
+#
+# _assign_verdict (the in-route 70/50 band literal) is DELETED. Under
+# LLM-precedence (insight_engine.md §2.6) the engine owns the verdict and the
+# score: both come from the engine ResultRecord's Phase-7 band lookup against
+# the per-strategy verdict_band_set (§3.8). No route/app code assigns a verdict.
+
+_earnings_gate_singleton = None
+
+
+def _get_earnings_gate() -> EarningsInWindowGate:
+    """Lazily build the retained EarningsInWindowGate (§2 residual, OTA-760).
+
+    The engine reproduces dte / credit-debit / negative-EV gating, so those
+    app-layer gates were removed from this route. EarningsInWindowGate is
+    RETAINED unchanged as a PRE-ENGINE short-circuit because the engine's
+    earnings gate is currently INERT — no next_earnings_date producer is wired
+    into the options-chain adapter (catalog marks earnings "nullable until
+    wired"), so its route formulas never fire. Removing this gate would silently
+    drop live earnings protection. When an adapter earnings-input producer
+    lands, this retained gate MUST be removed in the SAME change, or the app
+    gate will mask the engine gate (the producer's earnings logic never fires).
+    """
+    global _earnings_gate_singleton
+    if _earnings_gate_singleton is None:
+        _earnings_gate_singleton = EarningsInWindowGate()
+    return _earnings_gate_singleton
+
+
+def _to_float_safe(v) -> float:
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return math.nan
+
+
+def _credit_debit_pct(trade: Optional[dict]) -> tuple[Optional[float], Optional[float]]:
+    """Reproduce CreditDebitQualityGate's display metrics from net_debit/width.
+
+    The engine credit/debit gates enforce the floor/ceiling; these values are
+    display-only (no effect on verdict/score). Credit spread → net_debit < 0.
+    """
+    if not trade:
+        return None, None
+    try:
+        net_debit = float(trade.get("net_debit") or 0)
+        spread_width = float(trade.get("spread_width") or 0)
+    except (TypeError, ValueError):
+        return None, None
+    if spread_width <= 0:
+        return None, None
+    if net_debit < 0:
+        return round(abs(net_debit) / spread_width, 4), None
+    if net_debit > 0:
+        return None, round(net_debit / spread_width, 4)
+    return None, None
+
+
+_DTE_WARNING_LOW = 8
+_DTE_WARNING_HIGH = 13
+
+
+def _dte_warning_message(dte: Optional[int]) -> Optional[str]:
+    """Reproduce DTEGate's 8-13 warning string (display only).
+
+    The score penalty is applied by the engine's dte_warning_penalty rule; this
+    is purely the user-facing banner the legacy strategy-agnostic gate showed
+    for any 8-13 DTE trade.
+    """
+    if dte is None:
+        return None
+    if _DTE_WARNING_LOW <= dte <= _DTE_WARNING_HIGH:
+        return (
+            f"{dte} DTE — below recommended minimum. Exit-management time is "
+            "limited; a near-expiry score penalty applies."
+        )
+    return None
+
+
+def _asymmetry_ratio_from_candidate(candidate) -> Optional[float]:
+    """p_max_loss / p_max_profit diagnostic from the engine candidate's COMPUTED
+    values (populated by the adapter callback during evaluate). Display only —
+    the score impact is the engine's probability_asymmetry_penalty adjustment.
+    """
+    nv = getattr(candidate, "named_values", {}) or {}
+    pml = nv.get("p_max_loss")
+    pmp = nv.get("p_max_profit")
+    try:
+        pml = float(pml) if pml is not None else None
+        pmp = float(pmp) if pmp is not None else None
+    except (TypeError, ValueError):
+        return None
+    return _asymmetry_ratio(pml, pmp)
+
+
+def _halt_claude_read(screening_result) -> str:
+    """Templated read for a candidate the engine halted at a gate (non-survivor).
+
+    No Claude call is made for halted candidates (§2.6); the verdict is the
+    engine's terminal_verdict.
+    """
+    return (
+        "Did not pass screening — the engine halted this trade at a hard gate "
+        f"before scoring (terminal_phase={screening_result.terminal_phase}). "
+        "See the engine decision trace for the failing rule."
+    )
+
+
+def _build_engine_candidate(request, strategy_key: str, dte: int, run_id: str) -> Candidate:
+    """Build one engine Candidate from the request's pre-chosen trade (DECISION 1
+    approach A).
+
+    The legacy /analyze trade dicts (ScoredSpread / ScoredNakedOption) use field
+    names that already mirror the options adapter's canonical named values, so the
+    trade dict seeds named_values directly; market context comes from the request.
+    Verified by the OTA-760 named-value parity pass (PASS). COMPUTED values
+    (total_ev, probability_matrix, p_max_loss/p_max_profit) are populated by the
+    adapter callback during engine.evaluate. This route does NOT re-fetch the
+    chain (approach B rejected) and does NOT re-run _compute_derived (which would
+    zero net_theta from absent per-leg thetas).
+    """
+    trade = dict(request.trade or {})
+    nv = dict(trade)
+
+    # Naked trades carry option_type but no spread_type; the engine/adapter use
+    # long_call / long_put as the structure key.
+    if not nv.get("spread_type") and trade.get("option_type"):
+        nv["spread_type"] = f"long_{trade['option_type']}"
+
+    # Core market context (request-supplied; "engine-sourced" per DECISION 1).
+    nv["underlying_price"] = request.current_price
+    nv["stock_price"] = request.current_price
+    nv["dte"] = dte
+    if trade.get("expiration"):
+        nv["expiration"] = trade["expiration"]
+        nv["expiry_date"] = trade["expiration"]
+
+    _iv = trade.get("iv") if trade.get("iv") is not None else request.iv
+    nv["iv"] = _iv
+    nv["atm_iv"] = _iv  # iv_rank proxy when a true percentile is absent
+
+    sma = request.sma_alignment or {}
+    if sma.get("sma_8") is not None:
+        nv["sma_8"] = sma.get("sma_8")
+    if sma.get("sma_21") is not None:
+        nv["sma_21"] = sma.get("sma_21")
+    if sma.get("sma_50") is not None:
+        nv["sma_50"] = sma.get("sma_50")
+    _align = sma.get("alignment") or sma.get("ma_alignment")
+    if _align:
+        nv["sma_alignment"] = str(_align).upper()
+        nv["sma_alignment_classification"] = str(_align).upper()
+
+    return Candidate(
+        candidate_id=f"{run_id}:{strategy_key}",
+        candidate_type="options_trade",
+        named_values=nv,
+        symbol=canonicalize(request.symbol),
+    )
 
 
 async def _log_validator_event(
@@ -363,8 +519,12 @@ def _build_structured_user_message(
 
     lines += [
         "",
-        "Populate all TradeEvaluationCard fields for each strategy.",
-        "Set verdict from score (>=70 EXECUTE, 50-69 WAIT, <50 PASS).",
+        # OTA-760: the engine owns verdict + score (Phase-7 band lookup). Claude
+        # narrates an already-decided verdict — it must NOT set or infer a verdict
+        # or a band. The prior "Set verdict from score (>=70/50)" instruction is
+        # removed: no band literal lives in the prompt.
+        "Populate the narrative and trade-structure fields for each strategy.",
+        "Do NOT set or change the verdict or the score — those are decided upstream.",
         "claude_read: 2-3 sentences, specific, no generic statements.",
         "key_risks: exactly 2-3 items, each under 15 words.",
         "thesis_invalidators: exactly 2-3 specific price/event conditions.",
@@ -509,14 +669,21 @@ async def evaluate_structured(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Phase 2.11 — Structured multi-strategy AI evaluation.
+    Structured multi-strategy evaluation — engine-precedence (OTA-760).
 
-    For each strategy_key:
-      1. Computes a Black-Scholes probability matrix (iv + derived dte)
-      2. Builds a prompt using the DEEP_DIVE_SYSTEM from SKILL.md
-      3. Calls Claude via Foundry and parses JSON into TradeEvaluationCard list
-      4. Retries once with correction context if JSON parsing fails
-      5. Writes the full input/output to agent_run_log
+    LLM precedence (insight_engine.md §2.6): the engine produces the verdict and
+    score; Claude only narrates survivors. Flow:
+      1. Retained EarningsInWindowGate runs PRE-ENGINE (the engine's earnings gate
+         is inert until an adapter earnings producer lands); a BLOCK/DEFER halt
+         short-circuits with no engine/Claude call.
+      2. For every requested strategy, build a Candidate from the request's trade
+         and run engine.evaluate (via the shared evaluate_screening path, with the
+         runtime bronze sink). Verdict + score come ONLY from the ResultRecord's
+         Phase-7 band lookup against the per-strategy verdict_band_set.
+      3. Claude is called once for SURVIVORS only, for narrative prose; it never
+         sets or alters verdict/score. Halted candidates get a templated read.
+      4. Writes the full input/output to agent_run_log; bronze persistence is
+         handled inside engine.evaluate via the injected sink.
     """
     adapter = _get_adapter()
     skill = get_skill("claude-trade-agent")
@@ -573,16 +740,33 @@ async def evaluate_structured(
                         f"{request.symbol}: {exc}"
                     )
 
-    # ─── Hard Gate Evaluation (OTA-502+) ─────────────────────────────────────
-    # Runs BEFORE all inline gates. Registered gates are evaluated in order;
-    # first triggered gate forces PASS. Non-triggered gates may inject
-    # effective_dte_override and penalty_points used later in scoring.
+    # ─── OTA-760: engine runtime + fail-closed guards ────────────────────────
+    runtime = get_engine_runtime()
+    if request.trade is None:
+        raise HTTPException(
+            status_code=422,
+            detail="trade data is required: the engine evaluates a concrete candidate.",
+        )
+    _unknown_keys = [k for k in request.strategy_keys if k not in runtime.config.rule_sets]
+    if _unknown_keys:
+        # MANDATORY GUARD: never fall back to a hardcoded band for an unknown
+        # strategy — fail closed (§3.8 / OTA-760).
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Unknown strategy_key(s) not present in the engine config: "
+                f"{_unknown_keys}. Fail-closed — no hardcoded verdict fallback."
+            ),
+        )
+
+    # ─── Earnings Gate (retained app-layer §2 residual — OTA-760) ────────────
+    # The engine reproduces dte / credit-debit / negative-EV gating, so those
+    # gates were removed from this route. EarningsInWindowGate is RETAINED
+    # unchanged as a PRE-ENGINE short-circuit (the engine's earnings gate is
+    # inert — no next_earnings_date producer wired into the adapter yet). It
+    # fires before engine.evaluate; on a BLOCK/DEFER halt no engine or Claude
+    # call is made. Its WAIT_FOR_EARNINGS metadata is preserved natively.
     auto_pass_reason = None
-    dte_warning_msg = None
-    credit_pct_of_width = None
-    debit_pct_of_width = None
-    _gate_result = None
-    _gate_penalty_points = 0
 
     _expiry_date = None
     if request.trade and request.trade.get("expiration"):
@@ -601,7 +785,7 @@ async def evaluate_structured(
         except (TypeError, ValueError):
             _gate_ev = None
 
-    # OTA-775: build a generic Candidate with named values for gates
+    # OTA-775: generic Candidate with named values for the earnings gate
     _gate_candidate = Candidate(
         candidate_id=str(run_id),
         candidate_type="options_trade",
@@ -619,40 +803,39 @@ async def evaluate_structured(
         trade=request.trade,
         db=db,
     )
-    _gate_result = await evaluate_hard_gates(_gate_ctx)
+    earnings_result = await _get_earnings_gate().evaluate(_gate_ctx)
     _wait_for_earnings = False  # OTA-515: set when action is DEFER
 
-    # OTA-776: domain mapping — action codes → OTA verdict strings
+    # OTA-776: domain mapping — action codes → OTA verdict strings (earnings only)
     _ACTION_TO_VERDICT = {
         ACTION_BLOCK: "PASS",
         ACTION_DEFER: "WAIT_FOR_EARNINGS",
     }
 
-    if _gate_result and _gate_result.triggered:
-        if _gate_result.action == ACTION_DEFER:
+    if earnings_result and earnings_result.triggered:
+        if earnings_result.action == ACTION_DEFER:
             # OTA-515: Route 2 or 3 — short-circuit with WAIT_FOR_EARNINGS cards
             _wait_for_earnings = True
-            auto_pass_reason = _gate_result.reason
+            auto_pass_reason = earnings_result.reason
         else:
-            # Hard block (BLOCK) — feed into the existing auto-pass short-circuit
-            auto_pass_reason = _gate_result.reason
-    elif _gate_result and not _gate_result.triggered:
-        # Modifier-only result (Route 4: pre-earnings momentum play)
-        if _gate_result.effective_dte_override is not None:
-            dte = _gate_result.effective_dte_override
-        if _gate_result.penalty_points:
-            _gate_penalty_points = _gate_result.penalty_points
+            # Hard block (BLOCK) — feed the auto-pass short-circuit below
+            auto_pass_reason = earnings_result.reason
+    elif earnings_result and not earnings_result.triggered:
+        # Route 4 (pre-earnings momentum play): apply effective_dte as a
+        # PRE-ENGINE input so the engine scores with the adjusted DTE.
+        if earnings_result.effective_dte_override is not None:
+            dte = earnings_result.effective_dte_override
+        # DOCUMENTED RESIDUAL (OTA-760): the Route-4 15-point penalty is NOT
+        # applied. The engine owns the score; a post-engine subtraction would
+        # desync the score from the engine band-lookup verdict (forbidden —
+        # verdict must come only from the ResultRecord). Restore as a
+        # junction-bound earnings adjustment when the earnings input producer
+        # lands and the retained EarningsInWindowGate is removed.
 
-    # ─── OTA-780: Extract gate metadata ─────────────────────────────────────
-    # DTE warning, credit/debit metrics now come from registered gates.
-    if _gate_result:
-        dte_warning_msg = _gate_result.metadata.get("dte_warning")
-        credit_pct_of_width = _gate_result.metadata.get("credit_pct_of_width")
-        debit_pct_of_width = _gate_result.metadata.get("debit_pct_of_width")
-
-    # ─── Auto-PASS / WAIT_FOR_EARNINGS: return immediately, NO Claude API call ─
+    # ─── Auto-PASS / WAIT_FOR_EARNINGS: return immediately, NO engine/Claude ──
+    # Only the retained earnings gate can short-circuit here (OTA-760).
     if auto_pass_reason:
-        _verdict = _ACTION_TO_VERDICT.get(_gate_result.action, "PASS") if _gate_result else "PASS"
+        _verdict = _ACTION_TO_VERDICT.get(earnings_result.action, "PASS") if earnings_result else "PASS"
         logger.info(
             f"Auto-{_verdict} for {request.symbol} (strategy_keys={request.strategy_keys}): {auto_pass_reason[:80]}"
         )
@@ -666,6 +849,9 @@ async def evaluate_structured(
             else:
                 _claude_read = "Wait is strictly better — entry improves post-crush."
 
+        # Credit/debit % reproduced app-side (CreditDebitQualityGate removed; the
+        # engine never runs on an earnings short-circuit). Display-only.
+        _ap_credit_pct, _ap_debit_pct = _credit_debit_pct(request.trade)
         auto_pass_cards = []
         for _key in request.strategy_keys:
             _label = _key.replace("-", " ").title()
@@ -688,10 +874,10 @@ async def evaluate_structured(
                 key_risks=[],
                 thesis_invalidators=[],
                 auto_pass_reason=auto_pass_reason,
-                credit_pct_of_width=credit_pct_of_width,
-                debit_pct_of_width=debit_pct_of_width,
-                dte_after_earnings=_gate_result.metadata.get("dte_after_earnings") if _wait_for_earnings and _gate_result else None,
-                reevaluate_on=_gate_result.metadata.get("reevaluate_on") if _wait_for_earnings and _gate_result else None,
+                credit_pct_of_width=_ap_credit_pct,
+                debit_pct_of_width=_ap_debit_pct,
+                dte_after_earnings=earnings_result.metadata.get("dte_after_earnings") if _wait_for_earnings and earnings_result else None,
+                reevaluate_on=earnings_result.metadata.get("reevaluate_on") if _wait_for_earnings and earnings_result else None,
             ))
 
         db.add(AgentRunLog(
@@ -730,7 +916,7 @@ async def evaluate_structured(
                 f"iv={request.iv}, strategies={request.strategy_keys}, dte={dte}, "
                 f"trade_keys={list(request.trade.keys()) if request.trade else None}")
 
-    # Compute probability matrix once (same IV/price/DTE across all strategies)
+    # Probability matrix once (same IV/price/DTE across all strategies) — display only.
     pm = compute_probability_matrix(
         current_price=request.current_price,
         iv=request.iv,
@@ -742,275 +928,284 @@ async def evaluate_structured(
         "matrix": pm.matrix,
     }
 
-    # ── OTA-618: Build strategy_spec per strategy ────────────────────────────
-    from app.analysis.strategy_definitions import STRATEGIES as _STRATEGIES
-    _strategy_specs = {}
-    for _sk in request.strategy_keys:
-        _sdef = _STRATEGIES.get(_sk)
-        if _sdef:
-            _credit_types = {"bull_put_credit", "bear_call_credit"}
-            _is_credit = bool(_credit_types & set(_sdef.compatible_structures))
-            _strategy_specs[_sk] = {
-                "preferred_dte_window": [_sdef.dte_min, _sdef.dte_max],
-                "preferred_structure": "credit" if _is_credit else "debit",
-                "compatible_structures": _sdef.compatible_structures,
-            }
+    # ─── Engine evaluation (LLM-precedence, insight_engine.md §2.6) ───────────
+    # The engine runs to completion (gates → scoring → adjustments → verdict)
+    # for EVERY requested strategy BEFORE any Claude call. Verdict and score come
+    # ONLY from the engine ResultRecord's Phase-7 band lookup against the
+    # per-strategy verdict_band_set (§3.8); no app/route code assigns a verdict.
+    # evaluate_screening is the single decision-C screening path; passing
+    # runtime.sink lands bronze candidate snapshots + decisions (OTA-758).
+    _chain_adapter = OptionsChainAdapter()
+    _registry = get_screening_registry()
 
+    engine_results: dict[str, Any] = {}
+    for _key in request.strategy_keys:
+        _cand = _build_engine_candidate(request, _key, dte, run_id)
+        _screen = evaluate_screening(
+            candidates=[_cand],
+            strategy_key=_key,
+            config=runtime.config,
+            registry=_registry,
+            adapter=_chain_adapter,
+            sink=runtime.sink,
+        )
+        if not _screen:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Engine returned no result for strategy {_key!r}.",
+            )
+        _sr = _screen[0]
+        if _sr.verdict is None:
+            # Fail-closed: a gate halt with no terminal_verdict is a config gap —
+            # never invent a verdict (MANDATORY GUARD).
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"Engine produced no verdict for strategy {_key!r} "
+                    f"(terminal_phase={_sr.terminal_phase}). Engine config issue — "
+                    "not falling back to a hardcoded band."
+                ),
+            )
+        engine_results[_key] = (_sr, _cand)
+
+    # Survivors completed through the verdict phase; halted candidates exited at a
+    # gate (terminal_phase = the gate phase value). Claude narrates survivors only.
+    survivor_keys = [
+        k for k, (sr, _c) in engine_results.items()
+        if sr.terminal_phase == "verdict"
+    ]
+
+    # ─── Claude narrative — survivors only, prose only (§2.6) ─────────────────
+    # Claude sits strictly downstream of the engine verdict. It never sets or
+    # alters verdict/score; for halted candidates it is not called at all.
     system_prompt = skill.get("DEEP_DIVE_SYSTEM")
-    user_message = _build_structured_user_message(
-        symbol=request.symbol,
-        current_price=request.current_price,
-        iv=request.iv,
-        sma_alignment=request.sma_alignment,
-        strategy_keys=request.strategy_keys,
-        scores=request.scores,
-        trade=request.trade,
-        current_date=current_date,
-        dte=dte,
-        strategy_specs=_strategy_specs,
-    )
+    _claude_by_key: dict[str, Any] = {}
+    raw_text = ""
+    user_message = ""
+    _model_name = "none"
+    _input_tokens = 0
+    _output_tokens = 0
+    _otel_trace_id = None
 
-    market_snapshot = {
-        "symbol": canonicalize(request.symbol),
-        "underlying_price": request.current_price,
-        "iv": request.iv,
-        **request.sma_alignment,
-    }
+    if survivor_keys:
+        # OTA-618: strategy_spec per surviving strategy
+        from app.analysis.strategy_definitions import STRATEGIES as _STRATEGIES
+        _strategy_specs = {}
+        for _sk in survivor_keys:
+            _sdef = _STRATEGIES.get(_sk)
+            if _sdef:
+                _credit_types = {"bull_put_credit", "bear_call_credit"}
+                _is_credit = bool(_credit_types & set(_sdef.compatible_structures))
+                _strategy_specs[_sk] = {
+                    "preferred_dte_window": [_sdef.dte_min, _sdef.dte_max],
+                    "preferred_structure": "credit" if _is_credit else "debit",
+                    "compatible_structures": _sdef.compatible_structures,
+                }
 
-    async with invoke_with_tracing(
-        "claude-trade-agent", "structured_eval",
-        symbol=request.symbol,
-        session_id=run_id,
-        prompt_version=skill.prompt_version,
-    ) as span_ctx:
-        try:
-            result = await adapter.chat(system_prompt, user_message, max_tokens=3000)
-        except Exception as e:
-            # OTA-558: Surface full error details for diagnosis
-            err_details = {
-                "exception_type": type(e).__name__,
-                "message": str(e),
-                "symbol": request.symbol,
-                "strategy_keys": request.strategy_keys,
-                "trade_type": request.trade.get("option_type") or request.trade.get("spread_type") if request.trade else None,
-                "user_message_preview": user_message[:500],
-            }
-            if isinstance(e, httpx.HTTPStatusError):
-                err_details["status_code"] = e.response.status_code
-                err_details["response_body"] = e.response.text[:1000]
-            logger.error(
-                f"AI evaluation failed for {request.symbol} "
-                f"(strategies={request.strategy_keys}): "
-                f"{type(e).__name__}: {e}",
-                extra={"eval_error_details": err_details},
-            )
-            raise HTTPException(status_code=502, detail=f"AI evaluation failed: {e}")
-
-        span_ctx["input_tokens"] = result["input_tokens"]
-        span_ctx["output_tokens"] = result["output_tokens"]
-
-    raw_text = result["text"]
-    evaluations = _try_parse_cards(raw_text)
-
-    # Retry once with correction context if initial parse failed
-    if evaluations is None:
-        try:
-            retry_result = await adapter.chat(
-                system_prompt,
-                user_message,
-                max_tokens=3000,
-                extra_messages=[
-                    {"role": "assistant", "content": raw_text},
-                    {
-                        "role": "user",
-                        "content": (
-                            "Your response was not valid JSON. "
-                            "Return ONLY a JSON array of TradeEvaluationCard objects. "
-                            "No preamble, no markdown fences, no explanation."
-                        ),
-                    },
-                ],
-            )
-            raw_text = retry_result["text"]
-            result["input_tokens"] += retry_result["input_tokens"]
-            result["output_tokens"] += retry_result["output_tokens"]
-            evaluations = _try_parse_cards(raw_text)
-        except Exception as retry_exc:
-            # OTA-558: Log retry failure for diagnosis
-            logger.warning(
-                f"AI evaluation retry failed for {request.symbol}: "
-                f"{type(retry_exc).__name__}: {retry_exc}"
-            )
-
-    if evaluations is None:
-        raise HTTPException(
-            status_code=502,
-            detail="AI returned malformed JSON for structured evaluation after retry.",
+        user_message = _build_structured_user_message(
+            symbol=request.symbol,
+            current_price=request.current_price,
+            iv=request.iv,
+            sma_alignment=request.sma_alignment,
+            strategy_keys=survivor_keys,
+            scores=request.scores,
+            trade=request.trade,
+            current_date=current_date,
+            dte=dte,
+            strategy_specs=_strategy_specs,
         )
 
-    # ─── Fix 3: Verdict Band Enforcement + Inject Pipeline Metrics ────────────
-    # Extract asymmetry inputs once — same trade data for all strategy cards.
-    _p_max_loss   = None
-    _p_max_profit = None
-    if request.trade:
-        try:
-            _raw_pml = request.trade.get("p_max_loss")
-            _raw_pmp = request.trade.get("p_max_profit")
-            _p_max_loss   = float(_raw_pml) if _raw_pml is not None else None
-            _p_max_profit = float(_raw_pmp) if _raw_pmp is not None else None
-        except (TypeError, ValueError):
-            pass  # leave as None → 0 penalty
-
-    _asym_penalty = _asymmetry_penalty(_p_max_loss, _p_max_profit)
-    _asym_ratio   = _asymmetry_ratio(_p_max_loss, _p_max_profit)
-
-    for card in evaluations:
-        # Apply gate penalties (DTE warning, earnings gate, credit/debit — OTA-780)
-        if _gate_penalty_points:
-            card.score = max(0, card.score - _gate_penalty_points)
-        if dte_warning_msg:
-            card.dte_warning = dte_warning_msg
-
-        # Apply probability asymmetry penalty (OTA-505 — graduated, post-score pre-band)
-        if _asym_penalty:
-            card.score = max(0, card.score - _asym_penalty)
-        card.asymmetry_penalty = _asym_penalty
-        card.asymmetry_ratio   = _asym_ratio
-
-        # Enforce strict score band → verdict (ONLY place this happens)
-        correct_verdict = _assign_verdict(card.score)
-        if card.verdict != correct_verdict:
-            logger.info(
-                f"Verdict corrected for {card.strategy_key}: {card.verdict} → {correct_verdict} "
-                f"(score={card.score})"
-            )
-            card.verdict = correct_verdict
-
-        # Inject credit/debit quality metrics
-        if credit_pct_of_width is not None:
-            card.credit_pct_of_width = credit_pct_of_width
-        if debit_pct_of_width is not None:
-            card.debit_pct_of_width = debit_pct_of_width
-
-        # Export effective DTE for downstream consumers (OTA-506)
-        card.effective_dte = dte
-
-    # Inject the pre-computed probability matrix into every card
-    for card in evaluations:
-        card.probability_matrix = pm_dict
-
-    # ─── Narrative Grounding Validation (OTA-504) ──────────────────────────────
-    # Validate claude_read prose against computed inputs before emission.
-    # Max 1 retry on failure; template fallback if retry also fails.
-    _raw_sma_8  = request.sma_alignment.get("sma_8")
-    _raw_sma_21 = request.sma_alignment.get("sma_21")
-    _raw_sma_50 = request.sma_alignment.get("sma_50")
-    _raw_ev     = request.trade.get("total_ev") if request.trade else None
-
-    def _to_float(v) -> float:
-        try:
-            return float(v)
-        except (TypeError, ValueError):
-            return math.nan
-
-    _computed_fields = EvaluationFields(
-        price=request.current_price,
-        sma_8=_to_float(_raw_sma_8),
-        sma_21=_to_float(_raw_sma_21),
-        sma_50=_to_float(_raw_sma_50),
-        expected_value=_to_float(_raw_ev),
-    )
-
-    _grounding_errors = []
-    for card in evaluations:
-        if card.claude_read:
-            _grounding_errors.extend(validate_narrative(card.claude_read, _computed_fields))
-
-    _retry_triggered = False
-    _fallback_used = False
-
-    if _grounding_errors:
-        _retry_triggered = True
-        logger.warning(
-            f"Narrative grounding errors for {request.symbol} (run_id={run_id}): "
-            f"{[e.code for e in _grounding_errors]}"
-        )
-
-        # One retry — same prompt, same context
-        _retry_evals = None
-        try:
-            _retry_result = await adapter.chat(system_prompt, user_message, max_tokens=3000)
-            result["input_tokens"] += _retry_result["input_tokens"]
-            result["output_tokens"] += _retry_result["output_tokens"]
-            _retry_evals = _try_parse_cards(_retry_result["text"])
-        except Exception as _retry_exc:
-            logger.warning(f"Narrative grounding retry call failed: {_retry_exc}")
-
-        if _retry_evals is not None:
-            # Re-apply all post-parse fixes to retry cards
-            for card in _retry_evals:
-                if _gate_penalty_points:
-                    card.score = max(0, card.score - _gate_penalty_points)
-                if dte_warning_msg:
-                    card.dte_warning = dte_warning_msg
-                _correct_verdict = _assign_verdict(card.score)
-                if card.verdict != _correct_verdict:
-                    card.verdict = _correct_verdict
-                if credit_pct_of_width is not None:
-                    card.credit_pct_of_width = credit_pct_of_width
-                if debit_pct_of_width is not None:
-                    card.debit_pct_of_width = debit_pct_of_width
-                card.effective_dte = dte
-            for card in _retry_evals:
-                card.probability_matrix = pm_dict
-
-            # Re-validate retry output
-            _retry_errors = []
-            for card in _retry_evals:
-                if card.claude_read:
-                    _retry_errors.extend(validate_narrative(card.claude_read, _computed_fields))
-
-            if not _retry_errors:
-                evaluations = _retry_evals
-                logger.info(f"Narrative grounding retry succeeded for {request.symbol} (run_id={run_id})")
-            else:
-                _fallback_used = True
-                logger.warning(
-                    f"Narrative grounding fallback applied for {request.symbol} (run_id={run_id}): "
-                    f"retry errors={[e.code for e in _retry_errors]}"
+        async with invoke_with_tracing(
+            "claude-trade-agent", "structured_eval",
+            symbol=request.symbol,
+            session_id=run_id,
+            prompt_version=skill.prompt_version,
+        ) as span_ctx:
+            try:
+                result = await adapter.chat(system_prompt, user_message, max_tokens=3000)
+            except Exception as e:
+                # OTA-558: Surface full error details for diagnosis
+                err_details = {
+                    "exception_type": type(e).__name__,
+                    "message": str(e),
+                    "symbol": request.symbol,
+                    "strategy_keys": survivor_keys,
+                    "trade_type": request.trade.get("option_type") or request.trade.get("spread_type") if request.trade else None,
+                    "user_message_preview": user_message[:500],
+                }
+                if isinstance(e, httpx.HTTPStatusError):
+                    err_details["status_code"] = e.response.status_code
+                    err_details["response_body"] = e.response.text[:1000]
+                logger.error(
+                    f"AI narrative failed for {request.symbol} "
+                    f"(strategies={survivor_keys}): {type(e).__name__}: {e}",
+                    extra={"eval_error_details": err_details},
                 )
-                for card in evaluations:
-                    card.claude_read = (
+                raise HTTPException(status_code=502, detail=f"AI narrative failed: {e}")
+
+            span_ctx["input_tokens"] = result["input_tokens"]
+            span_ctx["output_tokens"] = result["output_tokens"]
+            _otel_trace_id = span_ctx.get("otel_trace_id")
+
+        raw_text = result["text"]
+        _input_tokens = result["input_tokens"]
+        _output_tokens = result["output_tokens"]
+        _model_name = result["model"]
+        _parsed = _try_parse_cards(raw_text)
+
+        # Retry once with correction context if initial parse failed
+        if _parsed is None:
+            try:
+                retry_result = await adapter.chat(
+                    system_prompt,
+                    user_message,
+                    max_tokens=3000,
+                    extra_messages=[
+                        {"role": "assistant", "content": raw_text},
+                        {
+                            "role": "user",
+                            "content": (
+                                "Your response was not valid JSON. "
+                                "Return ONLY a JSON array of TradeEvaluationCard objects. "
+                                "No preamble, no markdown fences, no explanation."
+                            ),
+                        },
+                    ],
+                )
+                raw_text = retry_result["text"]
+                _input_tokens += retry_result["input_tokens"]
+                _output_tokens += retry_result["output_tokens"]
+                _parsed = _try_parse_cards(raw_text)
+            except Exception as retry_exc:
+                logger.warning(
+                    f"AI narrative retry failed for {request.symbol}: "
+                    f"{type(retry_exc).__name__}: {retry_exc}"
+                )
+
+        if _parsed:
+            for _c in _parsed:
+                _claude_by_key[_c.strategy_key] = _c
+
+        # ─── Narrative Grounding (OTA-504) — PROSE ONLY; never touches verdict/score ──
+        _raw_ev = request.trade.get("total_ev") if request.trade else None
+        _computed_fields = EvaluationFields(
+            price=request.current_price,
+            sma_8=_to_float_safe(request.sma_alignment.get("sma_8")),
+            sma_21=_to_float_safe(request.sma_alignment.get("sma_21")),
+            sma_50=_to_float_safe(request.sma_alignment.get("sma_50")),
+            expected_value=_to_float_safe(_raw_ev),
+        )
+        _grounding_errors = []
+        for _c in _claude_by_key.values():
+            if _c.claude_read:
+                _grounding_errors.extend(validate_narrative(_c.claude_read, _computed_fields))
+
+        if _grounding_errors:
+            logger.warning(
+                f"Narrative grounding errors for {request.symbol} (run_id={run_id}): "
+                f"{[e.code for e in _grounding_errors]}"
+            )
+            _retry_evals = None
+            try:
+                _retry_result = await adapter.chat(system_prompt, user_message, max_tokens=3000)
+                _input_tokens += _retry_result["input_tokens"]
+                _output_tokens += _retry_result["output_tokens"]
+                _retry_evals = _try_parse_cards(_retry_result["text"])
+            except Exception as _retry_exc:
+                logger.warning(f"Narrative grounding retry call failed: {_retry_exc}")
+
+            _retry_ok = False
+            if _retry_evals is not None:
+                _retry_map = {c.strategy_key: c for c in _retry_evals}
+                _retry_errors = []
+                for _c in _retry_map.values():
+                    if _c.claude_read:
+                        _retry_errors.extend(validate_narrative(_c.claude_read, _computed_fields))
+                if not _retry_errors:
+                    # Replace PROSE ONLY — engine verdict/score applied below.
+                    for _k, _c in _retry_map.items():
+                        if _k in _claude_by_key:
+                            _claude_by_key[_k] = _c
+                    _retry_ok = True
+                    logger.info(f"Narrative grounding retry succeeded for {request.symbol} (run_id={run_id})")
+
+            if not _retry_ok:
+                for _c in _claude_by_key.values():
+                    _c.claude_read = (
                         "Structured evaluation complete. See computed fields for details. "
                         "Narrative unavailable this cycle."
                     )
-        else:
-            _fallback_used = True
-            logger.warning(f"Narrative grounding retry parse failed for {request.symbol} (run_id={run_id})")
-            for card in evaluations:
-                card.claude_read = (
-                    "Structured evaluation complete. See computed fields for details. "
-                    "Narrative unavailable this cycle."
+
+            # Fire-and-forget observability — never block emission
+            asyncio.create_task(
+                _log_validator_event(
+                    run_id, request.symbol, user_id,
+                    {
+                        "validator": "narrative_grounding",
+                        "errors": [
+                            {"code": e.code, "field": e.field_context, "msg": e.message}
+                            for e in _grounding_errors
+                        ],
+                        "retry_triggered": True,
+                        "fallback_used": not _retry_ok,
+                    },
+                    skill.prompt_version,
                 )
+            )
 
-        # Fire-and-forget observability — never block emission
-        _validator_log = {
-            "validator": "narrative_grounding",
-            "errors": [
-                {"code": e.code, "field": e.field_context, "msg": e.message}
-                for e in _grounding_errors
-            ],
-            "retry_triggered": _retry_triggered,
-            "fallback_used": _fallback_used,
-        }
-        asyncio.create_task(
-            _log_validator_event(run_id, request.symbol, user_id, _validator_log, skill.prompt_version)
-        )
+    # ─── Assemble cards — engine owns verdict + score; Claude prose attached ──
+    evaluations: List[TradeEvaluationCard] = []
+    for _key in request.strategy_keys:
+        _sr, _cand = engine_results[_key]
+        _label = _key.replace("-", " ").title()
+        _engine_score = int(round(_sr.score)) if _sr.score is not None else 0
 
-    # ─── Strategy Classifier (OTA-506) ────────────────────────────────────────
-    # Run after Claude scoring is final. Uses effective DTE (post gate-override).
-    # Builds StrategyScore proxies from the evaluated cards so the classifier
-    # can filter by DTE eligibility and rank by Claude's scores.
+        if _key in survivor_keys and _key in _claude_by_key:
+            card = _claude_by_key[_key]
+            card.score = _engine_score          # engine owns score
+            card.verdict = _sr.verdict          # engine owns verdict (Phase-7 band)
+        else:
+            # Halted at a gate (or narrative missing) → templated card, no prose.
+            _structure = (request.trade.get("spread_label") or "") if request.trade else ""
+            card = TradeEvaluationCard(
+                strategy_key=_key,
+                strategy_label=_label,
+                trade_structure=_structure,
+                entry_price=0.0,
+                max_profit=0.0,
+                max_loss=0.0,
+                exit_warning_price=0.0,
+                exit_warning_pnl=0.0,
+                exit_target_debit=0.0,
+                exit_stop_debit=0.0,
+                probability_matrix={},
+                score=_engine_score,
+                verdict=_sr.verdict,
+                claude_read=_halt_claude_read(_sr),
+                key_risks=[],
+                thesis_invalidators=[],
+            )
+
+        # Reproduced display metadata (no effect on verdict/score):
+        # - probability_matrix + effective_dte (echoed)
+        # - credit/debit % (CreditDebitQualityGate display metric, app-side)
+        # - dte_warning (DTEGate 8-13 banner; engine applies the score penalty)
+        # - asymmetry_ratio (diagnostic from candidate COMPUTED values; the score
+        #   impact is the engine's probability_asymmetry_penalty adjustment)
+        card.probability_matrix = pm_dict
+        card.effective_dte = dte
+        _credit_pct, _debit_pct = _credit_debit_pct(request.trade)
+        if _credit_pct is not None:
+            card.credit_pct_of_width = _credit_pct
+        if _debit_pct is not None:
+            card.debit_pct_of_width = _debit_pct
+        _dwarn = _dte_warning_message(dte)
+        if _dwarn:
+            card.dte_warning = _dwarn
+        card.asymmetry_ratio = _asymmetry_ratio_from_candidate(_cand)
+        evaluations.append(card)
+
+    # ─── Strategy Classifier (OTA-506) — ranks by the engine score ───────────
     _clf_candidates = [
         StrategyScore(
             strategy_key=card.strategy_key,
@@ -1046,31 +1241,36 @@ async def evaluate_structured(
         stage="structured_eval",
         symbol=canonicalize(request.symbol),
         user_id=user_id,
-        prompt_system=system_prompt,
-        prompt_user=user_message,
+        prompt_system=system_prompt if survivor_keys else "ENGINE_ONLY",
+        prompt_user=user_message if survivor_keys else "ENGINE_ONLY (all strategies halted at gates)",
         prompt_version=skill.prompt_version,
-        market_snapshot=market_snapshot,
+        market_snapshot={
+            "symbol": canonicalize(request.symbol),
+            "underlying_price": request.current_price,
+            "iv": request.iv,
+            **request.sma_alignment,
+        },
         trade_snapshot={
             "strategy_keys": request.strategy_keys,
+            "survivor_keys": survivor_keys,
             "trade": request.trade,
-            "gate_result": {
-                "gate_id": _gate_result.gate_id,
-                "triggered": _gate_result.triggered,
-                "penalty_points": _gate_result.penalty_points,
-                "effective_dte_override": _gate_result.effective_dte_override,
-                "reason": _gate_result.reason,
-            } if _gate_result else None,
+            "earnings_gate": {
+                "gate_id": earnings_result.gate_id,
+                "triggered": earnings_result.triggered,
+                "effective_dte_override": earnings_result.effective_dte_override,
+                "reason": earnings_result.reason,
+            } if earnings_result else None,
         },
         model_response_raw=raw_text,
         verdict=None,
         verdict_summary=verdicts_summary,
-        otel_trace_id=span_ctx.get("otel_trace_id"),
-        input_tokens=result["input_tokens"],
-        output_tokens=result["output_tokens"],
-        model_name=result["model"],
+        otel_trace_id=_otel_trace_id,
+        input_tokens=_input_tokens,
+        output_tokens=_output_tokens,
+        model_name=_model_name,
         created_at=datetime.now(timezone.utc),
     ))
-    # OTA-624: Update trade candidate with Claude evaluation
+    # OTA-624: Update trade candidate with the evaluation
     # Use user.get("sub") directly — same reasoning as auto-pass path above.
     await _update_trade_candidate_evaluation(db, request.trade_key, user.get("sub", ""), evaluations)
     await db.commit()
