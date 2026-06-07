@@ -434,6 +434,12 @@ class EngineRuntime:
     sink: PersistenceSink
     source: ConfigSource
     config_version: str
+    # The loadable-set hash stamped at startup (OTA-790). GET /config/status
+    # recomputes the same hash from current DB rows and compares; a difference
+    # means the persisted config diverged from what is running → restart pending.
+    # Distinct from config_version (which hashes drafts in); see
+    # loader._compute_loadable_version.
+    loadable_version: str
 
 
 _runtime: EngineRuntime | None = None
@@ -462,6 +468,26 @@ def _reset_engine_runtime() -> None:
     """Clear the holder. For tests only."""
     global _runtime
     _runtime = None
+
+
+async def compute_persisted_loadable_version(
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    app_ids: tuple[str, ...] = ("SHARED", "OTA"),
+) -> str:
+    """Recompute the loadable config version from CURRENT DB rows, on demand.
+
+    Reads a FRESH :class:`AzureSqlConfigSource` and runs ``load_config`` — the
+    same path startup uses — so the loadable-set hash has a single definition
+    (``EngineConfig.loadable_version``). GET /config/status compares this to the
+    running :attr:`EngineRuntime.loadable_version` to detect a pending restart.
+
+    Restart-only invariant (insight_engine.md §6.5): this never mutates the
+    running runtime — it does not call ``set_engine_runtime`` and does not touch
+    the holder. It is a read-only recompute.
+    """
+    source = await AzureSqlConfigSource.load(session_factory)
+    return load_config(source, app_ids=app_ids).loadable_version
 
 
 # ── Startup hydration (OTA-818 + OTA-758) ─────────────────────────────────
@@ -512,6 +538,7 @@ async def init_engine_runtime(
         sink=sink,
         source=source,
         config_version=config.config_version,
+        loadable_version=config.loadable_version,
     )
     set_engine_runtime(runtime)
 

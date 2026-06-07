@@ -480,6 +480,52 @@ async def delete_draft(session: AsyncSession, live_key: str) -> RawRow:
     return draft
 
 
+async def apply_draft(session: AsyncSession, live_key: str) -> RawRow:
+    """Promote the draft's junction bindings to the live strategy, then delete it.
+
+    OTA-790 Apply — a single-transaction, **junction-only** promote (decision
+    superseding the original "overwrite live header from draft" wording):
+
+      1. Replace the live strategy's junction rows with the draft's, repointed
+         to the live ``strategy_id`` (``_clone_junctions`` from draft → live).
+      2. Delete the draft (its junctions + header) via ``_stage_draft_deletion``.
+
+    The live **header is intentionally NOT touched.** Header fields
+    (display_name, status, structures, DTE) are edited live-direct through the
+    OTA-782 PUT, never routed to the draft (OTA-827 finding), so the draft header
+    is a stale clone — copying it onto live would silently revert live-direct
+    header edits.
+
+    The whole promote is gated on full §6.6 validation of the RESULTING live
+    config via ``_commit_with_validation``: a failure rolls back, leaving the
+    live row (and its junctions) untouched, and surfaces the structured report.
+    Nothing here calls ``set_engine_runtime`` — the running engine is unchanged
+    until the next restart (insight_engine.md §6.5); GET /config/status then
+    reports ``restart_pending=true``.
+
+    Raises :class:`NotFoundError` if the live strategy or its draft is absent.
+    """
+    if is_draft_key(live_key):
+        raise ValueError(f"{live_key!r} is already a draft key; cannot apply a draft")
+    live = await _get_strategy(session, live_key)  # 404 if missing / not OTA-owned
+    draft = await _get_strategy(session, draft_key_for(live_key))  # 404 if no draft
+
+    live_id = live["strategy_id"]
+    draft_id = draft["strategy_id"]
+
+    # Replace live junctions with the draft's (repointed to the live strategy).
+    await session.execute(
+        delete(engine_junction).where(engine_junction.c.strategy_id == live_id)
+    )
+    await _clone_junctions(session, draft_id, live_id)
+
+    # Consume the draft (its own junctions + header row).
+    await _stage_draft_deletion(session, draft)
+
+    await _commit_with_validation(session)
+    return await _get_strategy(session, live_key)
+
+
 async def _get_strategy_optional(
     session: AsyncSession, strategy_key: str
 ) -> RawRow | None:

@@ -27,6 +27,8 @@ import {
   createOrResumeDraft,
   refreshDraftFromLive,
   previewDraft,
+  applyDraft,
+  getConfigStatus,
 } from '../api/client';
 import { useToast } from '../components/Toast';
 import { formatDate } from '../utils/formatDate';
@@ -150,6 +152,12 @@ export default function StrategyAdminPage() {
   const [previewMeta, setPreviewMeta]       = useState(null);
   const [previewError, setPreviewError]     = useState(null);
   const [draftBusy, setDraftBusy]           = useState(false);
+  const [applying, setApplying]             = useState(false);
+
+  // ── Engine config restart-pending signal (OTA-790) ──────────────────────────
+  // Engine-wide (not per-strategy): any live config change flips it. Advisory —
+  // a load failure never blocks editing.
+  const [configStatus, setConfigStatus]     = useState(null);  // { restart_pending, … }
 
   // ── Load the admin strategy list ──────────────────────────────────────────
   const load = useCallback(async () => {
@@ -172,6 +180,18 @@ export default function StrategyAdminPage() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // Restart-pending banner signal (OTA-790). Loaded on mount; refreshed after a
+  // live change (header save / Apply). Advisory — failures are swallowed.
+  const loadConfigStatus = useCallback(async () => {
+    try {
+      setConfigStatus(await getConfigStatus());
+    } catch {
+      setConfigStatus(null);
+    }
+  }, []);
+
+  useEffect(() => { loadConfigStatus(); }, [loadConfigStatus]);
 
   // The currently selected row + whether it is editable.
   const selected = useMemo(
@@ -244,6 +264,7 @@ export default function StrategyAdminPage() {
       await updateEngineStrategy(selected.strategy_key, body);
       showToast({ type: 'success', message: `Saved ${form.display_name}` });
       await load();   // re-read persisted state (write is not restart-gated)
+      loadConfigStatus();  // a live header edit can flip restart_pending (OTA-790)
     } catch (err) {
       showToast({ type: 'error', message: `Save failed: ${err.message}` });
     } finally {
@@ -297,6 +318,31 @@ export default function StrategyAdminPage() {
     }
   };
 
+  // "Apply changes" (OTA-790): promote the draft's junctions to live (junction-
+  // only — the header is live-direct), then reload the live view and refresh the
+  // banner. A §6.6 failure rejects with the structured report; live is untouched.
+  // The running engine is unchanged until restart (the banner says so).
+  const handleApply = async () => {
+    if (!selected || !editable) return;
+    setApplying(true);
+    try {
+      await applyDraft(selected.strategy_key);
+      showToast({
+        type: 'success',
+        message: 'Applied to live — restart the engine to take effect',
+      });
+      setPreviewResults(null);
+      setPreviewMeta(null);
+      setPreviewError(null);
+      await load();
+      loadConfigStatus();
+    } catch (err) {
+      showToast({ type: 'error', message: `Apply failed: ${err.message}` });
+    } finally {
+      setApplying(false);
+    }
+  };
+
   // ── Render: loading / error ─────────────────────────────────────────────────
   if (loading) {
     return (
@@ -333,6 +379,9 @@ export default function StrategyAdminPage() {
             </div>
           ) : (
             <>
+              {/* ── Pending-restart banner (OTA-790) ── */}
+              {configStatus?.restart_pending && <PendingRestartBanner />}
+
               {/* ── Header card ── */}
               <div style={{
                 border: '1px solid var(--border, #30363d)', borderRadius: 6,
@@ -571,6 +620,8 @@ export default function StrategyAdminPage() {
                   onSymbol={setPreviewSymbol}
                   onFindTrades={handleFindTrades}
                   onRefreshFromLive={handleRefreshFromLive}
+                  onApply={handleApply}
+                  applying={applying}
                   loading={previewLoading}
                   draftBusy={draftBusy}
                   results={previewResults}
@@ -715,25 +766,67 @@ const verdictColor = (verdict) =>
   (GRADE_FOR_VERDICT[String(verdict || '').toUpperCase()] || {}).color
   || 'var(--text, #e6edf3)';
 
+// ─── Pending-restart banner (OTA-790) ───────────────────────────────────────
+//
+// Shown when GET /config/status reports restart_pending. var(--bg2) callout with
+// a 2px amber left border (UI-GUIDANCE Part 3a permits var(--bg2) on callouts).
+// The running engine is unchanged until a restart picks up the persisted config.
+
+function PendingRestartBanner() {
+  return (
+    <div
+      role="status"
+      style={{
+        background: 'var(--bg2, #161b22)',
+        border: '1px solid var(--border, #30363d)',
+        borderLeft: '2px solid var(--amber, #f59e0b)',
+        borderRadius: 4,
+        padding: '10px 14px',
+        marginBottom: 16,
+        fontSize: 11,
+        fontFamily: MONO,
+        color: 'var(--text, #e6edf3)',
+      }}
+    >
+      Config changed — restart the engine to apply. The running analysis is
+      unchanged until then.
+    </div>
+  );
+}
+
 function PreviewPanel({
-  symbol, onSymbol, onFindTrades, onRefreshFromLive,
+  symbol, onSymbol, onFindTrades, onRefreshFromLive, onApply, applying,
   loading, draftBusy, results, meta, error,
 }) {
   const canRun = symbol.trim().length > 0 && !loading;
+  // Apply is enabled only once the draft previewed clean (results present, no
+  // §6.6 error) — OTA-790. A failed preview leaves results null / error set.
+  const busy = applying || draftBusy;
+  const canApply = results !== null && !error && !busy;
   return (
     <div style={{ marginTop: 28 }}>
       <div style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12,
       }}>
         <div style={sectionTitleStyle}>Live Preview · evaluate draft against a symbol</div>
-        <button
-          onClick={onRefreshFromLive}
-          disabled={draftBusy}
-          title="Discard the draft and re-clone it from the live strategy"
-          style={{ ...mutedBtn, opacity: draftBusy ? 0.4 : 1, cursor: draftBusy ? 'default' : 'pointer' }}
-        >
-          {draftBusy ? 'Refreshing…' : 'Refresh from live'}
-        </button>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <button
+            onClick={onApply}
+            disabled={!canApply}
+            title="Promote the draft's changes to the live strategy (takes effect at next engine restart)"
+            style={{ ...tealBtn, opacity: canApply ? 1 : 0.35, cursor: canApply ? 'pointer' : 'default' }}
+          >
+            {applying ? 'Applying…' : 'Apply changes'}
+          </button>
+          <button
+            onClick={onRefreshFromLive}
+            disabled={busy}
+            title="Discard the draft's edits and re-clone it from the live strategy"
+            style={{ ...mutedBtn, opacity: busy ? 0.4 : 1, cursor: busy ? 'default' : 'pointer' }}
+          >
+            {draftBusy ? 'Resetting…' : 'Reset draft'}
+          </button>
+        </div>
       </div>
 
       {/* Callout box — var(--bg2) is permitted on inset/callout boxes (UI Part 3a) */}

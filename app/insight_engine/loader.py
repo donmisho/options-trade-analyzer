@@ -170,7 +170,14 @@ class EngineConfig:
     strategies: dict[str, Strategy]  # strategy_key → Strategy
     lookups: dict[str, list[LookupEntry]]  # lookup_set → sorted entries
     apps: set[str]  # loaded app_ids
-    config_version: str  # deterministic hash
+    config_version: str  # deterministic hash over ALL in-scope raw rows
+    # Deterministic hash over ONLY the rows the engine actually loads (enabled +
+    # in-scope; junctions resolved to a loaded strategy AND rule). Draft
+    # strategies (status='draft' ⇒ enabled=0) and their junctions are excluded by
+    # construction. OTA-790 uses this — not config_version — to detect a pending
+    # restart, so a transient draft never produces a false "restart needed". See
+    # _compute_loadable_version.
+    loadable_version: str
 
 
 # ── Loader ───────────────────────────────────────────────────────────────
@@ -314,6 +321,35 @@ def load_config(
         raw_rules, raw_strategies, raw_junction, raw_lookups, scope
     )
 
+    # ── Loadable config version hash (OTA-790) ────────────────────────
+    # Hash ONLY the rows that actually entered the load above: enabled +
+    # in-scope rules/strategies/lookups, and junction rows whose strategy AND
+    # rule both resolved to a loaded row. The id sets are the loader's own load
+    # decisions, so this mirrors "what the engine loads" with no duplicated
+    # filter. Draft strategies are enabled=0 (never in strategies_by_id) and
+    # their junctions repoint to that excluded strategy_id — both drop out here.
+    loaded_strategy_ids = set(strategies_by_id)
+    loaded_rule_ids = set(rules_by_id)
+    loadable_version = _compute_loadable_version(
+        apps=[r for r in raw_apps if r.get("app_id") in loaded_apps],
+        rules=[r for r in raw_rules if r.get("rule_id") in loaded_rule_ids],
+        strategies=[
+            r for r in raw_strategies if r.get("strategy_id") in loaded_strategy_ids
+        ],
+        junction=[
+            r
+            for r in raw_junction
+            if _is_enabled(r)
+            and r.get("strategy_id") in loaded_strategy_ids
+            and r.get("rule_id") in loaded_rule_ids
+        ],
+        lookups=[
+            r
+            for r in raw_lookups
+            if r.get("owner_app_id") in scope and _is_enabled(r)
+        ],
+    )
+
     return EngineConfig(
         rule_sets=rule_sets,
         rules=rules_by_key,
@@ -321,6 +357,7 @@ def load_config(
         lookups=lookups,
         apps=loaded_apps,
         config_version=config_version,
+        loadable_version=loadable_version,
     )
 
 
@@ -448,6 +485,42 @@ def _compute_config_version(
             # Use json.dumps with sort_keys for determinism
             hasher.update(json.dumps(row, sort_keys=True, default=str).encode("utf-8"))
 
+    _hash_rows(rules, ["owner_app_id", "rule_key"])
+    _hash_rows(strategies, ["owner_app_id", "strategy_key"])
+    _hash_rows(junction, ["strategy_id", "rule_id"])
+    _hash_rows(lookups, ["owner_app_id", "lookup_set", "lookup_key"])
+
+    return hasher.hexdigest()[:16]
+
+
+def _compute_loadable_version(
+    *,
+    apps: list[RawRow],
+    rules: list[RawRow],
+    strategies: list[RawRow],
+    junction: list[RawRow],
+    lookups: list[RawRow],
+) -> str:
+    """Deterministic SHA-256 over ONLY the rows the engine actually loads.
+
+    Unlike :func:`_compute_config_version` (which hashes every in-scope raw row,
+    drafts and all), the caller passes pre-filtered lists holding exactly the
+    loadable set: enabled + in-scope rules/strategies/lookups and junction rows
+    whose strategy and rule both resolve to a loaded row. Draft strategies
+    (``enabled=0``) and their junctions are absent by construction. The hashing
+    is identical to ``_compute_config_version`` (stable sort + canonical JSON)
+    so the two share one serialization contract; only the input population
+    differs. OTA-790 compares this across startup vs. on-demand to flag a pending
+    restart without false positives from transient drafts.
+    """
+    hasher = hashlib.sha256()
+
+    def _hash_rows(rows: list[RawRow], sort_keys: list[str]) -> None:
+        stable = sorted(rows, key=lambda r: tuple(str(r.get(k, "")) for k in sort_keys))
+        for row in stable:
+            hasher.update(json.dumps(row, sort_keys=True, default=str).encode("utf-8"))
+
+    _hash_rows(apps, ["app_id"])
     _hash_rows(rules, ["owner_app_id", "rule_key"])
     _hash_rows(strategies, ["owner_app_id", "strategy_key"])
     _hash_rows(junction, ["strategy_id", "rule_id"])

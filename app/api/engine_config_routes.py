@@ -53,9 +53,12 @@ from app.api.engine_config_validation import ConfigSaveValidationError
 from app.auth.dependencies import require_read, require_write
 from app.insight_engine.expressions import extract_formula_name, is_formula_ref
 from app.insight_engine.models import Phase
-from app.models.session import get_db
+from app.models.session import async_session, get_db
 from app.options_rules.screening import get_registry
-from app.ota_adapters.engine_runtime import get_engine_runtime
+from app.ota_adapters.engine_runtime import (
+    compute_persisted_loadable_version,
+    get_engine_runtime,
+)
 
 router = APIRouter(prefix="/config", tags=["Engine Config"])
 
@@ -610,6 +613,69 @@ async def preview_draft(
         underlying_price=meta["underlying_price"],
         candidates_evaluated=meta["candidates_evaluated"],
         results=[PreviewResultItem(**vars(r)) for r in results],
+    )
+
+
+# ── Apply / status (OTA-790) ──────────────────────────────────────────────
+#
+# Apply promotes the draft's junction bindings to the live strategy in one
+# validated transaction and deletes the draft; the live header is untouched
+# (header edits are live-direct). The running engine config is NOT reloaded —
+# the change takes effect at the next restart (insight_engine.md §6.5). The
+# status endpoint surfaces that pending restart by comparing the loadable hash
+# stamped at startup to a fresh recompute over current DB rows.
+
+
+class ConfigStatusResponse(BaseModel):
+    """Engine config restart-pending signal (OTA-790).
+
+    The two versions are LOADABLE-set hashes (enabled + in-scope, drafts and
+    disabled rows excluded) — distinct from the bronze ``config_version`` which
+    hashes all raw rows. A draft never moves these, so editing/previewing a
+    draft does not raise a false ``restart_pending``.
+    """
+
+    running_config_version: str
+    persisted_config_version: str
+    restart_pending: bool
+
+
+@router.post("/strategies/{strategy_key}/apply", response_model=StrategyRow)
+async def apply_draft(
+    strategy_key: str,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_write),
+) -> Any:
+    """Promote the strategy's draft junctions to live, then delete the draft.
+
+    Single transaction (junction-only): the live strategy's junction rows are
+    replaced with the draft's, gated on full §6.6 validation of the resulting
+    live config — a failure rolls back (live untouched) and returns 422 with the
+    structured report. The live header is not modified (header edits are
+    live-direct, OTA-827). 404 if no draft exists. The running engine is
+    unchanged until restart (insight_engine.md §6.5); poll GET /config/status.
+    """
+    return await _run(store.apply_draft(db, strategy_key))
+
+
+@router.get("/status", response_model=ConfigStatusResponse)
+async def get_config_status(
+    user: dict = Depends(require_read),
+) -> ConfigStatusResponse:
+    """Report whether the persisted engine config differs from what is running.
+
+    Compares the loadable hash stamped on the runtime at startup against a fresh
+    recompute over current DB rows (``compute_persisted_loadable_version`` — a
+    read-only load that never mutates the runtime). ``restart_pending`` is true
+    when they differ, i.e. a live config change (e.g. an Apply, or a live-direct
+    header edit) has not yet been picked up by a restart.
+    """
+    running = get_engine_runtime().loadable_version
+    persisted = await compute_persisted_loadable_version(async_session)
+    return ConfigStatusResponse(
+        running_config_version=running,
+        persisted_config_version=persisted,
+        restart_pending=running != persisted,
     )
 
 

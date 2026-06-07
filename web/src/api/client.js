@@ -385,6 +385,31 @@ export async function discardDraft(strategyKey) {
 }
 
 /**
+ * Apply the draft (OTA-790): promote the draft's junction bindings onto the live
+ * strategy and delete the draft, in one validated transaction. The live header
+ * is untouched (header edits are live-direct). On §6.6 validation failure the
+ * call rejects with the structured report and the live row is left unchanged.
+ * The running engine is unchanged until restart — poll getConfigStatus after.
+ * @returns StrategyRow — the live row after promotion
+ */
+export async function applyDraft(strategyKey) {
+  return apiFetch(`/config/strategies/${encodeURIComponent(strategyKey)}/apply`, {
+    method: 'POST',
+  });
+}
+
+/**
+ * Engine config restart-pending signal (OTA-790). Compares the loadable-config
+ * hash stamped at engine start to a fresh recompute over current rows; a draft
+ * never moves these, so only a live change (Apply, or a live-direct header save)
+ * flips `restart_pending`.
+ * @returns { running_config_version, persisted_config_version, restart_pending }
+ */
+export async function getConfigStatus() {
+  return apiFetch('/config/status');
+}
+
+/**
  * Evaluate the strategy's draft against one symbol's chain → ranked scores/verdicts.
  * Loads a fresh local config server-side; the running engine config is untouched.
  * @returns { draft_key, config_version, underlying_price, candidates_evaluated,
