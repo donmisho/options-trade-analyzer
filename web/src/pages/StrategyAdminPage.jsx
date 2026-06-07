@@ -35,6 +35,7 @@ import { formatDate } from '../utils/formatDate';
 import HardGatesSection from '../components/HardGatesSection';
 import ScoringSection from '../components/ScoringSection';
 import AdjustmentsSection from '../components/AdjustmentsSection';
+import ParametersSection from '../components/ParametersSection';
 import VerdictBandsSection from '../components/VerdictBandsSection';
 import './PageShared.css';
 
@@ -59,7 +60,9 @@ const AVAILABLE_STRUCTURES = [
 // Stacked config sections — bodies are their own stories; this shell mounts them.
 // Story tags corrected per OTA-785 Phase 0 finding #4 (the OTA-784 shell shipped
 // with the tags shifted by one slot): Parameters=OTA-827, Scoring=OTA-786,
-// Hard Gates=OTA-785 (built here), Adjustments=OTA-787.
+// Hard Gates=OTA-785 (built here), Adjustments=OTA-787. All four bodies are now
+// built — Parameters (OTA-827) is an orientation guide, not an editor: its
+// prototype cards have no net-new backing store at HEAD (see ParametersSection).
 const SECTIONS = [
   { key: 'parameters', title: 'Parameters', story: 'OTA-827', catalog: null },
   { key: 'scoring',    title: 'Scoring Weights', story: 'OTA-786', catalog: 'scoring' },
@@ -580,10 +583,13 @@ export default function StrategyAdminPage() {
               </div>
 
               {/* ── Stacked config sections ── */}
-              {/* Hard Gates (OTA-785), Scoring Weights (OTA-786), and Adjustments
-                  (OTA-787) are built; Parameters (OTA-827) remains a scaffold until
-                  its story lands. */}
+              {/* All four section bodies are built: Parameters (OTA-827),
+                  Scoring Weights (OTA-786), Hard Gates (OTA-785), Adjustments
+                  (OTA-787). Parameters is an orientation guide — see its body. */}
               {SECTIONS.map(sec => {
+                if (sec.key === 'parameters') {
+                  return <ParametersSection key={sec.key} />;
+                }
                 if (sec.key === 'gates') {
                   return (
                     <HardGatesSection
@@ -611,14 +617,7 @@ export default function StrategyAdminPage() {
                     />
                   );
                 }
-                return (
-                  <SectionScaffold
-                    key={sec.key}
-                    section={sec}
-                    editable={editable}
-                    onOpenCatalog={sec.catalog ? () => setDrawerTab(sec.catalog) : null}
-                  />
-                );
+                return null;
               })}
 
               {/* ── Verdict Bands editor (OTA-788) ── */}
@@ -723,41 +722,6 @@ function OwnerBadge({ owner, editable }) {
     }}>
       {owner} · {editable ? 'editable' : 'read-only'}
     </span>
-  );
-}
-
-// ─── Section scaffold (mount point for OTA-785/786/787/788) ──────────────────
-
-function SectionScaffold({ section, editable, onOpenCatalog }) {
-  return (
-    <div style={{ marginTop: 24 }}>
-      <div style={{
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12,
-      }}>
-        <div style={sectionTitleStyle}>{section.title}</div>
-      </div>
-      <div style={{
-        border: '1px solid var(--border, #30363d)', borderRadius: 6, padding: 16,
-      }}>
-        <div style={{ fontSize: 11, color: 'var(--muted, #8b949e)', fontFamily: MONO }}>
-          {section.title.split(' · ')[0]} configuration lands in {section.story}.
-        </div>
-        {onOpenCatalog && (
-          <button
-            onClick={onOpenCatalog}
-            disabled={!editable}
-            style={{
-              ...mutedBtn, marginTop: 12,
-              border: '1px dashed var(--border, #30363d)',
-              opacity: editable ? 1 : 0.35,
-              cursor: editable ? 'pointer' : 'default',
-            }}
-          >
-            {section.addLabel || '+ Add from catalog'}
-          </button>
-        )}
-      </div>
-    </div>
   );
 }
 
