@@ -27,4 +27,12 @@ export default defineConfig({
       },
     },
   },
+  // Vitest config (OTA-829). Shares the react plugin above so JSX transforms in
+  // tests; `loadLocalHttps`/proxy only apply to the dev `server`, inert here.
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: ['./src/test/setup.js'],
+    css: false,
+  },
 })
