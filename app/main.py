@@ -321,19 +321,36 @@ async def lifespan(app: FastAPI):
     #     module-level accessor (get_engine_runtime). Mirrors the hard-gate
     #     registry pattern above.
     #
-    #     A validation failure here is LOUD and FATAL by design (insight_engine.md
-    #     §6.6) — it is intentionally NOT swallowed, unlike the init_db() guard at
-    #     step 1. The engine refuses to evaluate on invalid config. Per OTA-818,
-    #     a live-seed validation failure is OTA-815 territory: do not patch config
-    #     in code to make validation pass.
+    #     DESIGN INTENT: a validation failure here is LOUD and FATAL (insight_engine.md
+    #     §6.6) — the engine refuses to evaluate on invalid config. The live OTA-680
+    #     seed stores human-readable condition_expression text that the §6.3 loader
+    #     rejects, so hydration currently raises and the design-intended FATAL would
+    #     crash-loop the whole app (the 06-06 dev outage). Until that is properly
+    #     reconciled, this guard is TEMPORARILY relaxed to non-fatal so unrelated
+    #     routes still serve. Engine/insight routes that resolve get_engine_runtime()
+    #     will fail (runtime stays None) until the seed/loader contract is fixed.
+    #
+    #     TODO(OTA-815): canonicalize the seeded condition_expression values to the
+    #     §6.3 closed operator set (+ fix validate_expression to honour formula_ref,
+    #     + update scripts/seed_engine_config.py), then RESTORE the fatal behaviour
+    #     by removing this try/except. Do NOT patch config in code to pass validation.
     from app.models.session import async_session as _engine_session_factory
     from app.ota_adapters.engine_runtime import init_engine_runtime
-    _engine_runtime = await init_engine_runtime(_engine_session_factory)
-    logger.info(
-        "Insight Engine config hydrated: config_version=%s, %d strategies resolved",
-        _engine_runtime.config_version,
-        len(_engine_runtime.config.rule_sets),
-    )
+    try:
+        _engine_runtime = await init_engine_runtime(_engine_session_factory)
+        logger.info(
+            "Insight Engine config hydrated: config_version=%s, %d strategies resolved",
+            _engine_runtime.config_version,
+            len(_engine_runtime.config.rule_sets),
+        )
+    except Exception as exc:
+        logger.error(
+            "Insight Engine config hydration FAILED — engine/insight routes will be "
+            "unavailable until OTA-815 reconciles the seed/loader contract. "
+            "App continuing without the engine runtime (TEMPORARY, see step 6d). "
+            "Error: %s",
+            exc,
+        )
 
     # 7. Initialize OpenTelemetry → Application Insights (agent observability)
     appinsights_cs = secrets_manager.get("applicationinsights-connection-string")
