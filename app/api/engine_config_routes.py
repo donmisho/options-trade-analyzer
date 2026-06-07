@@ -35,7 +35,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, NoReturn
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -465,6 +465,16 @@ async def _run(coro) -> Any:
         )
 
 
+def _actor(user: dict) -> dict:
+    """The BFF identity recorded on each config-audit row (OTA-792).
+
+    Read from the same session dependency the CRUD routes already use — no new
+    auth path (auth-process.md). ``sub`` is the stable actor id (Entra OID);
+    ``username`` is a human-readable label snapshot.
+    """
+    return {"user_id": user.get("sub"), "actor_label": user.get("username")}
+
+
 # ── Strategies ────────────────────────────────────────────────────────────
 
 
@@ -489,7 +499,7 @@ async def create_strategy(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_write),
 ) -> Any:
-    return await _run(store.create_strategy(db, body.model_dump()))
+    return await _run(store.create_strategy(db, body.model_dump(), actor=_actor(user)))
 
 
 @router.put("/strategies/{strategy_key}", response_model=StrategyRow)
@@ -499,7 +509,9 @@ async def update_strategy(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_write),
 ) -> Any:
-    return await _run(store.update_strategy(db, strategy_key, body.model_dump()))
+    return await _run(
+        store.update_strategy(db, strategy_key, body.model_dump(), actor=_actor(user))
+    )
 
 
 @router.delete("/strategies/{strategy_key}", response_model=StrategyRow)
@@ -508,7 +520,7 @@ async def delete_strategy(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_write),
 ) -> Any:
-    return await _run(store.delete_strategy(db, strategy_key))
+    return await _run(store.delete_strategy(db, strategy_key, actor=_actor(user)))
 
 
 @router.get(
@@ -655,7 +667,7 @@ async def apply_draft(
     live-direct, OTA-827). 404 if no draft exists. The running engine is
     unchanged until restart (insight_engine.md §6.5); poll GET /config/status.
     """
-    return await _run(store.apply_draft(db, strategy_key))
+    return await _run(store.apply_draft(db, strategy_key, actor=_actor(user)))
 
 
 @router.get("/status", response_model=ConfigStatusResponse)
@@ -725,7 +737,7 @@ async def create_rule(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_write),
 ) -> Any:
-    return await _run(store.create_rule(db, body.model_dump()))
+    return await _run(store.create_rule(db, body.model_dump(), actor=_actor(user)))
 
 
 @router.put("/rules/{rule_key}", response_model=RuleRow)
@@ -735,7 +747,7 @@ async def update_rule(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_write),
 ) -> Any:
-    return await _run(store.update_rule(db, rule_key, body.model_dump()))
+    return await _run(store.update_rule(db, rule_key, body.model_dump(), actor=_actor(user)))
 
 
 @router.delete("/rules/{rule_key}", response_model=RuleRow)
@@ -744,7 +756,7 @@ async def delete_rule(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_write),
 ) -> Any:
-    return await _run(store.delete_rule(db, rule_key))
+    return await _run(store.delete_rule(db, rule_key, actor=_actor(user)))
 
 
 # ── Junction ──────────────────────────────────────────────────────────────
@@ -756,7 +768,7 @@ async def create_junction(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_write),
 ) -> Any:
-    return await _run(store.create_junction(db, body.model_dump()))
+    return await _run(store.create_junction(db, body.model_dump(), actor=_actor(user)))
 
 
 @router.put("/junction/{strategy_key}/{rule_key}", response_model=JunctionRow)
@@ -767,7 +779,9 @@ async def update_junction(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_write),
 ) -> Any:
-    return await _run(store.update_junction(db, strategy_key, rule_key, body.model_dump()))
+    return await _run(
+        store.update_junction(db, strategy_key, rule_key, body.model_dump(), actor=_actor(user))
+    )
 
 
 @router.delete("/junction/{strategy_key}/{rule_key}", response_model=JunctionRow)
@@ -777,7 +791,7 @@ async def delete_junction(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_write),
 ) -> Any:
-    return await _run(store.delete_junction(db, strategy_key, rule_key))
+    return await _run(store.delete_junction(db, strategy_key, rule_key, actor=_actor(user)))
 
 
 # ── Lookups ───────────────────────────────────────────────────────────────
@@ -789,7 +803,7 @@ async def create_lookup(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_write),
 ) -> Any:
-    return await _run(store.create_lookup(db, body.model_dump()))
+    return await _run(store.create_lookup(db, body.model_dump(), actor=_actor(user)))
 
 
 @router.put("/lookups/{lookup_set}/{lookup_key}", response_model=LookupRow)
@@ -800,7 +814,9 @@ async def update_lookup(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_write),
 ) -> Any:
-    return await _run(store.update_lookup(db, lookup_set, lookup_key, body.model_dump()))
+    return await _run(
+        store.update_lookup(db, lookup_set, lookup_key, body.model_dump(), actor=_actor(user))
+    )
 
 
 @router.delete("/lookups/{lookup_set}/{lookup_key}", response_model=LookupRow)
@@ -810,4 +826,87 @@ async def delete_lookup(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(require_write),
 ) -> Any:
-    return await _run(store.delete_lookup(db, lookup_set, lookup_key))
+    return await _run(store.delete_lookup(db, lookup_set, lookup_key, actor=_actor(user)))
+
+
+# ── Config change audit trail — query surface (OTA-792) ────────────────────
+#
+# Read-only trail of config changes committed through this CRUD path. Isolation
+# is by owning app (OTA), NOT by actor: any require_read admin sees the full
+# trail; user_id is recorded for accountability, never a read filter (OTA-792
+# decision). The trail per strategy includes that strategy's junction-row
+# changes (matched on the denormalized strategy_key soft key).
+
+
+class AuditEntryRow(BaseModel):
+    """One config-audit entry (full row; before/after parsed to objects)."""
+
+    audit_id: int
+    source_app_id: str
+    user_id: str
+    actor_label: str | None = None
+    occurred_at: datetime
+    entity_type: str
+    operation: str
+    target_stage: str
+    strategy_key: str | None = None
+    rule_key: str | None = None
+    lookup_set: str | None = None
+    lookup_key: str | None = None
+    before_json: Any | None = None
+    after_json: Any | None = None
+    loadable_version: str | None = None
+
+
+@router.get("/audit", response_model=list[AuditEntryRow])
+async def list_config_audit(
+    entity_type: str | None = Query(None),
+    strategy_key: str | None = Query(None),
+    rule_key: str | None = Query(None),
+    lookup_set: str | None = Query(None),
+    lookup_key: str | None = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_read),
+) -> Any:
+    """Return the config-change trail (newest first), optionally filtered.
+
+    App-scoped to OTA; no actor filter (OTA-792 decision). Filter by
+    ``entity_type``, ``strategy_key``, ``rule_key``, or ``lookup_set``/``key``.
+    """
+    return await store.list_audit(
+        db,
+        entity_type=entity_type,
+        strategy_key=strategy_key,
+        rule_key=rule_key,
+        lookup_set=lookup_set,
+        lookup_key=lookup_key,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/audit/strategies/{strategy_key}", response_model=list[AuditEntryRow])
+async def list_config_audit_for_strategy(
+    strategy_key: str,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_read),
+) -> Any:
+    """Return the trail for one strategy (its header + junction-row changes)."""
+    return await store.list_audit(
+        db, strategy_key=strategy_key, limit=limit, offset=offset
+    )
+
+
+@router.get("/audit/{audit_id}", response_model=AuditEntryRow)
+async def get_config_audit(
+    audit_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_read),
+) -> Any:
+    """Return one audit entry by id. 404 if absent (no cross-user 404 — any
+    READ admin sees any OTA entry; isolation is by owning app, OTA-792)."""
+    return await _run(store.get_audit(db, audit_id))

@@ -45,10 +45,13 @@ OTA-782
 from __future__ import annotations
 
 import json
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     Column,
     DateTime,
@@ -199,6 +202,58 @@ engine_lookups = Table(
 )
 
 
+# ── Config change audit trail (OTA-792) ───────────────────────────────────
+#
+# Append-only attribution log for every config change committed through this
+# CRUD path (insight_engine.md §6.2 — the runtime tables are the source of
+# truth, so every change to them must be attributable). Defined on the same
+# separate ``_metadata`` as the engine_* tables (NOT on database.py's Base) so
+# the Alembic CI gate stays untouched and the SQLite test harness builds it via
+# ``create_all(_metadata)``.
+#
+# Bronze convention (insight_engine-schema-ddl.md §1): append-only, NO foreign
+# keys into the config tables — every reference out is a denormalized soft key
+# (strategy_key / rule_key / lookup_set+lookup_key), so the trail outlives the
+# rows it describes. Isolation is by owning app (owner_app_id), NOT by actor:
+# ``user_id`` is recorded for accountability but is never a read filter (OTA-792
+# decision) — the trail is the OTA app's, visible to any READ admin.
+engine_config_audit = Table(
+    "engine_config_audit",
+    _metadata,
+    # BigInteger in prod (bigint IDENTITY); INTEGER on SQLite so the test
+    # harness's INTEGER-PRIMARY-KEY rowid autoincrement populates audit_id.
+    Column(
+        "audit_id",
+        BigInteger().with_variant(Integer, "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    ),
+    Column("source_app_id", String(8), nullable=False, default=OTA_APP_ID),
+    # The acting BFF identity (Entra OID) + a human-readable label snapshot.
+    # Accountability attributes, not isolation keys.
+    Column("user_id", String(36), nullable=False),
+    Column("actor_label", String(200)),
+    Column("occurred_at", DateTime, nullable=False, default=_utcnow),
+    # target discriminator + operation + draft-vs-live stage
+    Column("entity_type", String(40), nullable=False),  # strategy|rule|junction|lookup
+    Column("operation", String(20), nullable=False),  # create|update|delete|apply
+    Column("target_stage", String(8), nullable=False),  # draft|live
+    # denormalized soft keys (nullable; set per entity_type)
+    Column("strategy_key", String(50)),
+    Column("rule_key", String(100)),
+    Column("lookup_set", String(60)),
+    Column("lookup_key", String(100)),
+    # before/after row images of the changed fields (full images; the changed
+    # subset is derivable). before NULL on create; after NULL on delete.
+    Column("before_json", Text),
+    Column("after_json", Text),
+    # the loadable-set hash the change produces (OTA-790 version stamp). For a
+    # draft write this equals the unchanged live hash (drafts are excluded from
+    # the loadable set); for a live change / Apply it is the new stamp.
+    Column("loadable_version", String(64)),
+)
+
+
 # Per-table set of columns whose stored value is a JSON string. Serialized on
 # write, parsed back to Python objects on read so the canonical shape carries
 # real JSON, not an escaped string.
@@ -207,6 +262,7 @@ _JSON_COLUMNS: dict[str, frozenset[str]] = {
     "engine_strategies": frozenset({"compatible_structures", "verdict_band_set"}),
     "engine_strategy_rule_junction": frozenset({"parameters"}),
     "engine_lookups": frozenset({"payload"}),
+    "engine_config_audit": frozenset({"before_json", "after_json"}),
 }
 
 
@@ -246,17 +302,88 @@ def _row_to_dict(row: Any, table_name: str) -> RawRow:
     return data
 
 
-# ── Save-time validation (OTA-783) ────────────────────────────────────────
+# ── Config change audit trail (OTA-792) ───────────────────────────────────
+#
+# AuditContext is the per-mutation attribution record the chokepoint
+# (_commit_with_validation) stamps with the produced loadable_version, resolves
+# the after-image for, and stages into engine_config_audit — all inside the
+# change's own transaction, so a validation rollback discards change + audit
+# together (only committed changes are audited).
+
+# An after-image loader: given the post-flush session, return the canonical row
+# (or row list) to record as after_json. Skipped for deletes.
+AfterLoader = Callable[[AsyncSession], Awaitable[Any]]
 
 
-async def _commit_with_validation(session: AsyncSession) -> None:
+@dataclass
+class AuditContext:
+    """One pending audit entry, supplied by a mutation to the commit chokepoint."""
+
+    entity_type: str  # strategy | rule | junction | lookup
+    operation: str  # create | update | delete | apply
+    target_stage: str  # draft | live
+    actor: RawRow  # {"user_id": ..., "actor_label": ...}
+    strategy_key: str | None = None
+    rule_key: str | None = None
+    lookup_set: str | None = None
+    lookup_key: str | None = None
+    before: Any | None = None  # canonical before-image (None on create)
+    after: Any | None = None  # canonical after-image (None on delete; else loaded)
+    after_loader: AfterLoader | None = None  # resolves `after` post-flush, in-txn
+
+
+def _audit_target_stage(strategy_key: str | None) -> str:
+    """draft if the affected strategy_key is a reserved draft key, else live."""
+    return "draft" if (strategy_key is not None and is_draft_key(strategy_key)) else "live"
+
+
+def _audit_json(value: Any) -> str | None:
+    """Serialize a before/after image to a JSON string (datetimes → ISO via str)."""
+    if value is None:
+        return None
+    return json.dumps(value, default=str)
+
+
+def _audit_row(ctx: AuditContext, loadable_version: str) -> RawRow:
+    """Build the engine_config_audit INSERT values from a resolved context."""
+    return {
+        "source_app_id": OTA_APP_ID,
+        "user_id": ctx.actor.get("user_id"),
+        "actor_label": ctx.actor.get("actor_label"),
+        "occurred_at": _utcnow(),
+        "entity_type": ctx.entity_type,
+        "operation": ctx.operation,
+        "target_stage": ctx.target_stage,
+        "strategy_key": ctx.strategy_key,
+        "rule_key": ctx.rule_key,
+        "lookup_set": ctx.lookup_set,
+        "lookup_key": ctx.lookup_key,
+        "before_json": _audit_json(ctx.before),
+        "after_json": _audit_json(ctx.after),
+        "loadable_version": loadable_version,
+    }
+
+
+# ── Save-time validation (OTA-783) + audit chokepoint (OTA-792) ────────────
+
+
+async def _commit_with_validation(
+    session: AsyncSession, audit: AuditContext | None = None
+) -> None:
     """Flush the staged write, validate via the OTA-699 engine-load path, commit.
 
-    This is the OTA-782 validation seam, now realized (OTA-783). The DML is
-    already staged on ``session``; we flush so the change is visible inside the
-    transaction, run ``engine_config_validation.validate_pending`` (which reuses
-    ``load_config`` + ``validate_config``), and commit only if it passes. A
-    validation failure rolls back — no partial / non-loadable state is persisted.
+    This is the OTA-782 validation seam (OTA-783) and the OTA-792 audit seam. The
+    DML is already staged on ``session``; we flush so the change is visible inside
+    the transaction, run ``engine_config_validation.validate_pending`` (which
+    reuses ``load_config`` + ``validate_config`` and returns the resolved
+    ``EngineConfig``), and commit only if it passes. A validation failure rolls
+    back — no partial / non-loadable state is persisted.
+
+    When an :class:`AuditContext` is supplied, the audit row is staged in this
+    same transaction: the produced ``loadable_version`` is read off the validated
+    config (no second config load), the after-image is resolved in-txn via the
+    context's ``after_loader``, and the row is inserted before commit. The audit
+    is therefore atomic with the change — a rollback discards both.
 
     Imported lazily to avoid a module-level cycle (the validation module imports
     this module's Table objects).
@@ -265,32 +392,53 @@ async def _commit_with_validation(session: AsyncSession) -> None:
 
     await session.flush()
     try:
-        await engine_config_validation.validate_pending(session)
+        config = await engine_config_validation.validate_pending(session)
     except engine_config_validation.ConfigSaveValidationError:
         await session.rollback()
         raise
+
+    if audit is not None:
+        if audit.after_loader is not None and audit.operation != "delete":
+            audit.after = await audit.after_loader(session)
+        await session.execute(
+            insert(engine_config_audit).values(**_audit_row(audit, config.loadable_version))
+        )
+
     await session.commit()
 
 
 # ── Strategies ────────────────────────────────────────────────────────────
 
 
-async def create_strategy(session: AsyncSession, data: RawRow) -> RawRow:
+async def create_strategy(
+    session: AsyncSession, data: RawRow, *, actor: RawRow | None = None
+) -> RawRow:
     _reject_shared(data.get("owner_app_id"))
     payload = _strategy_values(data)
+    key = payload["strategy_key"]
     await _ensure_absent(
         session, engine_strategies,
         engine_strategies.c.owner_app_id == OTA_APP_ID,
-        engine_strategies.c.strategy_key == payload["strategy_key"],
-        what=f"strategy {payload['strategy_key']!r}",
+        engine_strategies.c.strategy_key == key,
+        what=f"strategy {key!r}",
     )
-    await _insert(session, engine_strategies, payload)
-    return await _get_strategy(session, payload["strategy_key"])
+    audit = (
+        AuditContext(
+            entity_type="strategy", operation="create",
+            target_stage=_audit_target_stage(key), actor=actor,
+            strategy_key=key, after_loader=lambda s: _get_strategy(s, key),
+        )
+        if actor is not None else None
+    )
+    await _insert(session, engine_strategies, payload, audit=audit)
+    return await _get_strategy(session, key)
 
 
-async def update_strategy(session: AsyncSession, strategy_key: str, data: RawRow) -> RawRow:
+async def update_strategy(
+    session: AsyncSession, strategy_key: str, data: RawRow, *, actor: RawRow | None = None
+) -> RawRow:
     _reject_shared(data.get("owner_app_id"))
-    await _get_strategy(session, strategy_key)  # 404 if missing
+    before = await _get_strategy(session, strategy_key)  # 404 if missing
     payload = _strategy_values({**data, "strategy_key": strategy_key})
     payload.pop("strategy_key")  # natural key is immutable via PUT path
     payload["updated_at"] = _utcnow()
@@ -300,11 +448,22 @@ async def update_strategy(session: AsyncSession, strategy_key: str, data: RawRow
         .where(engine_strategies.c.strategy_key == strategy_key)
         .values(**payload)
     )
-    await _commit_with_validation(session)
+    audit = (
+        AuditContext(
+            entity_type="strategy", operation="update",
+            target_stage=_audit_target_stage(strategy_key), actor=actor,
+            strategy_key=strategy_key, before=before,
+            after_loader=lambda s: _get_strategy(s, strategy_key),
+        )
+        if actor is not None else None
+    )
+    await _commit_with_validation(session, audit=audit)
     return await _get_strategy(session, strategy_key)
 
 
-async def delete_strategy(session: AsyncSession, strategy_key: str) -> RawRow:
+async def delete_strategy(
+    session: AsyncSession, strategy_key: str, *, actor: RawRow | None = None
+) -> RawRow:
     existing = await _get_strategy(session, strategy_key)  # 404 if missing
     in_use = await session.scalar(
         select(engine_junction.c.junction_id)
@@ -320,7 +479,15 @@ async def delete_strategy(session: AsyncSession, strategy_key: str) -> RawRow:
         .where(engine_strategies.c.owner_app_id == OTA_APP_ID)
         .where(engine_strategies.c.strategy_key == strategy_key)
     )
-    await _commit_with_validation(session)
+    audit = (
+        AuditContext(
+            entity_type="strategy", operation="delete",
+            target_stage=_audit_target_stage(strategy_key), actor=actor,
+            strategy_key=strategy_key, before=existing,
+        )
+        if actor is not None else None
+    )
+    await _commit_with_validation(session, audit=audit)
     return existing
 
 
@@ -480,7 +647,9 @@ async def delete_draft(session: AsyncSession, live_key: str) -> RawRow:
     return draft
 
 
-async def apply_draft(session: AsyncSession, live_key: str) -> RawRow:
+async def apply_draft(
+    session: AsyncSession, live_key: str, *, actor: RawRow | None = None
+) -> RawRow:
     """Promote the draft's junction bindings to the live strategy, then delete it.
 
     OTA-790 Apply — a single-transaction, **junction-only** promote (decision
@@ -513,6 +682,14 @@ async def apply_draft(session: AsyncSession, live_key: str) -> RawRow:
     live_id = live["strategy_id"]
     draft_id = draft["strategy_id"]
 
+    # Prior live binding set, for the single apply audit row's before-image
+    # (captured before the delete). The individual junction edits were already
+    # audited at draft-write time (OTA-792 decision: Apply emits one row, not a
+    # per-junction replay).
+    before_junctions = (
+        await list_strategy_junctions(session, live_key) if actor is not None else None
+    )
+
     # Replace live junctions with the draft's (repointed to the live strategy).
     await session.execute(
         delete(engine_junction).where(engine_junction.c.strategy_id == live_id)
@@ -522,8 +699,23 @@ async def apply_draft(session: AsyncSession, live_key: str) -> RawRow:
     # Consume the draft (its own junctions + header row).
     await _stage_draft_deletion(session, draft)
 
-    await _commit_with_validation(session)
+    audit = (
+        AuditContext(
+            entity_type="strategy", operation="apply", target_stage="live",
+            actor=actor, strategy_key=live_key,
+            before={"junctions": before_junctions},
+            # promoted live binding set, post-flush, in-txn
+            after_loader=lambda s: _apply_after_image(s, live_key),
+        )
+        if actor is not None else None
+    )
+    await _commit_with_validation(session, audit=audit)
     return await _get_strategy(session, live_key)
+
+
+async def _apply_after_image(session: AsyncSession, live_key: str) -> RawRow:
+    """The promoted live binding set, wrapped for the apply audit after-image."""
+    return {"junctions": await list_strategy_junctions(session, live_key)}
 
 
 async def _get_strategy_optional(
@@ -618,22 +810,35 @@ async def _stage_draft_deletion(session: AsyncSession, draft_row: RawRow) -> Non
 # ── Rules ─────────────────────────────────────────────────────────────────
 
 
-async def create_rule(session: AsyncSession, data: RawRow) -> RawRow:
+async def create_rule(
+    session: AsyncSession, data: RawRow, *, actor: RawRow | None = None
+) -> RawRow:
     _reject_shared(data.get("owner_app_id"))
     payload = _rule_values(data)
+    key = payload["rule_key"]
     await _ensure_absent(
         session, engine_rules,
         engine_rules.c.owner_app_id == OTA_APP_ID,
-        engine_rules.c.rule_key == payload["rule_key"],
-        what=f"rule {payload['rule_key']!r}",
+        engine_rules.c.rule_key == key,
+        what=f"rule {key!r}",
     )
-    await _insert(session, engine_rules, payload)
-    return await _get_rule(session, payload["rule_key"])
+    # Rules have no draft substrate — every rule write is a live change.
+    audit = (
+        AuditContext(
+            entity_type="rule", operation="create", target_stage="live",
+            actor=actor, rule_key=key, after_loader=lambda s: _get_rule(s, key),
+        )
+        if actor is not None else None
+    )
+    await _insert(session, engine_rules, payload, audit=audit)
+    return await _get_rule(session, key)
 
 
-async def update_rule(session: AsyncSession, rule_key: str, data: RawRow) -> RawRow:
+async def update_rule(
+    session: AsyncSession, rule_key: str, data: RawRow, *, actor: RawRow | None = None
+) -> RawRow:
     _reject_shared(data.get("owner_app_id"))
-    await _get_rule(session, rule_key)  # 404 if missing
+    before = await _get_rule(session, rule_key)  # 404 if missing
     payload = _rule_values({**data, "rule_key": rule_key})
     payload.pop("rule_key")
     payload["updated_at"] = _utcnow()
@@ -643,11 +848,21 @@ async def update_rule(session: AsyncSession, rule_key: str, data: RawRow) -> Raw
         .where(engine_rules.c.rule_key == rule_key)
         .values(**payload)
     )
-    await _commit_with_validation(session)
+    audit = (
+        AuditContext(
+            entity_type="rule", operation="update", target_stage="live",
+            actor=actor, rule_key=rule_key, before=before,
+            after_loader=lambda s: _get_rule(s, rule_key),
+        )
+        if actor is not None else None
+    )
+    await _commit_with_validation(session, audit=audit)
     return await _get_rule(session, rule_key)
 
 
-async def delete_rule(session: AsyncSession, rule_key: str) -> RawRow:
+async def delete_rule(
+    session: AsyncSession, rule_key: str, *, actor: RawRow | None = None
+) -> RawRow:
     existing = await _get_rule(session, rule_key)  # 404 if missing
     in_use = await session.scalar(
         select(engine_junction.c.junction_id)
@@ -664,7 +879,14 @@ async def delete_rule(session: AsyncSession, rule_key: str) -> RawRow:
         .where(engine_rules.c.owner_app_id == OTA_APP_ID)
         .where(engine_rules.c.rule_key == rule_key)
     )
-    await _commit_with_validation(session)
+    audit = (
+        AuditContext(
+            entity_type="rule", operation="delete", target_stage="live",
+            actor=actor, rule_key=rule_key, before=existing,
+        )
+        if actor is not None else None
+    )
+    await _commit_with_validation(session, audit=audit)
     return existing
 
 
@@ -736,7 +958,9 @@ async def list_rules_admin(session: AsyncSession) -> list[RawRow]:
 # read-only protection applies to the rule/strategy library, not the binding.
 
 
-async def create_junction(session: AsyncSession, data: RawRow) -> RawRow:
+async def create_junction(
+    session: AsyncSession, data: RawRow, *, actor: RawRow | None = None
+) -> RawRow:
     strategy_key = data["strategy_key"]
     rule_key = data["rule_key"]
     strat = await _get_strategy(session, strategy_key)
@@ -751,14 +975,26 @@ async def create_junction(session: AsyncSession, data: RawRow) -> RawRow:
             f"junction ({strategy_key!r}, {rule_key!r}) already exists"
         )
     payload = _junction_values(strat["strategy_id"], rule["rule_id"], data)
-    await _insert(session, engine_junction, payload)
+    # target_stage tracks the bound strategy: a binding on `<key>__draft` is a
+    # draft-write (OTA-790 Apply later promotes it as one `apply` row).
+    audit = (
+        AuditContext(
+            entity_type="junction", operation="create",
+            target_stage=_audit_target_stage(strategy_key), actor=actor,
+            strategy_key=strategy_key, rule_key=rule_key,
+            after_loader=lambda s: _get_junction(s, strategy_key, rule_key),
+        )
+        if actor is not None else None
+    )
+    await _insert(session, engine_junction, payload, audit=audit)
     return await _get_junction(session, strategy_key, rule_key)
 
 
 async def update_junction(
-    session: AsyncSession, strategy_key: str, rule_key: str, data: RawRow
+    session: AsyncSession, strategy_key: str, rule_key: str, data: RawRow,
+    *, actor: RawRow | None = None,
 ) -> RawRow:
-    await _get_junction(session, strategy_key, rule_key)  # 404 if missing
+    before = await _get_junction(session, strategy_key, rule_key)  # 404 if missing
     strat = await _get_strategy(session, strategy_key)
     rule = await _get_rule(session, rule_key)
     payload = _junction_values(strat["strategy_id"], rule["rule_id"], data)
@@ -771,12 +1007,22 @@ async def update_junction(
         .where(engine_junction.c.rule_id == rule["rule_id"])
         .values(**payload)
     )
-    await _commit_with_validation(session)
+    audit = (
+        AuditContext(
+            entity_type="junction", operation="update",
+            target_stage=_audit_target_stage(strategy_key), actor=actor,
+            strategy_key=strategy_key, rule_key=rule_key, before=before,
+            after_loader=lambda s: _get_junction(s, strategy_key, rule_key),
+        )
+        if actor is not None else None
+    )
+    await _commit_with_validation(session, audit=audit)
     return await _get_junction(session, strategy_key, rule_key)
 
 
 async def delete_junction(
-    session: AsyncSession, strategy_key: str, rule_key: str
+    session: AsyncSession, strategy_key: str, rule_key: str,
+    *, actor: RawRow | None = None,
 ) -> RawRow:
     existing = await _get_junction(session, strategy_key, rule_key)  # 404 if missing
     await session.execute(
@@ -784,7 +1030,15 @@ async def delete_junction(
             engine_junction.c.junction_id == existing["junction_id"]
         )
     )
-    await _commit_with_validation(session)
+    audit = (
+        AuditContext(
+            entity_type="junction", operation="delete",
+            target_stage=_audit_target_stage(strategy_key), actor=actor,
+            strategy_key=strategy_key, rule_key=rule_key, before=existing,
+        )
+        if actor is not None else None
+    )
+    await _commit_with_validation(session, audit=audit)
     return existing
 
 
@@ -904,25 +1158,38 @@ def _junction_with_rule_to_dict(row: Any, strategy_key: str) -> RawRow:
 # ── Lookups ───────────────────────────────────────────────────────────────
 
 
-async def create_lookup(session: AsyncSession, data: RawRow) -> RawRow:
+async def create_lookup(
+    session: AsyncSession, data: RawRow, *, actor: RawRow | None = None
+) -> RawRow:
     _reject_shared(data.get("owner_app_id"))
     payload = _lookup_values(data)
+    lset, lkey = payload["lookup_set"], payload["lookup_key"]
     await _ensure_absent(
         session, engine_lookups,
         engine_lookups.c.owner_app_id == OTA_APP_ID,
-        engine_lookups.c.lookup_set == payload["lookup_set"],
-        engine_lookups.c.lookup_key == payload["lookup_key"],
-        what=f"lookup {payload['lookup_set']!r}/{payload['lookup_key']!r}",
+        engine_lookups.c.lookup_set == lset,
+        engine_lookups.c.lookup_key == lkey,
+        what=f"lookup {lset!r}/{lkey!r}",
     )
-    await _insert(session, engine_lookups, payload)
-    return await _get_lookup(session, payload["lookup_set"], payload["lookup_key"])
+    # Lookups have no draft substrate — every lookup write is a live change.
+    audit = (
+        AuditContext(
+            entity_type="lookup", operation="create", target_stage="live",
+            actor=actor, lookup_set=lset, lookup_key=lkey,
+            after_loader=lambda s: _get_lookup(s, lset, lkey),
+        )
+        if actor is not None else None
+    )
+    await _insert(session, engine_lookups, payload, audit=audit)
+    return await _get_lookup(session, lset, lkey)
 
 
 async def update_lookup(
-    session: AsyncSession, lookup_set: str, lookup_key: str, data: RawRow
+    session: AsyncSession, lookup_set: str, lookup_key: str, data: RawRow,
+    *, actor: RawRow | None = None,
 ) -> RawRow:
     _reject_shared(data.get("owner_app_id"))
-    await _get_lookup(session, lookup_set, lookup_key)  # 404 if missing
+    before = await _get_lookup(session, lookup_set, lookup_key)  # 404 if missing
     payload = _lookup_values(
         {**data, "lookup_set": lookup_set, "lookup_key": lookup_key}
     )
@@ -935,12 +1202,21 @@ async def update_lookup(
         .where(engine_lookups.c.lookup_key == lookup_key)
         .values(**payload)
     )
-    await _commit_with_validation(session)
+    audit = (
+        AuditContext(
+            entity_type="lookup", operation="update", target_stage="live",
+            actor=actor, lookup_set=lookup_set, lookup_key=lookup_key, before=before,
+            after_loader=lambda s: _get_lookup(s, lookup_set, lookup_key),
+        )
+        if actor is not None else None
+    )
+    await _commit_with_validation(session, audit=audit)
     return await _get_lookup(session, lookup_set, lookup_key)
 
 
 async def delete_lookup(
-    session: AsyncSession, lookup_set: str, lookup_key: str
+    session: AsyncSession, lookup_set: str, lookup_key: str,
+    *, actor: RawRow | None = None,
 ) -> RawRow:
     existing = await _get_lookup(session, lookup_set, lookup_key)  # 404 if missing
     await session.execute(
@@ -949,7 +1225,14 @@ async def delete_lookup(
         .where(engine_lookups.c.lookup_set == lookup_set)
         .where(engine_lookups.c.lookup_key == lookup_key)
     )
-    await _commit_with_validation(session)
+    audit = (
+        AuditContext(
+            entity_type="lookup", operation="delete", target_stage="live",
+            actor=actor, lookup_set=lookup_set, lookup_key=lookup_key, before=existing,
+        )
+        if actor is not None else None
+    )
+    await _commit_with_validation(session, audit=audit)
     return existing
 
 
@@ -980,6 +1263,66 @@ async def _get_lookup(
     return _row_to_dict(row, "engine_lookups")
 
 
+# ── Config audit trail reads (OTA-792) ────────────────────────────────────
+#
+# Isolation is by owning app (source_app_id='OTA'), NOT by actor: there is no
+# user_id read filter (OTA-792 decision). The trail belongs to the OTA app and
+# is visible in full to any require_read admin; user_id is recorded purely for
+# accountability. Reads are newest-first, tie-broken by audit_id for stability.
+
+
+async def list_audit(
+    session: AsyncSession,
+    *,
+    entity_type: str | None = None,
+    strategy_key: str | None = None,
+    rule_key: str | None = None,
+    lookup_set: str | None = None,
+    lookup_key: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[RawRow]:
+    """Return config-audit entries (filtered, newest first), app-scoped to OTA."""
+    a = engine_config_audit
+    stmt = select(a).where(a.c.source_app_id == OTA_APP_ID)
+    if entity_type is not None:
+        stmt = stmt.where(a.c.entity_type == entity_type)
+    if strategy_key is not None:
+        stmt = stmt.where(a.c.strategy_key == strategy_key)
+    if rule_key is not None:
+        stmt = stmt.where(a.c.rule_key == rule_key)
+    if lookup_set is not None:
+        stmt = stmt.where(a.c.lookup_set == lookup_set)
+    if lookup_key is not None:
+        stmt = stmt.where(a.c.lookup_key == lookup_key)
+    stmt = (
+        stmt.order_by(a.c.occurred_at.desc(), a.c.audit_id.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    rows = (await session.execute(stmt)).mappings().all()
+    return [_row_to_dict(row, "engine_config_audit") for row in rows]
+
+
+async def get_audit(session: AsyncSession, audit_id: int) -> RawRow:
+    """Return one audit entry by id (app-scoped to OTA). 404 if absent.
+
+    No cross-user 404 on this table (OTA-792 decision): any READ admin sees any
+    OTA entry — isolation is by owning app, not actor.
+    """
+    a = engine_config_audit
+    row = (
+        await session.execute(
+            select(a)
+            .where(a.c.audit_id == audit_id)
+            .where(a.c.source_app_id == OTA_APP_ID)
+        )
+    ).mappings().first()
+    if row is None:
+        raise NotFoundError(f"audit entry {audit_id!r} not found")
+    return _row_to_dict(row, "engine_config_audit")
+
+
 # ── Shared internals ──────────────────────────────────────────────────────
 
 
@@ -1001,16 +1344,19 @@ async def _ensure_absent(session: AsyncSession, table: Table, *conditions, what:
         raise DuplicateKeyError(f"{what} already exists")
 
 
-async def _insert(session: AsyncSession, table: Table, payload: RawRow) -> None:
+async def _insert(
+    session: AsyncSession, table: Table, payload: RawRow, *, audit: AuditContext | None = None
+) -> None:
     """Stage an insert, validate the resulting config, then commit.
 
     A unique-constraint race surfaces as DuplicateKeyError; a config that would
     not load cleanly surfaces as ConfigSaveValidationError (both before commit,
-    so nothing partial is persisted).
+    so nothing partial is persisted). An optional :class:`AuditContext` is staged
+    atomically by the commit chokepoint (OTA-792).
     """
     try:
         await session.execute(insert(table).values(**payload))
     except IntegrityError as exc:  # natural-key race or FK miss → clear conflict
         await session.rollback()
         raise DuplicateKeyError(f"write to {table.name} violated a constraint") from exc
-    await _commit_with_validation(session)
+    await _commit_with_validation(session, audit=audit)

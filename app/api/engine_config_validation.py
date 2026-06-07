@@ -46,6 +46,7 @@ from app.api.engine_config_store import (
     engine_strategies,
 )
 from app.insight_engine import (
+    EngineConfig,
     InMemoryConfigSource,
     load_config,
     validate_config,
@@ -100,12 +101,18 @@ async def _load_in_memory_source(session: AsyncSession) -> InMemoryConfigSource:
     )
 
 
-async def validate_pending(session: AsyncSession) -> None:
+async def validate_pending(session: AsyncSession) -> EngineConfig:
     """Validate the staged config via the OTA-699 path; raise on any failure.
 
     Must be called after the write DML is flushed but before commit. Reuses
     ``load_config`` (OTA-698) + ``validate_config`` (OTA-699) — no checks are
     re-derived here.
+
+    Returns the resolved :class:`EngineConfig` (OTA-792) so the caller can read
+    its ``loadable_version`` — the version stamp the committed change produces —
+    without a second full-config load. ``load_config`` here uses the default
+    ``app_ids=("SHARED","OTA")``, so this hash is identical to the one
+    ``init_engine_runtime`` stamps and ``GET /config/status`` compares against.
     """
     source = await _load_in_memory_source(session)
 
@@ -129,3 +136,5 @@ async def validate_pending(session: AsyncSession) -> None:
             ],
             summary=report.summary(),
         )
+
+    return config
