@@ -75,6 +75,17 @@ const DRAWER_TABS = [
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
+/**
+ * True for a draft substrate row (OTA-791): the `<key>__draft` editing backing
+ * store (status='draft' ⇒ enabled=0), not a user-selectable strategy. The clone
+ * sets both markers atomically, so either identifies it; we check both (OTA-828).
+ * Filter applied page-side only — the admin endpoint and `getAdminStrategies`
+ * still return drafts so VerdictBandsSection can resolve the draft's bands.
+ */
+function isDraftRow(r) {
+  return r.status === 'draft' || String(r.strategy_key).endsWith('__draft');
+}
+
 /** snake_case enum → Title Case display ('bull_put_credit' → 'Bull Put Credit'). */
 function titleCase(s) {
   return String(s)
@@ -164,8 +175,12 @@ export default function StrategyAdminPage() {
     setLoading(true);
     setError(null);
     try {
-      const rows = await getAdminStrategies();
-      setStrategies(rows || []);
+      // OTA-828: hide draft substrate rows from the selector. The endpoint still
+      // returns them (VerdictBandsSection resolves the draft from it); we filter
+      // here so `strategies` — and everything derived from it (selector groups,
+      // `selected`, default selection below) — is draft-free in one place.
+      const rows = (await getAdminStrategies() || []).filter(r => !isDraftRow(r));
+      setStrategies(rows);
       // Default selection: first OTA-editable strategy, else first row.
       setSelectedKey(prev => {
         if (prev && rows?.some(r => r.strategy_key === prev)) return prev;
