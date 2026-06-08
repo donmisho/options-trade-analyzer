@@ -57,3 +57,53 @@ describe('HardGatesSection — evaluation_order collision advisory invariant (OT
     await waitFor(() => expect(client.updateJunction).toHaveBeenCalled());
   });
 });
+
+// ── OTA-793: behavior + format on top of the OTA-829 advisory seed ──
+describe('HardGatesSection — behavior & format (OTA-793)', () => {
+  beforeEach(() => {
+    client.deleteJunction.mockResolvedValue({});
+  });
+
+  it('opens the shared catalog filtered to the gate phase', async () => {
+    const onOpenCatalog = vi.fn();
+    render(<HardGatesSection strategyKey="steady-paycheck" editable onOpenCatalog={onOpenCatalog} />);
+    await screen.findByText(/Duplicate evaluation order detected/i);
+
+    fireEvent.click(screen.getByText('+ Add hard gate from catalog'));
+    expect(onOpenCatalog).toHaveBeenCalledWith('gate');
+  });
+
+  it('removes a gate on the draft (delete targets `<key>__draft`)', async () => {
+    render(<HardGatesSection strategyKey="steady-paycheck" editable />);
+    await screen.findByText(/Duplicate evaluation order detected/i);
+
+    fireEvent.click(screen.getAllByText('Remove')[0]);   // first row: min_dte
+    await waitFor(() => expect(client.deleteJunction).toHaveBeenCalled());
+    expect(client.deleteJunction).toHaveBeenCalledWith('steady-paycheck__draft', 'min_dte');
+  });
+
+  it('toggling enabled commits to the draft via updateJunction', async () => {
+    render(<HardGatesSection strategyKey="steady-paycheck" editable />);
+    await screen.findByText(/Duplicate evaluation order detected/i);
+
+    fireEvent.click(screen.getByLabelText('Disable min_dte'));   // enabled=true ⇒ "Disable …"
+    await waitFor(() => expect(client.updateJunction).toHaveBeenCalled());
+    const [key, ruleKey, body] = client.updateJunction.mock.calls.at(-1);
+    expect(key).toBe('steady-paycheck__draft');
+    expect(ruleKey).toBe('min_dte');
+    expect(body.enabled).toBe(false);
+  });
+
+  it('is read-only for a shared (non-editable) strategy — no Add, no Remove', async () => {
+    render(<HardGatesSection strategyKey="health-monitor" editable={false} />);
+    await screen.findByText('Min Dte');   // prettified rule_key still renders
+    expect(screen.queryByText('+ Add hard gate from catalog')).not.toBeInTheDocument();
+    expect(screen.queryByText('Remove')).not.toBeInTheDocument();
+  });
+
+  it('carries no `$` (house style)', async () => {
+    const { container } = render(<HardGatesSection strategyKey="steady-paycheck" editable />);
+    await screen.findByText(/Duplicate evaluation order detected/i);
+    expect(container.textContent).not.toContain('$');
+  });
+});

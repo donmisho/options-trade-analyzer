@@ -34,5 +34,12 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./src/test/setup.js'],
     css: false,
+    // OneDrive-backed jsdom checkout is slow (see src/test/setup.js — async util
+    // timeout already raised to 5s for the same reason). Under the full parallel
+    // run, CPU saturation can push a test that stacks two 5s-budget async waits
+    // past the 5s default test/hook timeout. Raise both so the suite is reliably
+    // green; this is harness reliability only — no test logic depends on it.
+    testTimeout: 15000,
+    hookTimeout: 15000,
   },
 })

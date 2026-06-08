@@ -12,7 +12,7 @@
  * is a DOM/Testing-Library test, not a pure-function test (see ScoringSection.test).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import VerdictBandsSection from './VerdictBandsSection';
 
 // Stable showToast identity: useToast must not hand back a fresh fn each render,
@@ -57,5 +57,49 @@ describe('VerdictBandsSection — monotonicity advisory invariant (OTA-790)', ()
     // 2) Save is NOT blocked: the edit makes it dirty and "Save bands" stays enabled
     //    despite the advisory flag (it is gated only by dirty/saving, never by the flag).
     expect(screen.getByRole('button', { name: /Save bands/i })).not.toBeDisabled();
+  });
+});
+
+// ── OTA-793: behavior + format on top of the OTA-829 advisory seed ──
+describe('VerdictBandsSection — behavior & format (OTA-793)', () => {
+  it('saves the edited band set to the DRAFT key with status preserved', async () => {
+    // Draft already present → load() reads it; Save re-reads it to build the PUT.
+    client.getAdminStrategies.mockResolvedValue([
+      { strategy_key: 'steady-paycheck', verdict_band_set: monotonicBands },
+      { strategy_key: 'steady-paycheck__draft', display_name: 'Steady Paycheck',
+        consumer_surface: 'screening', description: null,
+        compatible_structures: ['bull_put_credit'], verdict_band_set: monotonicBands,
+        dte_min: 30, dte_max: 45, status: 'draft' },
+    ]);
+    render(<VerdictBandsSection strategyKey="steady-paycheck" editable />);
+
+    // Edit band 1's max (stays monotonic — no advisory) → dirty.
+    const band1Max = await screen.findByLabelText('Band 1 max score');
+    fireEvent.change(band1Max, { target: { value: '95' } });
+
+    fireEvent.click(screen.getByRole('button', { name: /Save bands/i }));
+    await waitFor(() => expect(client.updateEngineStrategy).toHaveBeenCalled());
+
+    const [key, body] = client.updateEngineStrategy.mock.calls.at(-1);
+    expect(key).toBe('steady-paycheck__draft');     // live is never written here
+    expect(body.status).toBe('draft');              // server derives enabled=0
+    expect(body.verdict_band_set[0].max_score).toBe(95);
+  });
+
+  it('renders read-only bands as ##.00 for a shared strategy — no inputs', async () => {
+    render(<VerdictBandsSection strategyKey="steady-paycheck" editable={false} />);
+
+    expect(await screen.findByText('A')).toBeInTheDocument();
+    // min – max formatted ##.00 (not bare integers).
+    expect(screen.getByText(/70\.00 – 100\.00/)).toBeInTheDocument();
+    // No editable inputs in read-only mode.
+    expect(screen.queryByLabelText('Band 1 min score')).not.toBeInTheDocument();
+    expect(screen.getByText('Shared strategy — read-only')).toBeInTheDocument();
+  });
+
+  it('carries no `$` (house style)', async () => {
+    const { container } = render(<VerdictBandsSection strategyKey="steady-paycheck" editable={false} />);
+    await screen.findByText('A');
+    expect(container.textContent).not.toContain('$');
   });
 });

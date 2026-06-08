@@ -58,3 +58,53 @@ describe('ScoringSection — weight-sum advisory invariant (OTA-790)', () => {
     // (Reaching here without an exception also proves the component did not throw.)
   });
 });
+
+// ── OTA-793: behavior + format on top of the OTA-829 advisory seed ──
+describe('ScoringSection — behavior & format (OTA-793)', () => {
+  it('opens the shared catalog filtered to the scoring phase', async () => {
+    const onOpenCatalog = vi.fn();
+    render(<ScoringSection strategyKey="steady-paycheck" editable onOpenCatalog={onOpenCatalog} />);
+    await screen.findByText('Pop Weight');
+
+    fireEvent.click(screen.getByText('+ Add scoring criterion from catalog'));
+    expect(onOpenCatalog).toHaveBeenCalledWith('scoring');
+  });
+
+  it('removes a criterion on the draft (delete targets `<key>__draft`)', async () => {
+    client.deleteJunction.mockResolvedValue({});
+    render(<ScoringSection strategyKey="steady-paycheck" editable />);
+    await screen.findByText('Pop Weight');
+
+    fireEvent.click(screen.getByText('Remove'));
+    await waitFor(() => expect(client.deleteJunction).toHaveBeenCalled());
+    expect(client.deleteJunction).toHaveBeenCalledWith('steady-paycheck__draft', 'pop_weight');
+  });
+
+  it('totals a unity weight set as 100.00% with no advisory flag', async () => {
+    client.getStrategyJunctions.mockResolvedValue([
+      { junction_id: 's1', rule_key: 'pop_weight', phase: 'scoring', evaluation_order: 1,
+        enabled: true, weight: 0.6, parameters: {}, parameter_schema: {} },
+      { junction_id: 's2', rule_key: 'iv_weight', phase: 'scoring', evaluation_order: 2,
+        enabled: true, weight: 0.4, parameters: {}, parameter_schema: {} },
+    ]);
+    render(<ScoringSection strategyKey="steady-paycheck" editable />);
+    await screen.findByText('Pop Weight');
+
+    // Total formatted ##.00% and clean (no off-sum advisory copy).
+    expect(screen.getByText('100.00%')).toBeInTheDocument();
+    expect(screen.queryByText(/Advisory — the save still succeeds/i)).not.toBeInTheDocument();
+  });
+
+  it('is read-only for a shared (non-editable) strategy — no Add, no Remove', async () => {
+    render(<ScoringSection strategyKey="health-monitor" editable={false} />);
+    await screen.findByText('Pop Weight');
+    expect(screen.queryByText('+ Add scoring criterion from catalog')).not.toBeInTheDocument();
+    expect(screen.queryByText('Remove')).not.toBeInTheDocument();
+  });
+
+  it('carries no `$` (house style)', async () => {
+    const { container } = render(<ScoringSection strategyKey="steady-paycheck" editable />);
+    await screen.findByText('Pop Weight');
+    expect(container.textContent).not.toContain('$');
+  });
+});
