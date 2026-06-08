@@ -8,8 +8,9 @@
  * adjustments are ordinary adjustment rows — NO special-casing here. Renders each
  * bound adjustment (from the OTA-826 junction read) sorted by evaluation_order,
  * with editable threshold parameters and evaluation_order via the shared
- * JunctionRowEditor. Provides "Add adjustment from catalog" (OTA-825 filtered to
- * phase==='adjustment') and "Remove".
+ * JunctionRowEditor. Provides "Add adjustment from catalog" (opens the shared
+ * RuleCatalogDrawer filtered to phase==='adjustment' — OTA-789; the drawer owns
+ * the bind and bumps refreshSignal so this section reloads) and "Remove".
  *
  * Save-to-draft (OTA-781): live is never written here. First junction write
  * ensures `<key>__draft` exists (create-or-resume, cloning live header +
@@ -26,11 +27,9 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import JunctionRowEditor, { defaultsFromSchema } from './JunctionRowEditor';
+import JunctionRowEditor from './JunctionRowEditor';
 import {
   getStrategyJunctions,
-  getRulesAdmin,
-  createJunction,
   updateJunction,
   deleteJunction,
   createOrResumeDraft,
@@ -52,12 +51,7 @@ const addBtnStyle = {
   padding: '7px 14px', borderRadius: 4, fontSize: 11, fontFamily: MONO, cursor: 'pointer',
 };
 
-/** snake_case / kebab → Title Case. */
-function prettify(s) {
-  return String(s).replace(/[_-]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-}
-
-export default function AdjustmentsSection({ strategyKey, editable }) {
+export default function AdjustmentsSection({ strategyKey, editable, onOpenCatalog, refreshSignal }) {
   const { showToast } = useToast();
   const draftKey = `${strategyKey}__draft`;
 
@@ -66,10 +60,6 @@ export default function AdjustmentsSection({ strategyKey, editable }) {
   const [error, setError]         = useState(null);
   const [draftExists, setDraftExists] = useState(false);
   const [mutating, setMutating]   = useState(false);
-
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [catalog, setCatalog]       = useState(null);
-  const [catalogErr, setCatalogErr] = useState(null);
 
   const rowsRef = useRef(rows);
   useEffect(() => { rowsRef.current = rows; }, [rows]);
@@ -104,10 +94,10 @@ export default function AdjustmentsSection({ strategyKey, editable }) {
     }
   }, [strategyKey, draftKey, editable]);
 
+  // Reload on strategy/editable change and after a shared-drawer bind (OTA-789).
   useEffect(() => {
-    setPickerOpen(false);
     load();
-  }, [load]);
+  }, [load, refreshSignal]);
 
   // ── Draft ensure (first write) ──
   const ensureDraft = useCallback(async () => {
@@ -149,31 +139,6 @@ export default function AdjustmentsSection({ strategyKey, editable }) {
     persistRow(merged);
   }, [persistRow]);
 
-  // ── Add an adjustment from the catalog ──
-  const addAdjustment = useCallback(async (rule) => {
-    setMutating(true);
-    try {
-      const dk = await ensureDraft();
-      const nextOrder = rows.length
-        ? Math.max(...rows.map(r => Number(r.evaluation_order) || 0)) + 1
-        : 1;
-      await createJunction({
-        strategy_key: dk,
-        rule_key: rule.rule_key,
-        evaluation_order: nextOrder,
-        stop_if_fail: false,   // adjustments never halt
-        parameters: defaultsFromSchema(rule.parameter_schema),
-        enabled: true,
-      });
-      setPickerOpen(false);
-      await load();
-    } catch (e) {
-      showToast({ type: 'error', message: `Add failed: ${e.message}` });
-    } finally {
-      setMutating(false);
-    }
-  }, [ensureDraft, rows, load, showToast]);
-
   const removeAdjustment = useCallback(async (row) => {
     setMutating(true);
     try {
@@ -186,23 +151,6 @@ export default function AdjustmentsSection({ strategyKey, editable }) {
       setMutating(false);
     }
   }, [ensureDraft, load, showToast]);
-
-  // ── Catalog picker ──
-  const openPicker = useCallback(async () => {
-    setPickerOpen(o => !o);
-    if (catalog == null) {
-      try {
-        const all = await getRulesAdmin();
-        setCatalog((all || []).filter(r => r.phase === ADJUSTMENT_PHASE));
-      } catch (e) {
-        setCatalogErr(e.message);
-        setCatalog([]);
-      }
-    }
-  }, [catalog]);
-
-  const boundKeys = new Set(rows.map(r => r.rule_key));
-  const available = (catalog || []).filter(r => !boundKeys.has(r.rule_key));
 
   // ── Advisory collision detection (enabled rows only — server parity) ──
   const orderCounts = {};
@@ -227,59 +175,10 @@ export default function AdjustmentsSection({ strategyKey, editable }) {
           )}
         </div>
         {editable && (
-          <button onClick={openPicker} disabled={mutating}
+          <button onClick={() => onOpenCatalog?.(ADJUSTMENT_PHASE)} disabled={mutating}
             style={{ ...addBtnStyle, opacity: mutating ? 0.4 : 1, cursor: mutating ? 'default' : 'pointer' }}>
             + Add adjustment from catalog
           </button>
-        )}
-
-        {pickerOpen && editable && (
-          <div style={{
-            position: 'absolute', top: '100%', right: 0, marginTop: 6, zIndex: 60,
-            width: 380, maxHeight: 360, overflowY: 'auto',
-            background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6,
-            boxShadow: '0 8px 24px rgba(0,0,0,0.5)', fontFamily: MONO,
-          }}>
-            <div style={{
-              padding: '10px 14px', borderBottom: '1px solid var(--border)',
-              fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--muted)',
-            }}>
-              Adjustments · {available.length} available
-            </div>
-            {catalog == null ? (
-              <div style={{ padding: 14, fontSize: 11, color: 'var(--muted)' }}>Loading catalog…</div>
-            ) : catalogErr ? (
-              <div style={{ padding: 14, fontSize: 11, color: 'var(--red)' }}>{catalogErr}</div>
-            ) : available.length === 0 ? (
-              <div style={{ padding: 14, fontSize: 11, color: 'var(--muted)' }}>
-                No adjustments available to add.
-              </div>
-            ) : available.map(rule => (
-              <div
-                key={rule.rule_key}
-                onClick={() => rule.enabled && !mutating && addAdjustment(rule)}
-                style={{
-                  padding: '10px 14px', borderBottom: '1px solid var(--border)',
-                  cursor: rule.enabled && !mutating ? 'pointer' : 'default',
-                  opacity: rule.enabled ? 1 : 0.5,
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
-                    {prettify(rule.rule_key)}
-                  </span>
-                  {!rule.enabled && (
-                    <span style={{ fontSize: 9, color: 'var(--muted)' }}>(disabled)</span>
-                  )}
-                </div>
-                {rule.intent && (
-                  <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 3, lineHeight: 1.4 }}>
-                    {rule.intent}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
         )}
       </div>
 

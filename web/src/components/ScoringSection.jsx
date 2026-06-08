@@ -4,8 +4,9 @@
  * Edits the `phase='scoring'` junction rows of the selected strategy. Renders each
  * bound scoring criterion (from the OTA-826 junction read) with an editable
  * weight and threshold parameters via the shared JunctionRowEditor. Provides a
- * live sum-to-1.0 indicator, "Add scoring criterion from catalog" (OTA-825
- * filtered to phase==='scoring'), and "Remove".
+ * live sum-to-1.0 indicator, "Add scoring criterion from catalog" (opens the
+ * shared RuleCatalogDrawer filtered to phase==='scoring' — OTA-789; the drawer
+ * owns the bind and bumps refreshSignal so this section reloads), and "Remove".
  *
  * Weight units (OTA-786 decision): the weight is STORED as a fraction
  * (numeric(7,4)) that must sum to 1.0 server-side; it is DISPLAYED/EDITED as a
@@ -29,11 +30,9 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import JunctionRowEditor, { defaultsFromSchema } from './JunctionRowEditor';
+import JunctionRowEditor from './JunctionRowEditor';
 import {
   getStrategyJunctions,
-  getRulesAdmin,
-  createJunction,
   updateJunction,
   deleteJunction,
   createOrResumeDraft,
@@ -56,12 +55,7 @@ const addBtnStyle = {
   padding: '7px 14px', borderRadius: 4, fontSize: 11, fontFamily: MONO, cursor: 'pointer',
 };
 
-/** snake_case / kebab → Title Case. */
-function prettify(s) {
-  return String(s).replace(/[_-]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-}
-
-export default function ScoringSection({ strategyKey, editable }) {
+export default function ScoringSection({ strategyKey, editable, onOpenCatalog, refreshSignal }) {
   const { showToast } = useToast();
   const draftKey = `${strategyKey}__draft`;
 
@@ -70,10 +64,6 @@ export default function ScoringSection({ strategyKey, editable }) {
   const [error, setError]         = useState(null);
   const [draftExists, setDraftExists] = useState(false);
   const [mutating, setMutating]   = useState(false);
-
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [catalog, setCatalog]       = useState(null);
-  const [catalogErr, setCatalogErr] = useState(null);
 
   const rowsRef = useRef(rows);
   useEffect(() => { rowsRef.current = rows; }, [rows]);
@@ -108,10 +98,10 @@ export default function ScoringSection({ strategyKey, editable }) {
     }
   }, [strategyKey, draftKey, editable]);
 
+  // Reload on strategy/editable change and after a shared-drawer bind (OTA-789).
   useEffect(() => {
-    setPickerOpen(false);
     load();
-  }, [load]);
+  }, [load, refreshSignal]);
 
   // ── Draft ensure (first write) ──
   const ensureDraft = useCallback(async () => {
@@ -156,32 +146,6 @@ export default function ScoringSection({ strategyKey, editable }) {
     persistRow(merged);
   }, [persistRow]);
 
-  // ── Add a scoring criterion from the catalog ──
-  const addCriterion = useCallback(async (rule) => {
-    setMutating(true);
-    try {
-      const dk = await ensureDraft();
-      const nextOrder = rows.length
-        ? Math.max(...rows.map(r => Number(r.evaluation_order) || 0)) + 1
-        : 1;
-      await createJunction({
-        strategy_key: dk,
-        rule_key: rule.rule_key,
-        evaluation_order: nextOrder,
-        stop_if_fail: false,   // scoring criteria never halt
-        weight: 0,             // starts at 0.00% — the indicator flags until set
-        parameters: defaultsFromSchema(rule.parameter_schema),
-        enabled: true,
-      });
-      setPickerOpen(false);
-      await load();
-    } catch (e) {
-      showToast({ type: 'error', message: `Add failed: ${e.message}` });
-    } finally {
-      setMutating(false);
-    }
-  }, [ensureDraft, rows, load, showToast]);
-
   const removeCriterion = useCallback(async (row) => {
     setMutating(true);
     try {
@@ -194,23 +158,6 @@ export default function ScoringSection({ strategyKey, editable }) {
       setMutating(false);
     }
   }, [ensureDraft, load, showToast]);
-
-  // ── Catalog picker ──
-  const openPicker = useCallback(async () => {
-    setPickerOpen(o => !o);
-    if (catalog == null) {
-      try {
-        const all = await getRulesAdmin();
-        setCatalog((all || []).filter(r => r.phase === SCORING_PHASE));
-      } catch (e) {
-        setCatalogErr(e.message);
-        setCatalog([]);
-      }
-    }
-  }, [catalog]);
-
-  const boundKeys = new Set(rows.map(r => r.rule_key));
-  const available = (catalog || []).filter(r => !boundKeys.has(r.rule_key));
 
   // ── Live sum indicator (enabled scoring rows only — server parity) ──
   const enabledRows = rows.filter(r => r.enabled);
@@ -233,59 +180,10 @@ export default function ScoringSection({ strategyKey, editable }) {
           )}
         </div>
         {editable && (
-          <button onClick={openPicker} disabled={mutating}
+          <button onClick={() => onOpenCatalog?.(SCORING_PHASE)} disabled={mutating}
             style={{ ...addBtnStyle, opacity: mutating ? 0.4 : 1, cursor: mutating ? 'default' : 'pointer' }}>
             + Add scoring criterion from catalog
           </button>
-        )}
-
-        {pickerOpen && editable && (
-          <div style={{
-            position: 'absolute', top: '100%', right: 0, marginTop: 6, zIndex: 60,
-            width: 380, maxHeight: 360, overflowY: 'auto',
-            background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6,
-            boxShadow: '0 8px 24px rgba(0,0,0,0.5)', fontFamily: MONO,
-          }}>
-            <div style={{
-              padding: '10px 14px', borderBottom: '1px solid var(--border)',
-              fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--muted)',
-            }}>
-              Scoring criteria · {available.length} available
-            </div>
-            {catalog == null ? (
-              <div style={{ padding: 14, fontSize: 11, color: 'var(--muted)' }}>Loading catalog…</div>
-            ) : catalogErr ? (
-              <div style={{ padding: 14, fontSize: 11, color: 'var(--red)' }}>{catalogErr}</div>
-            ) : available.length === 0 ? (
-              <div style={{ padding: 14, fontSize: 11, color: 'var(--muted)' }}>
-                No scoring criteria available to add.
-              </div>
-            ) : available.map(rule => (
-              <div
-                key={rule.rule_key}
-                onClick={() => rule.enabled && !mutating && addCriterion(rule)}
-                style={{
-                  padding: '10px 14px', borderBottom: '1px solid var(--border)',
-                  cursor: rule.enabled && !mutating ? 'pointer' : 'default',
-                  opacity: rule.enabled ? 1 : 0.5,
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
-                    {prettify(rule.rule_key)}
-                  </span>
-                  {!rule.enabled && (
-                    <span style={{ fontSize: 9, color: 'var(--muted)' }}>(disabled)</span>
-                  )}
-                </div>
-                {rule.intent && (
-                  <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 3, lineHeight: 1.4 }}>
-                    {rule.intent}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
         )}
       </div>
 

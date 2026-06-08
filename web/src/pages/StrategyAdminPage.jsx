@@ -37,6 +37,7 @@ import ScoringSection from '../components/ScoringSection';
 import AdjustmentsSection from '../components/AdjustmentsSection';
 import ParametersSection from '../components/ParametersSection';
 import VerdictBandsSection from '../components/VerdictBandsSection';
+import RuleCatalogDrawer from '../components/RuleCatalogDrawer';
 import './PageShared.css';
 
 // ─── Domain constants ───────────────────────────────────────────────────────
@@ -68,12 +69,6 @@ const SECTIONS = [
   { key: 'scoring',    title: 'Scoring Weights', story: 'OTA-786', catalog: 'scoring' },
   { key: 'gates',      title: 'Additional Hard Gates · beyond core parameters', story: 'OTA-785', catalog: 'gates', addLabel: '+ Add hard gate from catalog' },
   { key: 'adjustments', title: 'Post-Scoring Adjustments · penalties & bonuses', story: 'OTA-787', catalog: 'adjustments', addLabel: '+ Add adjustment from catalog' },
-];
-
-const DRAWER_TABS = [
-  { key: 'gates', label: 'Hard Gates' },
-  { key: 'scoring', label: 'Scoring' },
-  { key: 'adjustments', label: 'Adjustments' },
 ];
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -155,7 +150,11 @@ export default function StrategyAdminPage() {
   const [form, setForm]               = useState(null);   // editable header state
   const [saving, setSaving]           = useState(false);
 
-  const [drawerTab, setDrawerTab]     = useState(null);   // null = closed
+  // Rule-catalog drawer (OTA-789): the single shared picker. `catalogPhase` is
+  // null (closed) or the phase the drawer opens on ('gate'|'scoring'|'adjustment');
+  // `bindVersion` bumps after a drawer bind so the open sections reload their rows.
+  const [catalogPhase, setCatalogPhase] = useState(null);
+  const [bindVersion, setBindVersion]   = useState(0);
   const structMenuRef                 = useRef(null);
   const [structMenuOpen, setStructMenuOpen] = useState(false);
 
@@ -596,6 +595,8 @@ export default function StrategyAdminPage() {
                       key={sec.key}
                       strategyKey={selected.strategy_key}
                       editable={editable}
+                      onOpenCatalog={setCatalogPhase}
+                      refreshSignal={bindVersion}
                     />
                   );
                 }
@@ -605,6 +606,8 @@ export default function StrategyAdminPage() {
                       key={sec.key}
                       strategyKey={selected.strategy_key}
                       editable={editable}
+                      onOpenCatalog={setCatalogPhase}
+                      refreshSignal={bindVersion}
                     />
                   );
                 }
@@ -614,6 +617,8 @@ export default function StrategyAdminPage() {
                       key={sec.key}
                       strategyKey={selected.strategy_key}
                       editable={editable}
+                      onOpenCatalog={setCatalogPhase}
+                      refreshSignal={bindVersion}
                     />
                   );
                 }
@@ -648,9 +653,15 @@ export default function StrategyAdminPage() {
         </div>
       </div>
 
-      {/* ═══════════════ Rule catalog drawer (keeps internal tabs) ═══════════════ */}
-      {drawerTab && (
-        <RuleCatalogDrawer activeTab={drawerTab} onTab={setDrawerTab} onClose={() => setDrawerTab(null)} />
+      {/* ═══════ Rule catalog drawer (OTA-789) — the single shared picker ═══════ */}
+      {catalogPhase && selected && (
+        <RuleCatalogDrawer
+          strategyKey={selected.strategy_key}
+          editable={editable}
+          initialPhase={catalogPhase}
+          onClose={() => setCatalogPhase(null)}
+          onBound={() => setBindVersion(v => v + 1)}
+        />
       )}
     </div>
   );
@@ -897,67 +908,5 @@ function PreviewResults({ results }) {
         </div>
       )}
     </div>
-  );
-}
-
-// ─── Rule catalog drawer (the only tabbed element on this surface) ───────────
-
-function RuleCatalogDrawer({ activeTab, onTab, onClose }) {
-  return (
-    <>
-      <div
-        onClick={onClose}
-        style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 100 }}
-      />
-      <div style={{
-        position: 'fixed', top: 0, right: 0, bottom: 0, width: 480, zIndex: 101,
-        background: 'var(--bg, #0d1117)', borderLeft: '1px solid var(--border, #30363d)',
-        display: 'flex', flexDirection: 'column', fontFamily: MONO,
-      }}>
-        <div style={{
-          padding: '18px 20px', borderBottom: '1px solid var(--border, #30363d)',
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        }}>
-          <div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text, #e6edf3)' }}>Rule Catalog</div>
-            <div style={{ fontSize: 11, color: 'var(--muted, #8b949e)', marginTop: 2 }}>
-              From the rules schema
-            </div>
-          </div>
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            style={{ background: 'transparent', border: 'none', color: 'var(--muted, #8b949e)', fontSize: 20, cursor: 'pointer' }}
-          >×</button>
-        </div>
-
-        {/* Internal tabs — the only tabs on this surface */}
-        <div style={{ display: 'flex', gap: 16, padding: '0 20px', borderBottom: '1px solid var(--border, #30363d)' }}>
-          {DRAWER_TABS.map(t => {
-            const on = t.key === activeTab;
-            return (
-              <div
-                key={t.key}
-                onClick={() => onTab(t.key)}
-                style={{
-                  padding: '10px 0', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.5px',
-                  cursor: 'pointer',
-                  color: on ? 'var(--teal, #2dd4bf)' : 'var(--muted, #8b949e)',
-                  borderBottom: `2px solid ${on ? 'var(--teal, #2dd4bf)' : 'transparent'}`,
-                }}
-              >{t.label}</div>
-            );
-          })}
-        </div>
-
-        <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
-          <div style={{ fontSize: 11, color: 'var(--muted, #8b949e)', lineHeight: 1.6 }}>
-            The {DRAWER_TABS.find(t => t.key === activeTab)?.label} catalog and add-to-strategy
-            wiring are delivered with the section bodies (OTA-785 / OTA-786 / OTA-787 / OTA-788).
-            This shell stands up the drawer and its tabs.
-          </div>
-        </div>
-      </div>
-    </>
   );
 }
