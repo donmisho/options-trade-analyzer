@@ -1,11 +1,46 @@
 # Insight Engine — Migration Plan
 
-> **Status:** Plan only — no tickets created. Administer via Atlassian MCP after review.
-> **Version:** v3 — runtime tables as source of truth (sheet = build-time seed); gate mechanics (`stop_if_fail` / `evaluation_order` / `score_penalty`); LLM-precedence; engine-owned bronze contract + injected sink with `source_app_id`.
+> **Status:** In build. Engine core, config tables + seed, all three input adapters, and all three rule libraries are built and on dev; the F13 Strategy Administration UI core wave is on dev. Remaining work is consolidated into the **Insight Engine Completion** effort (see below).
+> **Version:** v4 — adds build status, the Completion effort scope, and the acceptance reframe (functional verification, not legacy parity). F13–F15 folded into the plan.
+
+
+`score_penalty`); LLM-precedence; engine-owned bronze contract + injected sink with `source_app_id`.
 > **Companion docs:** `insight_engine.md` (v3, this session) · `rules-engine-audit-2026-05-20.md` · `Scoring Parameters.xlsx` (seed) · `app/analysis/health_grade.py`
 > **Labels to apply:** `framework-portable` on F1, F2, F9. `options-domain` on F3, F4, F6, F7, F10, F11, F12. Mixed/both on F5, F8.
 
 > **Governing principle:** Every rule-based evaluation surface in OTA runs through the engine. Screening, position health grading, and directional thesis comparison are three consumers of one engine — three input adapters, three rule libraries, three rule-set configurations, one set of pipeline code. There is no second evaluation path under any circumstance.
+
+---
+
+## Insight Engine Completion — status and remaining scope
+
+*Added 2026-06-07.*
+
+### Built and on dev
+- Engine core (`app/insight_engine/`), config tables + one-time seed.
+- All three input adapters: options_chain (screening), position_health, directional.
+- All three rule libraries: screening, position_health, directional.
+- F13 Strategy Administration UI — core wave (CRUD + read API, editor shell, config tabs, verdict-bands editor, draft preview, Apply/Reset).
+
+### The Completion effort
+Everything left to make the engine the live, fully-wired evaluation path, organized into four work phases. (Execution batching is organized on the Jira board; this doc tracks the work in phases.)
+
+- **Phase 1 — Finish the admin UI:** Parameters tab, Rule catalog browser, Config audit trail, then UI tests (built last).
+- **Phase 2 — Build the end state:** the app-side cutover wiring (routes + UI consume `ResultRecord`; Position Monitor and directional routed through the engine; frontend stops being a parallel config source; score-color thresholds unified to engine bands), plus the strategy-independence and domain-decoupling cleanups — built *before* testing so the test target is the final state.
+- **Phase 3 — Functional test harness:** backend (every route returns the engine result shape; trace + bronze persist; invalid config rejected at load) and exhaustive UI (every click fires the expected action; every field populates with the expected type and format, per `UI-GUIDANCE.md`). Verification is of behavior, type, and formatting — not verdict values.
+- **Phase 4 — Manual acceptance:** a subset re-run live in the browser, observed and recorded; anything missing logged as observations under OTA-507.
+
+### Acceptance reframe (supersedes the original parity criteria)
+The Epic's original "end-to-end parity — same verdicts as pre-extraction" acceptance is retired. The pre-extraction engine was not a correctness baseline worth reproducing. Acceptance for the Completion effort is **functional** — the system runs end to end and renders engine output correctly. Verdict accuracy is handled continuously downstream by challenging exported evaluations (the Export MD path) against external reasoning — Claude, GPT, experienced traders — and, later, backtesting. Findings land under OTA-507.
+
+### Parked (revisit after the Completion effort)
+Legacy golden-path parity regression; the backtesting harness; the MCP server (connector dormant); and the pre-engine strategy-structure routing retests — all held pending the functional pass.
+
+### F13–F15 in the plan
+F13 (Strategy Administration UI), F14 (engine validation — now functional, not parity), and F15 (backtesting — parked) were added after v3. Full Feature/story detail lives in Jira under Epic OTA-679.
+
+---
+
 
 > **Naming convention:**
 > - **Insight Engine** = the new generic evaluation framework. Package: `app/insight_engine/`. Output: `ResultRecord`.

@@ -1,7 +1,7 @@
 # Jira Structure (Profile)
 
 **Scope:** Profile level — applies to all of Don's projects under this profile (currently OTA, future TMTC projects).
-**Last Updated:** 2026-06-07 UTC
+**Last Updated:** 2026-05-30 UTC
 **Governing Story:** OTA-569 (Documentation Governance — Profile)
 **Creation Subtask:** OTA-589
 
@@ -103,7 +103,6 @@ Each project on this profile uses a phase-based workflow with the following patt
 | 4 | Prompt Written | In Progress | Claude Web |
 | 5 | Code & Test Complete | In Progress | Claude Code |
 | 6 | Production Deployed | Done | Automation / manual override |
-| H | On Hold | To Do | Don |
 | C | Cancelled | Done | Don / Automation |
 
 The terminology is *phases*, not sprints. Sprint-based planning is not used on this profile.
@@ -111,17 +110,6 @@ The terminology is *phases*, not sprints. Sprint-based planning is not used on t
 ### Quirk worth knowing
 
 The transition named **"To Do"** in the workflow editor moves an issue to **Schedule** status (not "To Do" — there is no "To Do" status in this workflow). New work entering the Schedule phase uses this transition. The naming mismatch is a Jira workflow-editor artifact and is not worth fixing in the editor.
-
-### On Hold (off-linear holding state)
-
-On Hold is not a linear phase — it is a holding bay reachable from Schedule, Write Story, Write Prompt, or Prompt Written. It captures tickets that have been deprioritized, may no longer be necessary, or were superseded by a newer ticket — but are not cancelled.
-
-Two properties distinguish it from Cancelled:
-
-- Category is **To Do**, not Done. Cancelled is terminal; On Hold is recoverable and expected to potentially resume.
-- It is not reachable from Idea (already the rawest backlog state, so parking there is redundant), nor from Code & Test Complete onward (once work is built, the path forward is Production Deployed or a follow-up Story).
-
-In the workflow editor the status sits between Idea and Schedule, but that position is cosmetic — entry is multi-source, like Cancelled. A parked ticket returns to a working phase via the existing global set-status transitions. Project-specific status and transition IDs live in each project's `CLAUDE.md`, not here.
 
 ---
 
@@ -175,7 +163,6 @@ When creating, transitioning, or modifying issues via the Atlassian MCP or the J
 
 | Date | Subtask | Change |
 |---|---|---|
-| 2026-06-07 UTC | OTA-569 / subtask TBD | Added "On Hold" status — an off-linear, recoverable holding state in the To Do category for deprioritized or superseded (but not cancelled) tickets. Reachable from Schedule, Write Story, Write Prompt, or Prompt Written (not Idea, and not from Code & Test Complete onward). Exit via the existing global set-status transitions. Project-specific status/transition IDs are captured in OTA `CLAUDE.md`. |
 | 2026-05-19 UTC | Added "Prompt written" status to follow "write prompt"
 | 2026-05-19 UTC | OTA-674 | Added "Title conventions" section. Codifies the universal rule: titles describe the work, not the execution order. Phase numbers, sprint numbers, and step prefixes belong in descriptions, commit messages, or prompt files — never in titles. Applies to all projects on this profile; project-level overrides are not permitted. |
 | 2026-05-06 UTC | OTA-589 | Initial creation. Replaces a workaround where Jira hierarchy and parenting rules were duplicated inside each project's `CLAUDE.md`. Codifies the no-Feature decision driven by license tier — explicit "if you see Feature anywhere, it's wrong, ignore it" guidance included. Documents the transition-name quirk ("To Do" transition → Schedule status). Captures API lessons learned: parent must be direct named param, prefer markdown contentFormat, use transition IDs not names. |
