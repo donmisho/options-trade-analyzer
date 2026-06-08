@@ -62,6 +62,19 @@ SCAN_PARAM_COLS = {
     "lottery_ticket": 18,    # S
 }
 
+# ── Canonical screening verdict bands (OTA-815) ──────────────────────────
+# The OTA-wide `screening_verdicts` lookup carries one copy of the screening
+# band thresholds. This is NOT the per-strategy source of truth — that is each
+# strategy's `verdict_band_set` (engine_strategies), wired from the per-strategy
+# `_SCREENING_VERDICT_BANDS` inside parse_workbook(). This constant exists only
+# so the OTA-level lookup is not derived from any single named strategy (which
+# would hardcode one strategy as "canonical" — see insight_engine.md §3.8).
+_CANONICAL_SCREENING_BANDS = [
+    {"verdict": "EXECUTE", "min_score": 70, "max_score": 100},
+    {"verdict": "WAIT",    "min_score": 50, "max_score": 69.99},
+    {"verdict": "PASS",    "min_score": 0,  "max_score": 49.99},
+]
+
 
 def slugify(text: str) -> str:
     """Convert a description to a snake_case rule_key."""
@@ -423,6 +436,7 @@ def parse_workbook(xlsx_path: Path):
         })
 
     # Verdict domains (OTA — screening verdicts: band verdicts)
+    verdict_bands = _CANONICAL_SCREENING_BANDS
     for i, v in enumerate(verdict_bands, 1):
         lookups.append({
             "owner_app_id": "OTA",
