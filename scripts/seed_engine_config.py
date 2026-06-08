@@ -1982,6 +1982,143 @@ def build_formula_registry(rules: list[dict]) -> list[dict]:
     return lookups
 
 
+# ── OTA-832: Canonicalize condition_expression to the §6.3 closed set ─────
+#
+# The workbook stores human-readable predicates ("ACCEPT IF DTE <= threshold")
+# and the OTA-683 decomposer emitted readable phrases ("cushion_vs_ATR >= 1.0").
+# Neither is a §6.3 token, so the loader's validate_expression rejects them and
+# startup hydration dies inside load_config BEFORE the §6.6 validator runs.
+#
+# This pass rewrites condition_expression to a closed-set token for every rule
+# that maps cleanly to one. Evaluator contract (expressions.py): the LHS is
+# referenced_named_values[0]; the RHS is the first junction parameter value; the
+# loader decomposes BETWEEN into a >= / <= pair from the two junction params.
+#
+# SCOPE (OTA-832, deliberately partial — the split agreed with Don):
+#   - Canonicalize rules that resolve to a token over an EXISTING single named
+#     value, or to a token over a NEW derived named value (cushion_pct,
+#     cushion_vs_atr_ratio, stock_extension_pct, earnings_days_past_expiry,
+#     theta_load_fraction) whose producer is a later adapter feature.
+#   - Do NOT touch rules that would need a brand-new formula_ref with no live
+#     implementation (spread_width_tier_compliance, adj_sma_alignment_against_trade,
+#     adj_dte_8_13_penalty) or the two soft-gate stock-extended rows
+#     (stock_extended_against_entry, stock_extended_in_trade_direction — NOT
+#     superseded by the OTA-683 adjustment decomposition). These go to the
+#     registry-reconciliation keystone. Because this pass leaves them as-is, the
+#     loader still rejects them and the engine stays dark (swallowed by the
+#     OTA-830 step-6d try/except), exactly as today — by design for this story.
+#
+# Derived-named-value LHS rules pass startup validation because
+# init_engine_runtime does NOT pass an input_catalog (the named-value-in-catalog
+# check is skipped); each producer is deferred to the adapter, consistent with
+# the OTA-688 dependency-flag pattern.
+
+# rule_key → canonicalization spec.
+#   "expr"   : the §6.3 token stored as condition_expression
+#   "ref"    : (optional) replace referenced_named_values; ref[0] is the LHS
+#   "schema" : (optional) replace parameter_schema (keep in sync with "param")
+#   "param"  : (optional) replace EVERY junction's parameters with this dict —
+#              used where the RHS is a single parameter (>=, <=, <, >, ==) or an
+#              IN/EQUALS_ENUM membership value. Omit to leave junction params
+#              untouched: correct for BETWEEN, which keeps the existing {low, high}.
+_CANONICAL_EXPRESSIONS = {
+    # ── Group A: token over an EXISTING single named value ──────────────
+    # Range/floor/ceiling gates already carry {low, high}; BETWEEN decomposes.
+    "maximum_dte":                 {"expr": "BETWEEN"},
+    "minimum_dte":                 {"expr": "BETWEEN"},
+    "dte_window":                  {"expr": "BETWEEN"},
+    "per_leg_bid_ask_spread":      {"expr": "BETWEEN"},
+    "per_leg_open_interest_floor": {"expr": "BETWEEN"},
+    "per_leg_volume_floor":        {"expr": "BETWEEN"},
+    "total_expected_value":        {"expr": "BETWEEN"},
+    "underlying_price_floor":      {"expr": "BETWEEN"},
+    "credit_pct_of_width_floor":   {"expr": "BETWEEN"},
+    "debit_pct_of_width_ceiling":  {"expr": "BETWEEN"},
+    # Data-completeness gates: null check, LHS only, no RHS parameter.
+    "data_completeness_atr_14":    {"expr": "IS NOT NULL"},
+    "data_completeness_delta":     {"expr": "IS NOT NULL"},
+    "data_completeness_iv_rank":   {"expr": "IS NOT NULL"},
+    # Set / enum membership over chart_state.
+    "chart_state_valid_alignment": {
+        "expr": "IN",
+        "ref": ["chart_state"],
+        "param": {"allowed_values": ["Bullish Alignment", "Bearish Alignment"]},
+    },
+    "adj_mixed_chart_signal_on_directional_strategy": {
+        "expr": "EQUALS_ENUM",
+        "ref": ["chart_state"],
+        "param": {"enum_value": "Mixed — No Signal"},
+    },
+    # cushion_vs_atr ADJUSTMENT bands — threshold is a single parameter.
+    "adj_cushion_vs_atr_gte_floor":   {"expr": ">=", "ref": ["cushion_vs_atr"], "param": {"threshold": 1.0}},
+    "adj_cushion_vs_atr_lte_ceiling": {"expr": "<=", "ref": ["cushion_vs_atr"], "param": {"threshold": 1.5}},
+
+    # ── Group B: token over a NEW derived named value ───────────────────
+    # cushion_of_price: ratio abs(spot - short_strike)/spot → derived cushion_pct.
+    "cushion_of_price": {"expr": "BETWEEN", "ref": ["cushion_pct"]},
+    # cushion_vs_atr GATE: ratio abs(spot - short_strike)/ATR_14 → derived
+    # cushion_vs_atr_ratio. Deliberately NOT named cushion_vs_atr (the existing
+    # adjustment-rule named value) — the two stay distinct (OTA-832 note from Don).
+    "cushion_vs_atr": {"expr": "BETWEEN", "ref": ["cushion_vs_atr_ratio"]},
+    # adj_cushion_penalty_severe is already "<"/[cushion_pct] in the decomposer;
+    # restate here so the canonical contract lives in one place (idempotent).
+    "adj_cushion_penalty_severe": {"expr": "<", "ref": ["cushion_pct"]},
+    # adj_stock_extended_magnitude: ratio abs(spot - SMA_50)/SMA_50 → derived
+    # stock_extension_pct; the junction's first parameter (low=0.05) is the RHS.
+    "adj_stock_extended_magnitude": {"expr": ">", "ref": ["stock_extension_pct"]},
+    # earnings_buffer_past_expiry: (next_earnings_date - expiry_date) in days →
+    # derived earnings_days_past_expiry; BETWEEN over the existing {low, high}.
+    "earnings_buffer_past_expiry": {"expr": "BETWEEN", "ref": ["earnings_days_past_expiry"]},
+    # theta_load_fraction: ratio theta_total/debit → derived theta_load_fraction;
+    # single ceiling, so replace {low, high} with one threshold parameter.
+    "theta_load_fraction": {
+        "expr": "<=",
+        "ref": ["theta_load_fraction"],
+        "schema": {"threshold": {"type": "number"}},
+        "param": {"threshold": 0.5},
+    },
+    # adj_etf_underlying: boolean is_etf == True (+5 bonus lives in score_penalty).
+    # ref currently a dict enrichment — normalize to the bare named value.
+    "adj_etf_underlying": {"expr": "==", "ref": ["is_etf"], "param": {"expected": True}},
+}
+
+
+def canonicalize_expressions(rules, junctions):
+    """OTA-832: rewrite condition_expression to §6.3 tokens for mappable rules.
+
+    See _CANONICAL_EXPRESSIONS for the per-rule spec and the documented scope
+    (rules needing a new formula_ref with no live impl, and the two soft-gate
+    stock-extended rows, are intentionally left untouched for the keystone).
+    """
+    rewritten = 0
+    for r in rules:
+        spec = _CANONICAL_EXPRESSIONS.get(r["rule_key"])
+        if spec is None:
+            continue
+        r["condition_expression"] = spec["expr"]
+        if "ref" in spec:
+            r["referenced_named_values"] = spec["ref"]
+        if "schema" in spec:
+            r["parameter_schema"] = spec["schema"]
+        rewritten += 1
+        log.info(f"  Canonicalized '{r['rule_key']}' → {spec['expr']!r}")
+
+    # Pin junction parameters where the spec requires it (single-RHS tokens and
+    # IN/EQUALS_ENUM membership). BETWEEN rules keep their existing {low, high}.
+    param_specs = {k: v["param"] for k, v in _CANONICAL_EXPRESSIONS.items() if "param" in v}
+    patched = 0
+    for j in junctions:
+        param = param_specs.get(j["rule_key"])
+        if param is None:
+            continue
+        j["parameters"] = dict(param)
+        patched += 1
+
+    log.info(f"OTA-832 canonicalization: {rewritten} rules rewritten, "
+             f"{patched} junction parameter sets pinned")
+    return rules, junctions
+
+
 # ── Database write ───────────────────────────────────────────────────────
 
 def upsert_rules(cursor, rules: list[dict]) -> dict[str, int]:
@@ -2275,6 +2412,10 @@ def main():
     # OTA-769: Seed delta_center / delta_half_range on delta_quality junctions
     log.info("Populating delta_quality params (OTA-769)...")
     junctions = populate_delta_quality_params(junctions)
+
+    # OTA-832: Canonicalize condition_expression to §6.3 closed-set tokens
+    log.info("Canonicalizing condition_expression to §6.3 tokens (OTA-832)...")
+    rules, junctions = canonicalize_expressions(rules, junctions)
 
     # OTA-689: Build formula registry from engine_rules.formula_ref (scanned, not hand-copied)
     log.info("Building formula registry from engine_rules.formula_ref (OTA-689)...")

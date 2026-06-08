@@ -54,12 +54,25 @@ def validate_expression(expression: str | None, formula_ref: str | None) -> None
     ``BETWEEN`` is allowed at this stage — it is decomposed before
     reaching the runtime evaluator.
 
+    A rule governed by a ``formula_ref`` is valid regardless of its
+    ``condition_expression``: the formula governs evaluation, and the
+    ``condition_expression`` (when present on such a rule) is documentary or
+    legacy text, not a token the runtime evaluator ever sees. Formula
+    *existence* is not checked here — it is enforced downstream by the §6.6
+    startup validator (``validation.py``: contract, live-registry, and drift
+    checks). Honoring ``formula_ref`` at this stage therefore loses no
+    validation; it only stops this load-time gate from rejecting formula rules
+    whose documentary ``condition_expression`` is not a closed-set token.
+    (OTA-832: the signature already accepted ``formula_ref`` but ignored it.)
+
     Raises
     ------
     UnsupportedExpressionError
         If the expression is not in the closed set and no formula_ref
         is present.
     """
+    if is_formula_ref(formula_ref):
+        return  # formula governs evaluation; condition_expression is documentary
     if expression is None:
         return  # formula-only rules, or rules with no condition
     if expression == "BETWEEN":
