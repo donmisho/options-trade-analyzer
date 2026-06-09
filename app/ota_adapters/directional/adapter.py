@@ -29,6 +29,7 @@ from scipy.stats import norm
 
 from app.core.config import settings
 from app.insight_engine import Candidate, Tier
+from app.models.session import async_session
 from app.ota_adapters._shared.black_scholes import (
     black_scholes_probability,
     compute_naked_long_option_ev,
@@ -133,6 +134,10 @@ def _compute_spread_derived(nv: dict) -> None:
         (nv.get("long_theta", 0) or 0) + (nv.get("short_theta", 0) or 0), 6,
     )
 
+    # bid_ask_spread_pct — single-leg liquidity proxy; undefined for two-leg
+    # spreads (each leg has its own bid/ask). SKIP-null for spreads (OTA-834).
+    nv["bid_ask_spread_pct"] = None
+
 
 def _compute_naked_derived(nv: dict) -> None:
     """Populate DERIVED values for a naked long option candidate."""
@@ -150,6 +155,10 @@ def _compute_naked_derived(nv: dict) -> None:
     nv["max_profit"] = None  # unlimited
     nv["net_theta"] = theta
     nv["mid_price"] = round(mid, 4)
+    # bid_ask_spread_pct — relative spread over mid (liquidity proxy, OTA-834)
+    nv["bid_ask_spread_pct"] = (
+        round((ask - bid) / mid * 100, 2) if (mid > 0 and ask > bid) else None
+    )
     nv["prob_of_profit"] = round(abs(nv.get("delta", 0) or 0), 4)
     nv["ev_raw"] = None  # computed via B-S in COMPUTED tier
     nv["reward_risk_ratio"] = None  # undefined for unlimited upside
@@ -361,6 +370,12 @@ _CATALOG: dict[str, CatalogEntry] = {
     "delta":                  _raw("delta", "number", "SKIP"),
     "theta":                  _raw("theta", "number"),
     "iv":                     _raw("iv", "number"),
+    # ── RAW — liquidity (OTA-834; spreads use the long leg) ──
+    "open_interest":          _raw("open_interest", "number"),
+    "volume":                 _raw("volume", "number"),
+    # ── RAW — earnings (OTA-834; shared ContextStore + Finnhub path) ──
+    "next_earnings_date":     _raw("next_earnings_date", "date", "SKIP"),
+    "earnings_unknown":       _raw("earnings_unknown", "boolean", "FAIL_OPEN"),
     # ── DERIVED — core trade math ──
     "dte":                    _derived("dte", "number", "FAIL_CLOSED"),
     "stock_price":            _derived("stock_price", "number", "FAIL_CLOSED"),
@@ -374,6 +389,7 @@ _CATALOG: dict[str, CatalogEntry] = {
     "reward_risk_ratio":      _derived("reward_risk_ratio", "number", "SKIP"),
     "net_theta":              _derived("net_theta", "number"),
     "mid_price":              _derived("mid_price", "number", "SKIP"),
+    "bid_ask_spread_pct":     _derived("bid_ask_spread_pct", "number", "SKIP"),
     "trade_direction":        _derived("trade_direction", "enum:bullish|bearish", "SKIP"),
     "structure_type":         _derived("structure_type", "enum:vertical_spread|long_option", "FAIL_CLOSED"),
     # ── DERIVED — thesis-dependent ──
@@ -627,7 +643,34 @@ class DirectionalAdapter:
             _compute_iv_percentile(candles, atm_iv) if candles else None
         )
 
+        # next_earnings_date (OTA-834) — reuse the shared screening earnings path
+        ned = await self._fetch_next_earnings_date(symbol)
+        ctx["next_earnings_date"] = ned
+        ctx["earnings_unknown"] = ned is None
+
         return ctx
+
+    async def _fetch_next_earnings_date(self, symbol: str) -> str | None:
+        """Return next_earnings_date (ISO ``YYYY-MM-DD``) for *symbol*, or None.
+
+        Reuses the same ContextStore + FinnhubEarningsSource path the screening
+        earnings gate uses (TTL-cached in ``symbol_context``, 24 h). Fail-soft:
+        any error or absent earnings event yields None — unknown earnings never
+        blocks scoring (mirrors EarningsInWindowGate's contract).
+        """
+        from app.agents.context_store import ContextStore
+        from app.providers.finnhub_earnings import FinnhubEarningsSource
+
+        try:
+            async with async_session() as db:
+                store = ContextStore(db)
+                signal = await store.refresh_if_stale(symbol, FinnhubEarningsSource())
+        except Exception as exc:
+            log.warning("next_earnings_date fetch failed for %s: %s", symbol, exc)
+            return None
+
+        ned = (signal or {}).get("next_earnings_date")
+        return ned or None
 
     # ── internal: DTE range filter ──
 
@@ -705,6 +748,9 @@ class DirectionalAdapter:
                         "short_theta": short_leg.get("theta", 0) or 0,
                         "long_iv": _normalize_iv(long_iv_raw) or 0,
                         "short_iv": _normalize_iv(short_iv_raw) or 0,
+                        # liquidity from the long (defining) leg (OTA-834)
+                        "open_interest": long_leg.get("open_interest", 0) or 0,
+                        "volume": long_leg.get("volume", 0) or 0,
                     },
                 )
                 candidates.append(c)
@@ -747,6 +793,8 @@ class DirectionalAdapter:
                     "delta": _get_delta(c, price, exp),
                     "theta": c.get("theta", 0) or 0,
                     "iv": _normalize_iv(iv_raw) or 0,
+                    "open_interest": c.get("open_interest", 0) or 0,
+                    "volume": c.get("volume", 0) or 0,
                 },
             ))
 
