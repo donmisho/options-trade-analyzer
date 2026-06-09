@@ -62,18 +62,16 @@ SCAN_PARAM_COLS = {
     "lottery_ticket": 18,    # S
 }
 
-# ── Canonical screening verdict bands (OTA-815) ──────────────────────────
-# The OTA-wide `screening_verdicts` lookup carries one copy of the screening
-# band thresholds. This is NOT the per-strategy source of truth — that is each
-# strategy's `verdict_band_set` (engine_strategies), wired from the per-strategy
-# `_SCREENING_VERDICT_BANDS` inside parse_workbook(). This constant exists only
-# so the OTA-level lookup is not derived from any single named strategy (which
-# would hardcode one strategy as "canonical" — see insight_engine.md §3.8).
-_CANONICAL_SCREENING_BANDS = [
-    {"verdict": "EXECUTE", "min_score": 70, "max_score": 100},
-    {"verdict": "WAIT",    "min_score": 50, "max_score": 69.99},
-    {"verdict": "PASS",    "min_score": 0,  "max_score": 49.99},
-]
+# ── Canonical screening verdict labels (OTA-815; thresholds removed OTA-835) ──────────────────────────
+# The OTA-wide `screening_verdicts` lookup seeds only the verdict-LABEL domain
+# (used by validation to check junction terminal_verdict values). It carries NO
+# thresholds — threshold authority is per-strategy in `verdict_band_set`
+# (engine_strategies), wired from the per-strategy `_SCREENING_VERDICT_BANDS`
+# inside parse_workbook(). This list exists so the OTA-level label domain is not
+# derived from any single named strategy (which would hardcode one strategy as
+# "canonical" — see insight_engine.md §3.8). OTA-835 stripped the vestigial
+# {min_score, max_score} payload these rows used to carry (read by nothing).
+_CANONICAL_SCREENING_VERDICTS = ["EXECUTE", "WAIT", "PASS"]
 
 
 def slugify(text: str) -> str:
@@ -435,14 +433,16 @@ def parse_workbook(xlsx_path: Path):
             "sort_order": i,
         })
 
-    # Verdict domains (OTA — screening verdicts: band verdicts)
-    verdict_bands = _CANONICAL_SCREENING_BANDS
-    for i, v in enumerate(verdict_bands, 1):
+    # Verdict-label domain (OTA — screening). Threshold authority is per-strategy
+    # in engine_strategies.verdict_band_set (the column Phase 7 reads); these rows
+    # seed only the verdict-label domain validated against junction terminal_verdict
+    # values (OTA-835 — payload was {min_score, max_score}, now stripped).
+    for i, verdict in enumerate(_CANONICAL_SCREENING_VERDICTS, 1):
         lookups.append({
             "owner_app_id": "OTA",
             "lookup_set": "screening_verdicts",
-            "lookup_key": v["verdict"],
-            "payload": {"min_score": v["min_score"], "max_score": v["max_score"]},
+            "lookup_key": verdict,
+            "payload": {},
             "sort_order": i,
         })
 
@@ -458,7 +458,7 @@ def parse_workbook(xlsx_path: Path):
             },
         },
     ]
-    for i, hv in enumerate(halt_verdicts, len(verdict_bands) + 1):
+    for i, hv in enumerate(halt_verdicts, len(_CANONICAL_SCREENING_VERDICTS) + 1):
         lookups.append({
             "owner_app_id": "OTA",
             "lookup_set": "screening_verdicts",
@@ -2784,16 +2784,16 @@ def build_directional_config():
             "enabled": True,
         })
 
-        # Per-strategy verdict-band lookup set (mirrors screening_verdicts payload
-        # shape {min_score, max_score}). Replaces the orphan's single
-        # directional_verdicts set. Reference data — the engine reads bands from
-        # the verdict_band_set column above, not these rows.
+        # Per-strategy verdict-label lookup set. Threshold authority lives in the
+        # verdict_band_set column above (the column the engine reads at Phase 7);
+        # these rows seed only the verdict-label domain (OTA-835 — thresholds
+        # stripped; payload was {min_score, max_score}, read by nothing).
         for i, band in enumerate(bands, 1):
             lookups.append({
                 "owner_app_id": "OTA",
                 "lookup_set": set_name,
                 "lookup_key": band["verdict"],
-                "payload": {"min_score": band["min_score"], "max_score": band["max_score"]},
+                "payload": {},
                 "sort_order": i,
             })
 
