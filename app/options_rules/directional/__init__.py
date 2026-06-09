@@ -57,11 +57,47 @@ def directional_formula(name: str):
     return decorator
 
 
+def gate_formula(name: str):
+    """Register a directional gate formula under *name*.
+
+    Mirrors screening's ``gate_formula`` (``app/options_rules/screening``):
+    gate formulas return ``bool`` — ``True`` = gate passed (candidate
+    continues), ``False`` = gate failed (engine checks stop_if_fail /
+    terminal_verdict / score_penalty, all junction-driven).
+
+    Unlike ``directional_formula``, there is **no** ``[0, 100]`` clamp — a
+    gate is a pass/fail predicate, not a score. The wrapper enforces a strict
+    ``bool`` return so a stray numpy/int truthy value never masquerades as a
+    gate result.
+
+    OTA-837
+    """
+
+    def decorator(fn: FormulaFn) -> FormulaFn:
+        @functools.wraps(fn)
+        def wrapper(
+            named_values: dict[str, Any], params: dict[str, Any]
+        ) -> bool:
+            result = fn(named_values, params)
+            if not isinstance(result, bool):
+                raise FormulaReturnValueError(
+                    f"Gate formula '{name}' returned "
+                    f"{type(result).__name__}, expected bool."
+                )
+            return result
+
+        _REGISTRY.register(name, wrapper)
+        return fn  # return unwrapped fn so tests can call directly
+
+    return decorator
+
+
 def get_registry() -> DictFormulaRegistry:
     """Return the live directional formula registry."""
     return _REGISTRY
 
 
 # ── Auto-register all formula modules ──────────────────────────────────
-# Importing triggers @directional_formula decorators.
+# Importing triggers @directional_formula / @gate_formula decorators.
 import app.options_rules.directional.scoring_formulas as _scoring  # noqa: E402, F401
+import app.options_rules.directional.gate_formulas as _gates  # noqa: E402, F401
