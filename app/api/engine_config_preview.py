@@ -131,7 +131,15 @@ def evaluate_screening(
     ``/evaluate/structured`` rewire passes the live runtime bronze sink so its
     engine evaluations land in ``bronze_evaluations`` — the single decision-C
     screening path, now with optional persistence.
+
+    The LHS null-semantics map (OTA-838) is derived here from the adapter's §5.1
+    input catalog and threaded into the engine so a gate whose LHS named value is
+    null honors that value's declared SKIP / FAIL_OPEN / FAIL_CLOSED semantics
+    rather than mechanically failing closed. This is the single engine-backed
+    screening path, so deriving it here covers every live caller (draft preview
+    and ``/evaluate/structured``) without runtime plumbing.
     """
+    null_semantics = _null_semantics_from_adapter(adapter)
     records: list[ResultRecord] = evaluate(
         candidates=candidates,
         strategy_key=strategy_key,
@@ -140,6 +148,7 @@ def evaluate_screening(
         registry=registry,
         adapter=adapter,
         sink=sink,
+        null_semantics=null_semantics,
     )
     by_id = {c.candidate_id: c for c in candidates}
     results = [_to_screening_result(r, by_id.get(r.candidate_id)) for r in records]
@@ -224,6 +233,25 @@ async def preview_draft(
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────
+
+
+def _null_semantics_from_adapter(adapter: Any) -> dict[str, str] | None:
+    """Build the ``{named_value: null_semantics}`` map from an adapter catalog.
+
+    The §5 adapters expose ``input_catalog()`` returning entries that each carry
+    a ``null_semantics`` (SKIP | FAIL_OPEN | FAIL_CLOSED). This flattens it to the
+    plain map the engine consults on a null gate LHS (OTA-838). Returns None when
+    the adapter is absent or declares no catalog — the engine then falls back to
+    de-facto fail-closed, unchanged.
+    """
+    if adapter is None or not hasattr(adapter, "input_catalog"):
+        return None
+    catalog = adapter.input_catalog()
+    return {
+        entry.name: entry.null_semantics
+        for entry in catalog
+        if getattr(entry, "null_semantics", None) is not None
+    }
 
 
 def _adapter_structure_types(

@@ -48,6 +48,7 @@ def evaluate(
     registry=None,
     adapter=None,
     sink=None,
+    null_semantics=None,
 ):
     """Run the engine pipeline on a stream of candidates.
 
@@ -69,6 +70,10 @@ def evaluate(
     sink : PersistenceSink, optional
         Persistence sink (OTA-705). When provided, the engine drives it
         after each run with the bronze record streams.
+    null_semantics : dict[str, str], optional
+        Named-value null-semantics map (OTA-838). The consumer builds it from
+        its input adapter's catalog and the engine consults it when a gate's LHS
+        named value is null. See ``pipeline.run_batch`` for the semantics.
 
     Returns
     -------
@@ -97,7 +102,9 @@ def evaluate(
     candidate_list = list(candidates)
     rule_set = config.rule_sets[strategy_key]
 
-    pipeline_results = _run_batch(candidate_list, rule_set, reg, adapter)
+    pipeline_results = _run_batch(
+        candidate_list, rule_set, reg, adapter, null_semantics
+    )
 
     result_records = _build(
         pipeline_results,

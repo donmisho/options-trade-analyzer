@@ -147,7 +147,12 @@ def _build_snapshot(
             for a in result.adjustment_results
         ],
         "gate_count": len(result.gate_decisions),
-        "gate_pass_count": sum(1 for g in result.gate_decisions if g.passed),
+        # A skipped gate (OTA-838) sets passed=True but is NOT a genuine pass —
+        # exclude it from the pass count and surface it as its own count.
+        "gate_pass_count": sum(
+            1 for g in result.gate_decisions if g.passed and not g.skipped
+        ),
+        "gate_skipped_count": sum(1 for g in result.gate_decisions if g.skipped),
     }
 
     return CandidateSnapshot(
@@ -219,6 +224,8 @@ def _gate_to_decision(
         phase=gate.phase.value if hasattr(gate.phase, "value") else str(gate.phase),
         tier=gate.tier.value if gate.tier is not None and hasattr(gate.tier, "value") else None,
         evaluation_order=gate.evaluation_order,
+        # ``passed`` is True for a skipped gate (OTA-838); the bronze reader MUST
+        # consult ``skipped`` / ``outcome`` in the payload before interpreting it.
         passed=gate.passed,
         stop_if_fail=gate.stop_if_fail,
         was_terminal=gate.was_terminal,
@@ -228,6 +235,11 @@ def _gate_to_decision(
             "parameters_evaluated": gate.parameters_evaluated,
             "decision_reason": gate.decision_reason,
             "held_penalty": gate.held_penalty,
+            "skipped": gate.skipped,
+            "outcome": (
+                "skipped" if gate.skipped
+                else ("pass" if gate.passed else "fail")
+            ),
         },
     )
 

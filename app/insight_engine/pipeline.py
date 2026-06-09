@@ -114,6 +114,7 @@ def run_batch(
     rule_set: RuleSet,
     registry: FormulaRegistry,
     adapter: ComputedAdapter | None = None,
+    null_semantics: dict[str, str] | None = None,
 ) -> list[PipelineResult]:
     """Evaluate a batch of candidates with once-only COMPUTED callback.
 
@@ -132,6 +133,15 @@ def run_batch(
     adapter : ComputedAdapter | None
         COMPUTED-value callback adapter. When provided, the engine
         calls it once with survivors and the needed COMPUTED names.
+    null_semantics : dict[str, str] | None
+        Map of named-value name → its catalog null semantics
+        (``SKIP`` | ``FAIL_OPEN`` | ``FAIL_CLOSED``), supplied by the consumer
+        from its input adapter's catalog (OTA-838). When a gate's LHS named
+        value resolves to null, the engine consults this map: SKIP skips the
+        rule, FAIL_OPEN treats the null as a pass, FAIL_CLOSED / unknown / no
+        map leaves the de-facto fail-closed behaviour unchanged. The keys are
+        opaque named-value names and the tokens are engine-level null semantics
+        (insight_engine.md §3.2) — no domain coupling.
     """
     # Partition bindings by phase and tier
     raw_derived_gates: list[RuleBinding] = []
@@ -164,7 +174,8 @@ def run_batch(
         )
         held_penalties: list[float] = []
         halted = _run_gate_list(
-            candidate, raw_derived_gates, registry, result, held_penalties
+            candidate, raw_derived_gates, registry, result, held_penalties,
+            null_semantics,
         )
         if halted:
             all_results.append(result)
@@ -184,7 +195,8 @@ def run_batch(
     for candidate, result, held_penalties in survivors:
         # Phase 3: COMPUTED gates
         halted = _run_gate_list(
-            candidate, computed_gates, registry, result, held_penalties
+            candidate, computed_gates, registry, result, held_penalties,
+            null_semantics,
         )
         if halted:
             all_results.append(result)
@@ -228,6 +240,7 @@ def run_pipeline(
     rule_set: RuleSet,
     registry: FormulaRegistry,
     adapter: ComputedAdapter | None = None,
+    null_semantics: dict[str, str] | None = None,
 ) -> PipelineResult:
     """Evaluate a single candidate through the 7-phase pipeline.
 
@@ -243,12 +256,52 @@ def run_pipeline(
         Live formula registry for formula-based rules.
     adapter : ComputedAdapter | None
         COMPUTED-value callback adapter.
+    null_semantics : dict[str, str] | None
+        Named-value null-semantics map; see :func:`run_batch` (OTA-838).
     """
-    results = run_batch([candidate], rule_set, registry, adapter)
+    results = run_batch([candidate], rule_set, registry, adapter, null_semantics)
     return results[0]
 
 
 # ── Gate execution (Phases 1–3) ─────────────────────────────────────────
+
+
+# Explicit null operators handle a null LHS as their whole purpose
+# (IS NULL passes, IS NOT NULL fails) — the catalog-null-semantics override
+# must not interfere with them (OTA-838).
+_NULL_OPERATORS = frozenset({"IS NULL", "IS NOT NULL"})
+
+
+def _null_lhs_semantics(
+    binding: RuleBinding,
+    candidate: Candidate,
+    null_semantics: dict[str, str] | None,
+) -> tuple[bool, str | None, str | None]:
+    """Resolve catalog null semantics for a gate whose LHS resolved to null.
+
+    Returns ``(lhs_is_null, lhs_name, semantics)``. Eligible ONLY for
+    expression-based comparison/set/enum gates: formula:<name> gates (which
+    null-guard internally) and explicit IS NULL / IS NOT NULL operators are
+    excluded so their own null handling stands. ``semantics`` is the LHS named
+    value's catalog null semantics (SKIP | FAIL_OPEN | FAIL_CLOSED) or None.
+
+    Driven solely by the candidate's named values and the supplied catalog map —
+    no strategy or structure branching (insight_engine.md §2.2).
+    """
+    rule = binding.rule
+    if is_formula_ref(rule.formula_ref):
+        return (False, None, None)
+    expr = rule.condition_expression
+    if not expr or expr in _NULL_OPERATORS:
+        return (False, None, None)
+    refs = rule.referenced_named_values
+    if not refs:
+        return (False, None, None)
+    lhs_name = refs[0]
+    if candidate.named_values.get(lhs_name) is not None:
+        return (False, None, None)
+    semantics = null_semantics.get(lhs_name) if null_semantics else None
+    return (True, lhs_name, semantics)
 
 
 def _run_gate_list(
@@ -257,11 +310,38 @@ def _run_gate_list(
     registry: FormulaRegistry,
     result: PipelineResult,
     held_penalties: list[float],
+    null_semantics: dict[str, str] | None = None,
 ) -> bool:
     """Run a list of gate bindings. Returns True if candidate was halted."""
     for binding in gate_bindings:
         # Evaluate the gate
         passed = _evaluate_rule(candidate, binding, registry)
+
+        # OTA-838: honor the LHS named value's catalog null_semantics on a null
+        # LHS (expression gates only). SKIP → skip the rule; FAIL_OPEN → treat
+        # null as a pass; FAIL_CLOSED / unknown / no map → unchanged.
+        skipped = False
+        null_reason = ""
+        lhs_is_null, lhs_name, semantics = _null_lhs_semantics(
+            binding, candidate, null_semantics
+        )
+        if lhs_is_null:
+            if semantics == "SKIP":
+                skipped = True
+                # passed=True so a skipped gate never counts as a fail; readers
+                # MUST check `skipped` first — it is not a genuine pass either.
+                passed = True
+                null_reason = (
+                    f"Gate '{binding.rule.rule_key}' skipped: LHS '{lhs_name}' is "
+                    f"null and catalog null_semantics=SKIP "
+                    f"(no pass/fail, no halt, no penalty)"
+                )
+            elif semantics == "FAIL_OPEN" and not passed:
+                passed = True
+                null_reason = (
+                    f"Gate '{binding.rule.rule_key}' passed (fail-open): LHS "
+                    f"'{lhs_name}' is null and catalog null_semantics=FAIL_OPEN"
+                )
 
         decision = GateDecision(
             rule_key=binding.rule.rule_key,
@@ -275,7 +355,14 @@ def _run_gate_list(
             was_terminal=False,
             held_penalty=None,
             decision_reason="",
+            skipped=skipped,
         )
+
+        if skipped:
+            # Third outcome: neither pass nor fail. No halt, no held penalty.
+            decision.decision_reason = null_reason
+            result.gate_decisions.append(decision)
+            continue
 
         if not passed:
             if binding.junction.stop_if_fail:
@@ -309,7 +396,9 @@ def _run_gate_list(
                     f"stop_if_fail=false; penalty={penalty} held"
                 )
         else:
-            decision.decision_reason = f"Gate '{binding.rule.rule_key}' passed"
+            decision.decision_reason = (
+                null_reason or f"Gate '{binding.rule.rule_key}' passed"
+            )
 
         result.gate_decisions.append(decision)
 

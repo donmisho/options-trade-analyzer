@@ -169,7 +169,15 @@ class Candidate:
 
 @dataclass
 class GateDecision:
-    """Per-gate trace entry within a ResultRecord."""
+    """Per-gate trace entry within a ResultRecord.
+
+    ``skipped`` (OTA-838) is a third outcome distinct from pass and fail: the
+    gate's LHS named value resolved to null and that value's catalog
+    ``null_semantics`` is SKIP, so the rule was neither passed nor failed —
+    it did not halt, hold a penalty, or contribute a verdict. ``passed`` is set
+    True for a skipped gate (it did not fail), so every consumer that interprets
+    ``passed`` must check ``skipped`` first; a skipped gate is NOT a genuine pass.
+    """
     rule_key: str
     phase: Phase
     tier: Tier | None
@@ -181,6 +189,7 @@ class GateDecision:
     was_terminal: bool
     held_penalty: float | None
     decision_reason: str
+    skipped: bool = False
 
 
 @dataclass
