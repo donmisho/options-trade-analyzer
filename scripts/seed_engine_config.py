@@ -2367,6 +2367,468 @@ def cleanup_decomposed_compounds(cursor, compound_rule_keys: set[str]):
         log.info("  Disabled rule 'days_until_next_earnings' (kept for divergence record)")
 
 
+# ── OTA-833: DIRECTIONAL surface — three thesis-comparison objectives ─────
+#
+# Hand-authored engine_* rows for the DIRECTIONAL consumer surface, appended to
+# the seed lists in main() AFTER the SCREENING transform chain. Rationale for
+# the insertion point: the screening-only passes (set_gate_mechanics renumbers
+# evaluation_order; canonicalize_expressions rewrites condition_expression;
+# build_formula_registry scans formula_ref into the SHARED formula_registry
+# contract) must NOT touch these rows — otherwise our deliberate gate ordering
+# would be scrambled and the directional formulas would leak into the SHARED
+# contract that SCREENING startup-validates against (a drift failure, since the
+# directional formulas are not in the screening registry).
+#
+# Routing directional candidates through the engine is OTA-765; SKIP-honoring at
+# gate eval is OTA-838 (already landed). This story only SEEDS config. Supersedes
+# the orphan app/ota_adapters/directional/config.py (retired in this commit).
+#
+# Atomicity (insight_engine.md §6.3): every gate reads exactly one named value as
+# LHS and one bound parameter as RHS, so liquidity/data-completeness are split
+# into single-value rules. Earnings and negative-EV are formula-backed (OTA-837).
+# No strategy/structure branching: kill-vs-record-only lives entirely on junctions.
+
+_DIR_SURFACE = "DIRECTIONAL"
+
+_DIR_COMPATIBLE_STRUCTURES = ["bull_call", "bear_put", "long_call", "long_put"]
+
+# Per-strategy verdict bands (engine_strategies.verdict_band_set — the column the
+# pipeline reads at verdict lookup). Same EXECUTE/WAIT/PASS shape as SCREENING.
+_DIR_VERDICT_BANDS = {
+    "directional_income": [
+        {"verdict": "EXECUTE", "min_score": 75, "max_score": 100},
+        {"verdict": "WAIT",    "min_score": 55, "max_score": 74.99},
+        {"verdict": "PASS",    "min_score": 0,  "max_score": 54.99},
+    ],
+    "directional_growth": [
+        {"verdict": "EXECUTE", "min_score": 70, "max_score": 100},
+        {"verdict": "WAIT",    "min_score": 50, "max_score": 69.99},
+        {"verdict": "PASS",    "min_score": 0,  "max_score": 49.99},
+    ],
+    "directional_longshot": [
+        {"verdict": "EXECUTE", "min_score": 62, "max_score": 100},
+        {"verdict": "WAIT",    "min_score": 45, "max_score": 61.99},
+        {"verdict": "PASS",    "min_score": 0,  "max_score": 44.99},
+    ],
+}
+
+# (strategy_key, display_name, verdict_band_lookup_set, description)
+_DIR_STRATEGY_META = [
+    (
+        "directional_income",
+        "Directional — Income",
+        "directional_income_verdicts",
+        "Directional thesis comparison — Income objective. Favors probability of "
+        "profit and breakeven buffer; earnings inside the window is a hard stop.",
+    ),
+    (
+        "directional_growth",
+        "Directional — Steady Growth",
+        "directional_growth_verdicts",
+        "Directional thesis comparison — Steady Growth objective. Balances expected "
+        "value and reward-to-risk; earnings inside the window records a flag only.",
+    ),
+    (
+        "directional_longshot",
+        "Directional — Big-Bet Longshot",
+        "directional_longshot_verdicts",
+        "Directional thesis comparison — Big-Bet Longshot objective. Favors target "
+        "payoff and reward-to-risk; earnings inside the window records a flag only.",
+    ),
+]
+
+# Scoring criteria (engine_rules, phase=scoring). Bound to all three strategies
+# with per-strategy weights but identical params (formula defaults made explicit
+# so the junction self-supplies every schema key — §6.6 JUNCTION_PARAM_MISSING).
+# dir_budget_fit / dir_defined_risk are intentionally NOT bound by any strategy.
+_DIR_SCORING_RULES = [
+    {
+        "rule_key": "dir_probability",
+        "intent": "Probability of profit scaled to [0,100] (OTA-755).",
+        "formula_ref": "formula:dir_probability",
+        "referenced_named_values": ["prob_of_profit"],
+        "parameter_schema": {"scale": {"type": "number"}},
+        "params": {"scale": 100},
+    },
+    {
+        "rule_key": "dir_buffer",
+        "intent": "Breakeven-vs-target buffer, capped and scaled (OTA-755).",
+        "formula_ref": "formula:dir_buffer",
+        "referenced_named_values": ["buffer_pct"],
+        "parameter_schema": {"cap": {"type": "number"}, "scale": {"type": "number"}},
+        "params": {"cap": 10, "scale": 100},
+    },
+    {
+        "rule_key": "dir_expected_value",
+        "intent": "Expected value unified across spreads (ev_raw) and naked longs "
+                  "(total_ev), tanh-scaled to [0,100] (OTA-834).",
+        "formula_ref": "formula:dir_expected_value",
+        "referenced_named_values": ["ev_raw", "total_ev"],
+        "parameter_schema": {
+            "null_score": {"type": "number"},
+            "neutral_score": {"type": "number"},
+            "ev_scale": {"type": "number"},
+        },
+        "params": {"null_score": 50.0, "neutral_score": 50.0, "ev_scale": 100.0},
+    },
+    {
+        "rule_key": "dir_max_loss_pct",
+        "intent": "Budget consumption: max_loss / thesis_risk_budget, lower is "
+                  "better (OTA-834).",
+        "formula_ref": "formula:dir_max_loss_pct",
+        "referenced_named_values": ["max_loss", "thesis_risk_budget"],
+        "parameter_schema": {
+            "null_score": {"type": "number"},
+            "full_consumption": {"type": "number"},
+        },
+        "params": {"null_score": 0.0, "full_consumption": 1.0},
+    },
+    {
+        "rule_key": "dir_reward_risk",
+        "intent": "Reward-to-risk ratio scaled to [0,100]; null (naked, unlimited) "
+                  "scores full (OTA-834).",
+        "formula_ref": "formula:dir_reward_risk",
+        "referenced_named_values": ["reward_risk_ratio"],
+        "parameter_schema": {
+            "null_score": {"type": "number"},
+            "full_score_ratio": {"type": "number"},
+        },
+        "params": {"null_score": 100.0, "full_score_ratio": 2.0},
+    },
+    {
+        "rule_key": "dir_payoff_multiple",
+        "intent": "Target-based payoff multiple scaled to [0,100] — intrinsic at "
+                  "thesis target for naked longs, reward/risk for spreads (OTA-834).",
+        "formula_ref": "formula:dir_payoff_multiple",
+        "referenced_named_values": [
+            "structure_type", "cost", "strike", "thesis_target_price",
+            "option_type", "reward_risk_ratio",
+        ],
+        "parameter_schema": {
+            "null_score": {"type": "number"},
+            "full_multiple": {"type": "number"},
+        },
+        "params": {"null_score": 0.0, "full_multiple": 2.0},
+    },
+]
+
+# Per-strategy scoring weights (each column sums to 1.00 — §6.6 SCORING_WEIGHTS).
+_DIR_SCORING_WEIGHTS = {
+    "directional_income":   {"dir_probability": 0.32, "dir_buffer": 0.22, "dir_expected_value": 0.16, "dir_max_loss_pct": 0.16, "dir_reward_risk": 0.09, "dir_payoff_multiple": 0.05},
+    "directional_growth":   {"dir_probability": 0.18, "dir_buffer": 0.14, "dir_expected_value": 0.21, "dir_max_loss_pct": 0.12, "dir_reward_risk": 0.19, "dir_payoff_multiple": 0.16},
+    "directional_longshot": {"dir_probability": 0.09, "dir_buffer": 0.02, "dir_expected_value": 0.21, "dir_max_loss_pct": 0.16, "dir_reward_risk": 0.23, "dir_payoff_multiple": 0.29},
+}
+
+# evaluation_order within the scoring phase (gates occupy 1-9; see below).
+_DIR_SCORING_ORDER = {
+    "dir_probability": 10, "dir_buffer": 11, "dir_expected_value": 12,
+    "dir_max_loss_pct": 13, "dir_reward_risk": 14, "dir_payoff_multiple": 15,
+}
+
+# Gate criteria (engine_rules, phase=gate). One named value + one param each.
+# `tier` controls only RAW/DERIVED-vs-COMPUTED phase partitioning (RAW+DERIVED
+# co-run before the COMPUTED callback; negative-EV is COMPUTED so it runs after
+# total_ev is populated, mirroring SCREENING's total_expected_value gate).
+#
+# Flag A (Don): three FAIL_CLOSED IS NOT NULL data-completeness gates at the
+# FRONT (defense-in-depth + fail-closed invariant + parity with SCREENING's
+# data_completeness_* / underlying_price_floor). structure_type is catalog-DERIVED
+# but tagged RAW per the ruling — functionally identical (RAW+DERIVED co-run, and
+# the adapter fully derives candidates before engine entry).
+_DIR_GATE_RULES = [
+    {
+        "rule_key": "dir_data_completeness_underlying_price",
+        "tier": "RAW",
+        "intent": "Data completeness: underlying_price must be present (fail-closed).",
+        "condition_expression": "IS NOT NULL",
+        "formula_ref": None,
+        "referenced_named_values": ["underlying_price"],
+        "parameter_schema": None,
+        "null_semantics": "FAIL_CLOSED",
+    },
+    {
+        "rule_key": "dir_data_completeness_expiration",
+        "tier": "RAW",
+        "intent": "Data completeness: expiration must be present (fail-closed).",
+        "condition_expression": "IS NOT NULL",
+        "formula_ref": None,
+        "referenced_named_values": ["expiration"],
+        "parameter_schema": None,
+        "null_semantics": "FAIL_CLOSED",
+    },
+    {
+        "rule_key": "dir_data_completeness_structure_type",
+        "tier": "RAW",
+        "intent": "Data completeness: structure_type must be present (fail-closed).",
+        "condition_expression": "IS NOT NULL",
+        "formula_ref": None,
+        "referenced_named_values": ["structure_type"],
+        "parameter_schema": None,
+        "null_semantics": "FAIL_CLOSED",
+    },
+    {
+        "rule_key": "dir_earnings",
+        "tier": "RAW",
+        "intent": "Earnings gate (OTA-837): fail when next_earnings_date <= "
+                  "expiration + buffer_days; unknown earnings fail-open.",
+        "condition_expression": None,
+        "formula_ref": "formula:dir_earnings",
+        "referenced_named_values": ["next_earnings_date", "expiration"],
+        "parameter_schema": {"buffer_days": {"type": "number"}},
+        "null_semantics": None,
+    },
+    {
+        "rule_key": "dir_bid_ask_spread_max",
+        "tier": "DERIVED",
+        "intent": "Liquidity: per-candidate bid/ask spread %% must be within the "
+                  "ceiling. Null-by-design for debit spreads — catalog "
+                  "null_semantics=SKIP, so the engine (OTA-838) skips the rule "
+                  "rather than halting the candidate.",
+        "condition_expression": "<=",
+        "formula_ref": None,
+        "referenced_named_values": ["bid_ask_spread_pct"],
+        "parameter_schema": {"max_spread_pct": {"type": "number"}},
+        "null_semantics": "SKIP",
+    },
+    {
+        "rule_key": "dir_open_interest_floor",
+        "tier": "RAW",
+        "intent": "Liquidity: open interest must meet the floor.",
+        "condition_expression": ">=",
+        "formula_ref": None,
+        "referenced_named_values": ["open_interest"],
+        "parameter_schema": {"min_oi": {"type": "number"}},
+        "null_semantics": None,
+    },
+    {
+        "rule_key": "dir_volume_floor",
+        "tier": "RAW",
+        "intent": "Liquidity: volume must meet the floor.",
+        "condition_expression": ">=",
+        "formula_ref": None,
+        "referenced_named_values": ["volume"],
+        "parameter_schema": {"min_volume": {"type": "number"}},
+        "null_semantics": None,
+    },
+    {
+        "rule_key": "dir_budget_flag",
+        "tier": "DERIVED",
+        "intent": "Budget flag (record-only): fails when the trade cost does not "
+                  "fit the thesis risk budget. Never rejects — junction sets "
+                  "stop_if_fail=false, score_penalty=0.",
+        "condition_expression": "==",
+        "formula_ref": None,
+        "referenced_named_values": ["fits_budget"],
+        "parameter_schema": {"expected": {"type": "boolean"}},
+        "null_semantics": None,
+    },
+    {
+        "rule_key": "dir_negative_ev",
+        "tier": "COMPUTED",
+        "intent": "Negative-EV gate (OTA-837): fail when resolved EV (ev_raw else "
+                  "total_ev) < threshold; both null defers to data-completeness.",
+        "condition_expression": None,
+        "formula_ref": "formula:dir_negative_ev",
+        "referenced_named_values": ["ev_raw", "total_ev"],
+        "parameter_schema": {"threshold": {"type": "number"}},
+        "null_semantics": None,
+    },
+]
+
+# Per-strategy gate junction config. evaluation_order 1-9 (front-loaded
+# data-completeness). `liq` params and the earnings stop/record split vary by
+# objective; everything else is identical across the three strategies.
+#   (rule_key, evaluation_order, income_cfg, growth_cfg, longshot_cfg)
+# where *_cfg = dict(stop_if_fail, score_penalty, parameters).
+def _dir_gate_junction_specs():
+    """Return {strategy_key: [junction dict, ...]} for the 9 gates."""
+    # Liquidity thresholds: Income/Growth tight, Longshot relaxed.
+    liq_tight = {
+        "dir_bid_ask_spread_max": {"max_spread_pct": 10.00},
+        "dir_open_interest_floor": {"min_oi": 100},
+        "dir_volume_floor": {"min_volume": 50},
+    }
+    liq_relaxed = {
+        "dir_bid_ask_spread_max": {"max_spread_pct": 20.00},
+        "dir_open_interest_floor": {"min_oi": 50},
+        "dir_volume_floor": {"min_volume": 25},
+    }
+    liq = {
+        "directional_income": liq_tight,
+        "directional_growth": liq_tight,
+        "directional_longshot": liq_relaxed,
+    }
+    # Earnings: hard stop for Income; record-only flag for Growth/Longshot.
+    earnings_stop = {
+        "directional_income": (True, None),
+        "directional_growth": (False, 0.0),
+        "directional_longshot": (False, 0.0),
+    }
+
+    specs: dict[str, list[dict]] = {}
+    for strat_key, _disp, _set, _desc in _DIR_STRATEGY_META:
+        rows: list[dict] = []
+        # 1-3: data completeness (all stop, no params)
+        for order, rk in enumerate(
+            (
+                "dir_data_completeness_underlying_price",
+                "dir_data_completeness_expiration",
+                "dir_data_completeness_structure_type",
+            ),
+            start=1,
+        ):
+            rows.append({
+                "rule_key": rk, "evaluation_order": order,
+                "stop_if_fail": True, "score_penalty": None, "parameters": {},
+            })
+        # 4: earnings (formula_ref; stop/record split by objective)
+        e_stop, e_pen = earnings_stop[strat_key]
+        rows.append({
+            "rule_key": "dir_earnings", "evaluation_order": 4,
+            "stop_if_fail": e_stop, "score_penalty": e_pen,
+            "parameters": {"buffer_days": 0},
+        })
+        # 5-7: liquidity (all stop)
+        rows.append({
+            "rule_key": "dir_bid_ask_spread_max", "evaluation_order": 5,
+            "stop_if_fail": True, "score_penalty": None,
+            "parameters": liq[strat_key]["dir_bid_ask_spread_max"],
+        })
+        rows.append({
+            "rule_key": "dir_open_interest_floor", "evaluation_order": 6,
+            "stop_if_fail": True, "score_penalty": None,
+            "parameters": liq[strat_key]["dir_open_interest_floor"],
+        })
+        rows.append({
+            "rule_key": "dir_volume_floor", "evaluation_order": 7,
+            "stop_if_fail": True, "score_penalty": None,
+            "parameters": liq[strat_key]["dir_volume_floor"],
+        })
+        # 8: budget flag (record-only, never rejects)
+        rows.append({
+            "rule_key": "dir_budget_flag", "evaluation_order": 8,
+            "stop_if_fail": False, "score_penalty": 0.0,
+            "parameters": {"expected": True},
+        })
+        # 9: negative-EV (hard stop, COMPUTED tier)
+        rows.append({
+            "rule_key": "dir_negative_ev", "evaluation_order": 9,
+            "stop_if_fail": True, "score_penalty": None,
+            "parameters": {"threshold": 0.00},
+        })
+        specs[strat_key] = rows
+    return specs
+
+
+def build_directional_config():
+    """Build hand-authored engine_* rows for the three DIRECTIONAL objectives.
+
+    Returns ``(rules, strategies, junctions, lookups)`` as id-less row dicts in
+    the same shape the seed's transform chain produces, ready to extend the
+    main() lists before the upsert. JSON columns are left as Python objects;
+    ``validate_json`` serializes them at upsert and ``load_config`` accepts them
+    parsed (so the same rows drive both the seed and the InMemoryConfigSource
+    hydration test).
+    """
+    rules: list[dict] = []
+    strategies: list[dict] = []
+    junctions: list[dict] = []
+    lookups: list[dict] = []
+
+    # ── engine_rules — gates (9) + scoring (6), defined once, bound per strategy ──
+    for g in _DIR_GATE_RULES:
+        rules.append({
+            "owner_app_id": "OTA",
+            "rule_key": g["rule_key"],
+            "phase": "gate",
+            "tier": g["tier"],
+            "intent": g["intent"],
+            "condition_expression": g["condition_expression"],
+            "formula_ref": g["formula_ref"],
+            "referenced_named_values": g["referenced_named_values"],
+            "parameter_schema": g["parameter_schema"],
+            "null_semantics": g["null_semantics"],
+            "enabled": True,
+        })
+    for s in _DIR_SCORING_RULES:
+        rules.append({
+            "owner_app_id": "OTA",
+            "rule_key": s["rule_key"],
+            "phase": "scoring",
+            "tier": None,
+            "intent": s["intent"],
+            "condition_expression": None,
+            "formula_ref": s["formula_ref"],
+            "referenced_named_values": s["referenced_named_values"],
+            "parameter_schema": s["parameter_schema"],
+            "null_semantics": None,
+            "enabled": True,
+        })
+
+    # ── engine_strategies (3) + verdict-band lookup sets ──
+    gate_specs = _dir_gate_junction_specs()
+    scoring_params = {s["rule_key"]: s["params"] for s in _DIR_SCORING_RULES}
+
+    for strat_key, display_name, set_name, description in _DIR_STRATEGY_META:
+        bands = _DIR_VERDICT_BANDS[strat_key]
+        strategies.append({
+            "owner_app_id": "OTA",
+            "strategy_key": strat_key,
+            "display_name": display_name,
+            "consumer_surface": _DIR_SURFACE,
+            "description": description,
+            "compatible_structures": list(_DIR_COMPATIBLE_STRUCTURES),
+            "verdict_band_set": bands,
+            "dte_min": None,
+            "dte_max": None,
+            "enabled": True,
+        })
+
+        # Per-strategy verdict-band lookup set (mirrors screening_verdicts payload
+        # shape {min_score, max_score}). Replaces the orphan's single
+        # directional_verdicts set. Reference data — the engine reads bands from
+        # the verdict_band_set column above, not these rows.
+        for i, band in enumerate(bands, 1):
+            lookups.append({
+                "owner_app_id": "OTA",
+                "lookup_set": set_name,
+                "lookup_key": band["verdict"],
+                "payload": {"min_score": band["min_score"], "max_score": band["max_score"]},
+                "sort_order": i,
+            })
+
+        # Gate junctions (9)
+        for spec in gate_specs[strat_key]:
+            junctions.append({
+                "strategy_key": strat_key,
+                "rule_key": spec["rule_key"],
+                "evaluation_order": spec["evaluation_order"],
+                "stop_if_fail": spec["stop_if_fail"],
+                "score_penalty": spec["score_penalty"],
+                "weight": None,
+                "parameters": spec["parameters"],
+                "terminal_verdict": None,
+                "enabled": True,
+            })
+
+        # Scoring junctions (6)
+        weights = _DIR_SCORING_WEIGHTS[strat_key]
+        for rule_key, weight in weights.items():
+            junctions.append({
+                "strategy_key": strat_key,
+                "rule_key": rule_key,
+                "evaluation_order": _DIR_SCORING_ORDER[rule_key],
+                "stop_if_fail": False,
+                "score_penalty": None,
+                "weight": weight,
+                "parameters": dict(scoring_params[rule_key]),
+                "terminal_verdict": None,
+                "enabled": True,
+            })
+
+    return rules, strategies, junctions, lookups
+
+
 # ── Main ─────────────────────────────────────────────────────────────────
 
 def main():
@@ -2422,6 +2884,21 @@ def main():
     formula_lookups = build_formula_registry(rules)
     lookups.extend(formula_lookups)
     log.info(f"Formula registry: {len(formula_lookups)} formulas registered")
+
+    # OTA-833: Append the DIRECTIONAL block AFTER the SCREENING transform chain
+    # (so set_gate_mechanics / canonicalize_expressions / build_formula_registry
+    # never touch these rows and the directional formulas never enter the SHARED
+    # formula_registry contract that SCREENING validates against).
+    log.info("Appending DIRECTIONAL surface block (OTA-833)...")
+    dir_rules, dir_strategies, dir_junctions, dir_lookups = build_directional_config()
+    rules.extend(dir_rules)
+    strategies.extend(dir_strategies)
+    junctions.extend(dir_junctions)
+    lookups.extend(dir_lookups)
+    log.info(
+        f"DIRECTIONAL: +{len(dir_rules)} rules, +{len(dir_strategies)} strategies, "
+        f"+{len(dir_junctions)} junctions, +{len(dir_lookups)} lookups"
+    )
 
     if args.dry_run:
         log.info("DRY RUN — no database writes")
