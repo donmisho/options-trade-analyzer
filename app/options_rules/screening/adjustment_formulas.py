@@ -119,3 +119,110 @@ def probability_asymmetry_penalty(named_values: dict, params: dict) -> float:
         return float(params.get("penalty_moderate", -8))
 
     return 0.0
+
+
+# ── OTA-836: extension-matches-direction (contract-only impl) ─────────────
+#
+# Contract-only formula given a live implementation. The rule
+# `adj_stock_extended_direction_match` carries
+# formula_ref="formula:extension_matches_trade_direction" and binds to all four
+# screening strategies. Before OTA-836 it was in the contract with no live impl
+# (FORMULA_REGISTRY_DRIFT / FORMULA_MISSING_FROM_LIVE_REGISTRY at startup).
+#
+# Behavior is implemented to the formula contract intent: returns True when the
+# stock's extension direction matches the trade direction (price above SMA-50
+# for a bull trade, below for a bear trade). The engine's adjustment runner
+# (pipeline._run_adjustments) maps True → no penalty, False → junction penalty;
+# the penalty-direction *semantics* of this adjustment are a rule-correctness
+# question deferred to backtesting (OTA-836 hard constraint: no rule tuning),
+# since this formula has never executed at runtime before.
+
+
+@adjustment_formula("extension_matches_trade_direction")
+def extension_matches_trade_direction(named_values: dict, params: dict) -> bool:
+    """Does the stock's extension direction match the trade direction?
+
+    Returns True when price is above SMA-50 for a bull trade (or below SMA-50
+    for a bear trade), or when any input is missing (fail-soft — no penalty).
+
+    Reads: stock_price, sma_50, trade_direction.
+    """
+    stock_price = named_values.get("stock_price")
+    sma_50 = named_values.get("sma_50")
+    trade_direction = named_values.get("trade_direction")
+    if stock_price is None or sma_50 is None or trade_direction is None:
+        return True  # missing data → no penalty
+
+    td = str(trade_direction).lower()
+    if "bull" in td:
+        return stock_price > sma_50
+    if "bear" in td:
+        return stock_price < sma_50
+    return True  # unknown direction → no penalty
+
+
+# ── OTA-836: DTE 8-13 penalty (new formula) ──────────────────────────────
+#
+# Replaces the non-§6.3 condition_expression "dte >= 8 AND dte <= 13" on the
+# code-only rule `adj_dte_8_13_penalty` (bound to all four screening
+# strategies), which the §6.3 loader rejected and blocked load_config.
+# Replicates the confirmed behavior exactly: -20 when 8 <= dte <= 13, else 0.
+# Returns the amount directly (like probability_asymmetry_penalty) so the
+# junction's score_penalty does not double the effect.
+
+
+@adjustment_formula("adj_dte_8_13_penalty")
+def adj_dte_8_13_penalty(named_values: dict, params: dict) -> float:
+    """Near-expiry penalty: -20 points when 8 <= dte <= 13, else 0.
+
+    Reads: dte. Params (from junction): dte_low (8), dte_high (13),
+    penalty (-20).
+    """
+    dte = named_values.get("dte")
+    if dte is None:
+        return 0.0  # missing data → no penalty
+
+    dte_low = params.get("dte_low", 8)
+    dte_high = params.get("dte_high", 13)
+    penalty = params.get("penalty", -20)
+    return float(penalty) if dte_low <= dte <= dte_high else 0.0
+
+
+# ── OTA-836: SMA-alignment-against-trade penalty (new formula) ────────────
+#
+# Replaces the non-§6.3 workbook condition "REDUCE SCORE BY 15 IF price is
+# positioned against the trade direction across all 3 SMAs" on the rule
+# `adj_sma_alignment_against_trade` (bound to steady_paycheck + weekly_grind),
+# which blocked load_config. Cross-field (price vs sma_8/21/50 vs
+# trade_direction) → cannot be a §6.3 atom, so it is a formula. Replicates the
+# captured penalty: -15 when price is on the wrong side of all three SMAs for
+# the trade direction, else 0.
+
+
+@adjustment_formula("adj_sma_alignment_against_trade")
+def adj_sma_alignment_against_trade(named_values: dict, params: dict) -> float:
+    """-15 when price is positioned against the trade direction across all 3 SMAs.
+
+    "Against" = price below all of SMA-8/21/50 for a bull trade, or above all
+    three for a bear trade. Returns 0 otherwise or when any input is missing.
+
+    Reads: stock_price, sma_8, sma_21, sma_50, trade_direction.
+    Params (from junction): penalty (-15).
+    """
+    price = named_values.get("stock_price")
+    sma_8 = named_values.get("sma_8")
+    sma_21 = named_values.get("sma_21")
+    sma_50 = named_values.get("sma_50")
+    trade_direction = named_values.get("trade_direction")
+    if None in (price, sma_8, sma_21, sma_50, trade_direction):
+        return 0.0  # missing data → no penalty
+
+    penalty = params.get("penalty", -15)
+    td = str(trade_direction).lower()
+    below_all = price < sma_8 and price < sma_21 and price < sma_50
+    above_all = price > sma_8 and price > sma_21 and price > sma_50
+    if "bull" in td and below_all:
+        return float(penalty)
+    if "bear" in td and above_all:
+        return float(penalty)
+    return 0.0

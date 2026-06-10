@@ -1290,8 +1290,11 @@ def backfill_missing_rules(rules, junctions):
             "Covers the gap between the 7 DTE hard gate and normal scoring. "
             "Code-only rule captured from evaluation_routes.py:634-638."
         ),
+        # OTA-836: formula-backed. The condition_expression below is documentary
+        # only (the §6.3 loader honors formula_ref and ignores it); the live
+        # @adjustment_formula reproduces the -20 @ 8<=dte<=13 behavior exactly.
         "condition_expression": "dte >= 8 AND dte <= 13",
-        "formula_ref": None,
+        "formula_ref": "formula:adj_dte_8_13_penalty",
         "referenced_named_values": ["dte"],
         "parameter_schema": {
             "dte_low": {"type": "number", "default": 8},
@@ -1695,6 +1698,12 @@ def populate_delta_quality_params(junctions):
     return junctions
 
 
+# OTA-836: stride between consecutive gate/adjustment evaluation_orders, leaving
+# a gap for the loader's BETWEEN decomposition (which emits N and N+1). Any
+# value >= 2 works; 10 keeps the numbers readable.
+_EVAL_ORDER_STRIDE = 10
+
+
 def set_gate_mechanics(rules, junctions):
     """
     OTA-684: Set evaluation_order, stop_if_fail, and score_penalty on all
@@ -1732,11 +1741,19 @@ def set_gate_mechanics(rules, junctions):
         if phase in ("gate", "adjustment"):
             groups[(j["strategy_key"], phase)].append(j)
 
-    # Reassign evaluation_order within each group
+    # Reassign evaluation_order within each group.
+    # OTA-836: stride by _EVAL_ORDER_STRIDE (10, 20, 30, …) instead of dense
+    # 1, 2, 3, …. The §6.3 loader decomposes a BETWEEN gate into two atomic
+    # bindings at evaluation_order N and N+1 (loader._decompose_between); with
+    # dense numbering the N+1 half collided with the next gate's order, tripping
+    # EVAL_ORDER_DUPLICATE at startup validation. Striding leaves a gap so the
+    # +1 split lands cleanly between rules. This is NON-BEHAVIORAL: the engine
+    # sorts bindings by evaluation_order and never reads its absolute value, and
+    # a strictly increasing remap (k → 10·k) preserves the sort order exactly.
     for (strat_key, phase), group in groups.items():
         group.sort(key=sort_key)
         for order, j in enumerate(group, 1):
-            j["evaluation_order"] = order
+            j["evaluation_order"] = order * _EVAL_ORDER_STRIDE
 
     # Add long-DTE rationale to earnings junction rows
     for j in junctions:
@@ -2116,6 +2133,78 @@ def canonicalize_expressions(rules, junctions):
 
     log.info(f"OTA-832 canonicalization: {rewritten} rules rewritten, "
              f"{patched} junction parameter sets pinned")
+    return rules, junctions
+
+
+# ── OTA-836: build-to-testable carve-out resolution ──────────────────────
+#
+# Phase A of OTA-836: unblock load_config so the SCREENING surface validates
+# clean and the engine runtime hydrates (null runtime = dead /evaluate route).
+#
+#  - adj_sma_alignment_against_trade: cross-field (price vs 3 SMAs vs
+#    trade_direction) → not a §6.3 atom → wired to a live @adjustment_formula.
+#    Its junctions supply no parameters, so parameter_schema is cleared to {}
+#    to avoid a spurious JUNCTION_PARAM_MISSING (§6.6).
+#  - PARKED carve-outs (enabled=False, reversible): no honest resolution this
+#    pass, so they are disabled to stop blocking the §6.3 loader. Correctness /
+#    re-enable is deferred to backtesting.
+#      * spread_width_tier_compliance — needs the 5-tier Width Configuration
+#        producer (OTA-690), not built. NOTE: it is a HARD-STOP gate on
+#        steady_paycheck / weekly_grind / trend_rider, so parking removes a kill
+#        gate for the parked window (accepted by Don).
+#      * stock_extended_against_entry / stock_extended_in_trade_direction —
+#        soft gates (-10) whose magnitude signal overlaps the adjustment-phase
+#        adj_stock_extended_* rules; parked pending backtesting reconciliation.
+#  - adj_dte_8_13_penalty is handled at its definition (formula_ref wired there).
+_OTA836_FORMULA_WIRING = {
+    "adj_sma_alignment_against_trade": {
+        "formula_ref": "formula:adj_sma_alignment_against_trade",
+        "referenced_named_values": [
+            "stock_price", "sma_8", "sma_21", "sma_50", "trade_direction",
+        ],
+        "parameter_schema": {},
+    },
+}
+_OTA836_PARKED_RULES = {
+    "spread_width_tier_compliance",
+    "stock_extended_against_entry",
+    "stock_extended_in_trade_direction",
+}
+
+
+def apply_ota836_amendments(rules, junctions):
+    """OTA-836 Phase A: wire the SMA-alignment formula + park unresolved carve-outs.
+
+    Runs AFTER canonicalize_expressions and BEFORE build_formula_registry so the
+    newly wired formula_ref is scanned into the SHARED formula_registry contract.
+
+    Parking disables BOTH the rule AND its junction rows. Disabling only the rule
+    would leave an enabled junction binding a switched-off rule, which the §6.6
+    junction-FK check (validation.py) flags as JUNCTION_FK_RULE_MISSING.
+    """
+    wired = 0
+    parked_rules = 0
+    for r in rules:
+        spec = _OTA836_FORMULA_WIRING.get(r["rule_key"])
+        if spec is not None:
+            r.update(spec)
+            wired += 1
+            log.info(f"  OTA-836 wired formula_ref for '{r['rule_key']}'")
+        if r["rule_key"] in _OTA836_PARKED_RULES:
+            r["enabled"] = False
+            parked_rules += 1
+            log.info(f"  OTA-836 parked rule (enabled=False): '{r['rule_key']}'")
+
+    parked_junctions = 0
+    for j in junctions:
+        if j["rule_key"] in _OTA836_PARKED_RULES:
+            j["enabled"] = False
+            parked_junctions += 1
+
+    log.info(
+        f"OTA-836 amendments: {wired} formula(s) wired, "
+        f"{parked_rules} rule(s) + {parked_junctions} junction(s) parked"
+    )
     return rules, junctions
 
 
@@ -2735,40 +2824,23 @@ def build_directional_config():
     junctions: list[dict] = []
     lookups: list[dict] = []
 
-    # ── engine_rules — gates (9) + scoring (6), defined once, bound per strategy ──
-    for g in _DIR_GATE_RULES:
-        rules.append({
-            "owner_app_id": "OTA",
-            "rule_key": g["rule_key"],
-            "phase": "gate",
-            "tier": g["tier"],
-            "intent": g["intent"],
-            "condition_expression": g["condition_expression"],
-            "formula_ref": g["formula_ref"],
-            "referenced_named_values": g["referenced_named_values"],
-            "parameter_schema": g["parameter_schema"],
-            "null_semantics": g["null_semantics"],
-            "enabled": True,
-        })
-    for s in _DIR_SCORING_RULES:
-        rules.append({
-            "owner_app_id": "OTA",
-            "rule_key": s["rule_key"],
-            "phase": "scoring",
-            "tier": None,
-            "intent": s["intent"],
-            "condition_expression": None,
-            "formula_ref": s["formula_ref"],
-            "referenced_named_values": s["referenced_named_values"],
-            "parameter_schema": s["parameter_schema"],
-            "null_semantics": None,
-            "enabled": True,
-        })
+    # ── OTA-836 Phase A: directional surface PARKED disabled ─────────────
+    # The 3 directional strategies are seeded with enabled=0 and their rules /
+    # junctions are NOT emitted this pass. Rationale: the engine validates ONE
+    # config across all surfaces against the SCREENING formula registry; the
+    # directional dir_* formulas live only in the directional registry, so a
+    # loaded directional surface fails validate_and_raise — which, caught by the
+    # OTA-830 safety net, leaves the runtime null and dead. Disabling the
+    # strategies keeps their rows present (FK-valid, audit-preserved) but unloaded
+    # (load_config skips disabled strategies, so their junctions never bind and
+    # dir_* never reaches validation). Emitting enabled=0 also flips any prior
+    # enabled=1 directional strategy rows from an earlier reseed.
+    #
+    # Directional returns in Phase B (surface-scoped validation + safety-net
+    # removal), which re-emits the rules/junctions. Verdict-label lookup sets are
+    # still seeded so the verdict domain is ready when the surface re-enables.
 
-    # ── engine_strategies (3) + verdict-band lookup sets ──
-    gate_specs = _dir_gate_junction_specs()
-    scoring_params = {s["rule_key"]: s["params"] for s in _DIR_SCORING_RULES}
-
+    # ── engine_strategies (3, DISABLED) + verdict-band lookup sets ──
     for strat_key, display_name, set_name, description in _DIR_STRATEGY_META:
         bands = _DIR_VERDICT_BANDS[strat_key]
         strategies.append({
@@ -2781,13 +2853,10 @@ def build_directional_config():
             "verdict_band_set": bands,
             "dte_min": None,
             "dte_max": None,
-            "enabled": True,
+            "enabled": False,  # OTA-836 Phase A — parked; re-enabled in Phase B
         })
 
-        # Per-strategy verdict-label lookup set. Threshold authority lives in the
-        # verdict_band_set column above (the column the engine reads at Phase 7);
-        # these rows seed only the verdict-label domain (OTA-835 — thresholds
-        # stripped; payload was {min_score, max_score}, read by nothing).
+        # Per-strategy verdict-label lookup set (verdict domain only; OTA-835).
         for i, band in enumerate(bands, 1):
             lookups.append({
                 "owner_app_id": "OTA",
@@ -2797,52 +2866,25 @@ def build_directional_config():
                 "sort_order": i,
             })
 
-        # Gate junctions (9)
-        for spec in gate_specs[strat_key]:
-            junctions.append({
-                "strategy_key": strat_key,
-                "rule_key": spec["rule_key"],
-                "evaluation_order": spec["evaluation_order"],
-                "stop_if_fail": spec["stop_if_fail"],
-                "score_penalty": spec["score_penalty"],
-                "weight": None,
-                "parameters": spec["parameters"],
-                "terminal_verdict": None,
-                "enabled": True,
-            })
-
-        # Scoring junctions (6)
-        weights = _DIR_SCORING_WEIGHTS[strat_key]
-        for rule_key, weight in weights.items():
-            junctions.append({
-                "strategy_key": strat_key,
-                "rule_key": rule_key,
-                "evaluation_order": _DIR_SCORING_ORDER[rule_key],
-                "stop_if_fail": False,
-                "score_penalty": None,
-                "weight": weight,
-                "parameters": dict(scoring_params[rule_key]),
-                "terminal_verdict": None,
-                "enabled": True,
-            })
+    # NOTE: _DIR_GATE_RULES, _DIR_SCORING_RULES, _dir_gate_junction_specs(), and
+    # _DIR_SCORING_WEIGHTS are intentionally NOT emitted in Phase A. They remain
+    # defined above and are re-wired in Phase B.
 
     return rules, strategies, junctions, lookups
 
 
 # ── Main ─────────────────────────────────────────────────────────────────
 
-def main():
-    parser = argparse.ArgumentParser(description="Seed engine_* config tables from Scoring Parameters.xlsx")
-    parser.add_argument("--xlsx", type=Path, default=DEFAULT_XLSX, help="Path to workbook")
-    parser.add_argument("--dry-run", action="store_true", help="Parse only, do not write to DB")
-    args = parser.parse_args()
+def build_all_rows(xlsx_path: Path):
+    """Run the full SCREENING transform chain + the DIRECTIONAL append.
 
-    if not args.xlsx.exists():
-        log.error(f"Workbook not found: {args.xlsx}")
-        sys.exit(1)
-
-    log.info(f"Parsing workbook: {args.xlsx}")
-    rules, strategies, junctions, lookups = parse_workbook(args.xlsx)
+    Returns ``(rules, strategies, junctions, lookups)`` as id-less row dicts in
+    the exact shape ``main()`` upserts. Extracted (OTA-836) so the in-memory
+    Gate-A re-check hydrates the identical row set the seed writes, with no
+    duplicated ordering of the transform steps.
+    """
+    log.info(f"Parsing workbook: {xlsx_path}")
+    rules, strategies, junctions, lookups = parse_workbook(xlsx_path)
 
     log.info(f"Parsed: {len(rules)} rules, {len(strategies)} strategies, "
              f"{len(junctions)} junctions, {len(lookups)} lookups")
@@ -2879,17 +2921,22 @@ def main():
     log.info("Canonicalizing condition_expression to §6.3 tokens (OTA-832)...")
     rules, junctions = canonicalize_expressions(rules, junctions)
 
+    # OTA-836: wire the SMA-alignment formula + park unresolved carve-outs
+    # (BEFORE build_formula_registry so the new formula_ref is scanned in).
+    log.info("Applying OTA-836 amendments (formula wiring + carve-out parking)...")
+    rules, junctions = apply_ota836_amendments(rules, junctions)
+
     # OTA-689: Build formula registry from engine_rules.formula_ref (scanned, not hand-copied)
     log.info("Building formula registry from engine_rules.formula_ref (OTA-689)...")
     formula_lookups = build_formula_registry(rules)
     lookups.extend(formula_lookups)
     log.info(f"Formula registry: {len(formula_lookups)} formulas registered")
 
-    # OTA-833: Append the DIRECTIONAL block AFTER the SCREENING transform chain
-    # (so set_gate_mechanics / canonicalize_expressions / build_formula_registry
-    # never touch these rows and the directional formulas never enter the SHARED
-    # formula_registry contract that SCREENING validates against).
-    log.info("Appending DIRECTIONAL surface block (OTA-833)...")
+    # OTA-833 / OTA-836: Append the DIRECTIONAL block AFTER the SCREENING chain.
+    # Phase A (OTA-836) emits the 3 directional strategies DISABLED with no
+    # rules/junctions, so dir_* formulas never enter the SHARED contract or the
+    # validated/loaded config.
+    log.info("Appending DIRECTIONAL surface block (OTA-833 / OTA-836 Phase A)...")
     dir_rules, dir_strategies, dir_junctions, dir_lookups = build_directional_config()
     rules.extend(dir_rules)
     strategies.extend(dir_strategies)
@@ -2899,6 +2946,21 @@ def main():
         f"DIRECTIONAL: +{len(dir_rules)} rules, +{len(dir_strategies)} strategies, "
         f"+{len(dir_junctions)} junctions, +{len(dir_lookups)} lookups"
     )
+
+    return rules, strategies, junctions, lookups
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Seed engine_* config tables from Scoring Parameters.xlsx")
+    parser.add_argument("--xlsx", type=Path, default=DEFAULT_XLSX, help="Path to workbook")
+    parser.add_argument("--dry-run", action="store_true", help="Parse only, do not write to DB")
+    args = parser.parse_args()
+
+    if not args.xlsx.exists():
+        log.error(f"Workbook not found: {args.xlsx}")
+        sys.exit(1)
+
+    rules, strategies, junctions, lookups = build_all_rows(args.xlsx)
 
     if args.dry_run:
         log.info("DRY RUN — no database writes")

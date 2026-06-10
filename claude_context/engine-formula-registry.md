@@ -1,6 +1,6 @@
 # Engine Formula Registry
 
-> **Status:** 24 formulas registered · 2026-05-28
+> **Status:** 26 formulas registered · 2026-06-10
 > **Scope:** Complete, deduplicated list of every `formula:<name>` reference in `engine_rules.formula_ref`. Each entry is the implementation contract for the rule library. The engine's startup validation (OTA-699, `insight_engine.md` §6.6) checks that every reference resolves to both a registered lookup row and a live implementation.
 >
 > **Dual-validation contract:** This doc and the SHARED `engine_lookups.formula_registry` set must agree row-for-row. The lookup payloads carry the same intent/signature/notes as this doc. Drift between them is a defect class OTA-699 will catch.
@@ -9,6 +9,7 @@
 > | Date | Change |
 > |---|---|
 > | 2026-05-28 | Initial registry: 24 formulas (5 gate, 16 scoring, 3 adjustment). OTA-689 re-open. |
+> | 2026-06-10 | OTA-836: 24 → 26. Added two adjustment formulas (`adj_dte_8_13_penalty`, `adj_sma_alignment_against_trade`) given live implementations to unblock SCREENING startup hydration. The five EV-gate formulas (`dte_hard_filter`, `dte_warning_penalty`, `credit_pct_of_width_floor`, `debit_pct_of_width_ceiling`, `negative_ev_gate`) were deregistered from the live screening registry — they were never in this contract and were referenced by no live `formula_ref`, so their removal changes no rows here (it clears a FORMULA_REGISTRY_DRIFT). Directional `dir_*` formulas remain out of this SHARED contract (directional surface parked; returns under the deferred surface-scoped-validation story). |
 
 ---
 
@@ -51,15 +52,17 @@ Scoring formulas produce a value that contributes to the candidate's weighted sc
 
 ---
 
-## Adjustment Formulas (3)
+## Adjustment Formulas (5)
 
 Adjustment formulas apply post-scoring penalties or bonuses based on conditions.
 
 | Name | Intent | Inputs | Output | Notes |
 |---|---|---|---|---|
 | `cushion_penalty_moderate` | Moderate proximity penalty: cushion ≥ 1.0% and < 2.0% of underlying price → −10 points. | `stock_price`, `short_strike` | decimal | — |
-| `extension_matches_trade_direction` | Check if stock extension direction matches trade direction (above SMA for bull, below for bear). | `stock_price`, `sma_50`, `trade_direction` | bool | — |
+| `extension_matches_trade_direction` | Check if stock extension direction matches trade direction (above SMA for bull, below for bear). | `stock_price`, `sma_50`, `trade_direction` | bool | OTA-836: live impl added. Penalty-direction semantics deferred to backtesting. |
 | `probability_asymmetry_penalty` | Graduated penalty based on loss/profit probability ratio. ≥ 2.0 → −25; ≥ 1.5 → −15; ≥ 1.25 → −8; < 1.25 → 0. | `p_max_loss`, `p_max_profit` | decimal | Junction params: `band_severe` (2.0), `band_high` (1.5), `band_moderate` (1.25), `penalty_severe` (−25), `penalty_high` (−15), `penalty_moderate` (−8). |
+| `adj_dte_8_13_penalty` | Near-expiry penalty: −20 points when 8 ≤ dte ≤ 13, else 0. | `dte` | decimal | OTA-836. Returns the penalty amount directly (junction does not double it). Junction params: `dte_low` (8), `dte_high` (13), `penalty` (−20). Replaces the non-§6.3 `dte >= 8 AND dte <= 13` condition that blocked the loader. |
+| `adj_sma_alignment_against_trade` | −15 points when price is positioned against the trade direction across all three SMAs (below all of SMA-8/21/50 for a bull trade, above all for a bear trade), else 0. | `stock_price`, `sma_8`, `sma_21`, `sma_50`, `trade_direction` | decimal | OTA-836. Cross-field → cannot be a §6.3 atom. Junction param: `penalty` (−15). |
 
 ---
 

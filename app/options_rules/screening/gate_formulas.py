@@ -2,7 +2,7 @@
 Screening gate formulas — registered pre-scoring gates.
 
 OTA-730: Earnings gate — four atomic route formulas.
-OTA-731: Negative EV gate — single consolidated formula.
+OTA-836: chart_state_matches_direction — contract-only impl wired live.
 
 Gate formulas return bool:
   True  = gate passed, candidate continues
@@ -13,10 +13,17 @@ The formulas only evaluate conditions — they never set verdicts.
 
 Legacy code superseded:
 - app/analysis/hard_gates/earnings_gate.py (EarningsInWindowGate)
-- app/analysis/hard_gates/negative_ev_gate.py (NegativeEVGate)
-- app/analysis/vertical_engine.py:265 (duplicate EV filter)
 
-OTA-730, OTA-731
+OTA-836 note: the five EV-gate formulas (dte_hard_filter, dte_warning_penalty,
+credit_pct_of_width_floor, debit_pct_of_width_ceiling, negative_ev_gate) were
+DEREGISTERED. They were live in this registry but absent from the formula
+contract and referenced by no live formula_ref (the engine's real EV gate is
+the total_expected_value BETWEEN rule), so they fired FORMULA_REGISTRY_DRIFT at
+startup validation. The app-layer NegativeEVGate HardGate class
+(app/analysis/hard_gates/negative_ev_gate.py, registered in main.py) is a
+SEPARATE legacy mechanism and is untouched by this removal.
+
+OTA-730, OTA-836
 """
 
 from __future__ import annotations
@@ -138,124 +145,43 @@ def earnings_route4_pre_momentum_play(named_values: dict, params: dict) -> bool:
     return not condition_met
 
 
-# ── OTA-731: Negative EV gate ────────────────────────────────────────────
+# ── OTA-836: Chart-state direction confirmation gate ─────────────────────
 #
-# Consolidates:
-# 1. NegativeEVGate (hard_gates/negative_ev_gate.py) — class-based gate
-# 2. vertical_engine.py:265 — inline filter: ev_raw >= min_ev_threshold
+# Contract-only formula given a live implementation. The rule
+# `chart_state_matches_trade_direction` (engine_rules) carries
+# formula_ref="formula:chart_state_matches_direction" and binds to the
+# directional screening strategies (trend_rider, lottery_ticket) as a
+# stop_if_fail gate. Before OTA-836 the formula was in the contract but had no
+# live impl, firing FORMULA_REGISTRY_DRIFT / FORMULA_MISSING_FROM_LIVE_REGISTRY.
 #
-# Both enforce the same rule: negative EV trades must not pass.
-# The engine rule replaces both with a single registered formula.
-#
-# Semantics:
-#   ev_raw < 0 (or < threshold) → False (gate fails → junction halts)
-#   ev_raw >= 0 (or None)       → True (gate passes — fail-soft)
+# Behavior (per the formula contract intent): pass when the chart-state
+# alignment confirms the trade direction — bullish alignment for a bull trade,
+# bearish for a bear trade. Domain-agnostic substring match on "bull"/"bear" so
+# it holds regardless of the chart_state value-domain reconciliation tracked by
+# OTA-839 (this formula does NOT read/modify chart_state_valid_alignment).
 
 
-# ── OTA-780: DTE gates ──────────────────────────────────────────────────
+@gate_formula("chart_state_matches_direction")
+def chart_state_matches_direction(named_values: dict, params: dict) -> bool:
+    """Chart-state alignment must confirm the trade direction.
 
+    Returns True (pass) when the chart state aligns with the trade direction
+    (bullish chart for a bull trade, bearish chart for a bear trade), or when
+    either input is missing (fail-soft — a missing signal does not gate).
+    Returns False (fail) for a directional trade whose chart state does not
+    confirm it (e.g. Mixed/Neutral, or alignment opposite the trade).
 
-@gate_formula("dte_hard_filter")
-def dte_hard_filter(named_values: dict, params: dict) -> bool:
-    """Block trades with DTE at or below the hard threshold.
-
-    Returns True (pass) when DTE is above threshold.
-    Returns False (fail) when DTE <= threshold.
-
-    Params (from junction):
-      threshold: int (default 7)
+    Reads: chart_state, trade_direction.
     """
-    dte = named_values.get("dte")
-    if dte is None:
-        return True  # fail-soft: missing DTE data
+    chart_state = named_values.get("chart_state")
+    trade_direction = named_values.get("trade_direction")
+    if chart_state is None or trade_direction is None:
+        return True  # fail-soft: missing signal does not gate
 
-    threshold = params.get("threshold", 7)
-    return dte > threshold
-
-
-@gate_formula("dte_warning_penalty")
-def dte_warning_penalty(named_values: dict, params: dict) -> bool:
-    """Flag trades in the DTE warning band (8-13 DTE).
-
-    Returns True (pass) when DTE is outside the warning band.
-    Returns False (fail) when DTE is in [dte_low, dte_high].
-
-    When failed with stop_if_fail=false, junction's score_penalty is applied.
-
-    Params (from junction):
-      dte_low: int (default 8)
-      dte_high: int (default 13)
-    """
-    dte = named_values.get("dte")
-    if dte is None:
-        return True
-
-    dte_low = params.get("dte_low", 8)
-    dte_high = params.get("dte_high", 13)
-    condition_met = dte_low <= dte <= dte_high
-    return not condition_met  # False when in warning band → gate fails
-
-
-# ── OTA-780: Credit/debit quality gates ────────────────────────────────
-
-
-@gate_formula("credit_pct_of_width_floor")
-def credit_pct_of_width_floor(named_values: dict, params: dict) -> bool:
-    """Block credit spreads where credit is below minimum % of spread width.
-
-    Returns True (pass) when credit_pct >= threshold or not a credit spread.
-    Returns False (fail) when credit_pct < threshold.
-
-    Params (from junction):
-      threshold: float (default 0.30)
-    """
-    net_debit = named_values.get("net_debit")
-    spread_width = named_values.get("spread_width")
-    if net_debit is None or spread_width is None or spread_width <= 0:
-        return True  # fail-soft
-    if net_debit >= 0:
-        return True  # not a credit spread
-
-    credit_pct = abs(net_debit) / spread_width
-    threshold = params.get("threshold", 0.30)
-    return credit_pct >= threshold
-
-
-@gate_formula("debit_pct_of_width_ceiling")
-def debit_pct_of_width_ceiling(named_values: dict, params: dict) -> bool:
-    """Block debit spreads where debit exceeds maximum % of spread width.
-
-    Returns True (pass) when debit_pct <= threshold or not a debit spread.
-    Returns False (fail) when debit_pct > threshold.
-
-    Params (from junction):
-      threshold: float (default 0.40)
-    """
-    net_debit = named_values.get("net_debit")
-    spread_width = named_values.get("spread_width")
-    if net_debit is None or spread_width is None or spread_width <= 0:
-        return True  # fail-soft
-    if net_debit <= 0:
-        return True  # not a debit spread
-
-    debit_pct = net_debit / spread_width
-    threshold = params.get("threshold", 0.40)
-    return debit_pct <= threshold
-
-
-@gate_formula("negative_ev_gate")
-def negative_ev_gate(named_values: dict, params: dict) -> bool:
-    """Block trades with negative expected value.
-
-    Returns True (pass) when EV is non-negative or absent.
-    Returns False (fail) when EV is below threshold.
-
-    Params (from junction):
-      threshold: float (default 0.0) — EV must be >= this value
-    """
-    ev_raw = named_values.get("ev_raw")
-    if ev_raw is None:
-        return True  # fail-soft: missing EV ≠ negative EV
-
-    threshold = params.get("threshold", 0.0)
-    return ev_raw >= threshold
+    cs = str(chart_state).lower()
+    td = str(trade_direction).lower()
+    if "bull" in td:
+        return "bull" in cs
+    if "bear" in td:
+        return "bear" in cs
+    return True  # unknown/neutral direction → do not gate

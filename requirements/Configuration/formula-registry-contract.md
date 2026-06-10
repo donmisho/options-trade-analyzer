@@ -1,6 +1,6 @@
 # Formula Registry Contract
 
-> **Generated:** 2026-05-26 — scanned from `engine_rules.formula_ref` (OTA-689)
+> **Generated:** 2026-06-10 — scanned from `engine_rules.formula_ref` (OTA-689; OTA-836 refresh)
 > **Source:** `scripts/seed_engine_config.py` → `build_formula_registry()`
 > **Persistence:** `engine_lookups` rows with `owner_app_id='SHARED'`, `lookup_set='formula_registry'`
 
@@ -24,34 +24,48 @@ The registry is the `SHARED/formula_registry` lookup set in `engine_lookups`.
 3. **Membership check.** The engine's startup validation rejects any
    `formula_ref` that is not in the `SHARED/formula_registry` lookup set.
 
-## Formula list (24 formulas)
+## Formula list (26 formulas)
+
+Ordered alphabetically by name (matching `build_formula_registry`'s `sorted()`
+emission into the SHARED `formula_registry` lookup set).
 
 | # | Formula name | Phase | Source |
 |---|---|---|---|
-| 1 | `bid_ask_tightness` | scoring | TBD formula (OTA-686) |
-| 2 | `chart_state_matches_direction` | gate | Code-only rule (OTA-688) |
-| 3 | `credit_width` | scoring | TBD formula (OTA-686) |
-| 4 | `cushion_penalty_moderate` | adjustment | Code-only rule (OTA-688) |
-| 5 | `delta_otm_score` | scoring | TBD formula (OTA-686) |
-| 6 | `delta_quality` | scoring | TBD formula (OTA-686) |
-| 7 | `earnings_route1_no_viable_window` | gate | Code-only rule (OTA-688) |
-| 8 | `earnings_route2_wait_post_window` | gate | Code-only rule (OTA-688) |
-| 9 | `earnings_route3_post_entry_better` | gate | Code-only rule (OTA-688) |
-| 10 | `earnings_route4_pre_momentum_play` | gate | Code-only rule (OTA-688) |
-| 11 | `expected_value` | scoring | Black-Scholes formula |
-| 12 | `extension_matches_trade_direction` | adjustment | Code-only rule (OTA-688) |
-| 13 | `iv_percentile_cost` | scoring | TBD formula (OTA-686) |
-| 14 | `iv_rank` | scoring | Black-Scholes formula |
-| 15 | `liquidity` | scoring | TBD formula (OTA-686) |
-| 16 | `open_interest` | scoring | TBD formula (OTA-686) |
-| 17 | `payout_ratio` | scoring | TBD formula (OTA-686) |
-| 18 | `probability_asymmetry_penalty` | adjustment | Code-only rule (OTA-688) |
-| 19 | `probability_of_profit` | scoring | Black-Scholes formula |
-| 20 | `reward_risk` | scoring | Black-Scholes formula |
-| 21 | `runway_score` | scoring | TBD formula (OTA-686) |
-| 22 | `sma_alignment_score` | scoring | TBD formula (OTA-686) |
-| 23 | `theta_gamma_ratio` | scoring | TBD formula (OTA-686) |
-| 24 | `theta_margin_ratio` | scoring | Black-Scholes formula |
+| 1 | `adj_dte_8_13_penalty` | adjustment | Code-only rule (OTA-688); live impl OTA-836 |
+| 2 | `adj_sma_alignment_against_trade` | adjustment | Workbook rule; live impl OTA-836 |
+| 3 | `bid_ask_tightness` | scoring | TBD formula (OTA-686) |
+| 4 | `chart_state_matches_direction` | gate | Code-only rule (OTA-688); live impl OTA-836 |
+| 5 | `credit_width` | scoring | TBD formula (OTA-686) |
+| 6 | `cushion_penalty_moderate` | adjustment | Code-only rule (OTA-688) |
+| 7 | `delta_otm_score` | scoring | TBD formula (OTA-686) |
+| 8 | `delta_quality` | scoring | TBD formula (OTA-686) |
+| 9 | `earnings_route1_no_viable_window` | gate | Code-only rule (OTA-688) |
+| 10 | `earnings_route2_wait_post_window` | gate | Code-only rule (OTA-688) |
+| 11 | `earnings_route3_post_entry_better` | gate | Code-only rule (OTA-688) |
+| 12 | `earnings_route4_pre_momentum_play` | gate | Code-only rule (OTA-688) |
+| 13 | `expected_value` | scoring | Black-Scholes formula |
+| 14 | `extension_matches_trade_direction` | adjustment | Code-only rule (OTA-688); live impl OTA-836 |
+| 15 | `iv_percentile_cost` | scoring | TBD formula (OTA-686) |
+| 16 | `iv_rank` | scoring | Black-Scholes formula |
+| 17 | `liquidity` | scoring | TBD formula (OTA-686) |
+| 18 | `open_interest` | scoring | TBD formula (OTA-686) |
+| 19 | `payout_ratio` | scoring | TBD formula (OTA-686) |
+| 20 | `probability_asymmetry_penalty` | adjustment | Code-only rule (OTA-688) |
+| 21 | `probability_of_profit` | scoring | Black-Scholes formula |
+| 22 | `reward_risk` | scoring | Black-Scholes formula |
+| 23 | `runway_score` | scoring | TBD formula (OTA-686) |
+| 24 | `sma_alignment_score` | scoring | TBD formula (OTA-686) |
+| 25 | `theta_gamma_ratio` | scoring | TBD formula (OTA-686) |
+| 26 | `theta_margin_ratio` | scoring | Black-Scholes formula |
+
+> **OTA-836 note:** five formulas that were live in the screening registry but
+> never in this contract — `dte_hard_filter`, `dte_warning_penalty`,
+> `credit_pct_of_width_floor`, `debit_pct_of_width_ceiling`, `negative_ev_gate`
+> — were deregistered (they fired `FORMULA_REGISTRY_DRIFT`; the engine's real EV
+> gate is the `total_expected_value` BETWEEN rule). Directional `dir_*` formulas
+> are intentionally NOT in this SHARED contract — the directional surface is
+> parked (enabled=0) and returns under the deferred surface-scoped-validation
+> story.
 
 ## Verification
 
