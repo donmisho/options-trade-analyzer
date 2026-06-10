@@ -1,15 +1,18 @@
 # Engine Formula Registry
 
-> **Status:** 26 formulas registered · 2026-06-10
-> **Scope:** Complete, deduplicated list of every `formula:<name>` reference in `engine_rules.formula_ref`. Each entry is the implementation contract for the rule library. The engine's startup validation (OTA-699, `insight_engine.md` §6.6) checks that every reference resolves to both a registered lookup row and a live implementation.
+> **Status:** 36 formulas registered (26 screening + 10 directional) · 2026-06-10
+> **Scope:** Complete, deduplicated list of every `formula:<name>` reference in `engine_rules.formula_ref`, plus formulas registered in a live surface registry. Each entry is the implementation contract for the rule library. The engine's startup validation (OTA-699, `insight_engine.md` §6.6) checks that every reference resolves to both a registered lookup row and a live implementation.
 >
 > **Dual-validation contract:** This doc and the SHARED `engine_lookups.formula_registry` set must agree row-for-row. The lookup payloads carry the same intent/signature/notes as this doc. Drift between them is a defect class OTA-699 will catch.
+>
+> **Combined registry (OTA-840):** there is one SHARED contract validated against the **union** of every surface's live registry (screening ∪ directional). The drift check is global; the per-surface formula-in-live check resolves each surface's formulas through the union. So both screening and directional formulas live in this single contract.
 >
 > **Change Log**
 > | Date | Change |
 > |---|---|
 > | 2026-05-28 | Initial registry: 24 formulas (5 gate, 16 scoring, 3 adjustment). OTA-689 re-open. |
 > | 2026-06-10 | OTA-836: 24 → 26. Added two adjustment formulas (`adj_dte_8_13_penalty`, `adj_sma_alignment_against_trade`) given live implementations to unblock SCREENING startup hydration. The five EV-gate formulas (`dte_hard_filter`, `dte_warning_penalty`, `credit_pct_of_width_floor`, `debit_pct_of_width_ceiling`, `negative_ev_gate`) were deregistered from the live screening registry — they were never in this contract and were referenced by no live `formula_ref`, so their removal changes no rows here (it clears a FORMULA_REGISTRY_DRIFT). Directional `dir_*` formulas remain out of this SHARED contract (directional surface parked; returns under the deferred surface-scoped-validation story). |
+> | 2026-06-10 | OTA-840: 26 → 36. Directional surface re-enabled with surface-scoped validation (mechanism a). Added the 10 `dir_*` directional formulas to the SHARED contract — 8 **bound** (`dir_probability`, `dir_buffer`, `dir_expected_value`, `dir_max_loss_pct`, `dir_reward_risk`, `dir_payoff_multiple` scoring; `dir_earnings`, `dir_negative_ev` gate) and 2 **reserved/unbound** (`dir_budget_fit`, `dir_defined_risk` — registered in the live directional registry, bound by no strategy; carried in the contract so the global drift check balances against the union registry). Validation now injects the combined screening ∪ directional registry. |
 
 ---
 
@@ -79,3 +82,34 @@ Seven formulas are currently proxies or carry normalization debt:
 | `sma_alignment_score` | PROXY | Classification-to-score via `compute_sma_signal()` |
 | `theta_gamma_ratio` | PROXY | True theta/gamma requires per-leg gamma propagation |
 | `bid_ask_tightness`, `delta_otm_score`, `liquidity`, `payout_ratio` | NORMALIZATION OWED | Multiply by 100 or define [0,100] mapping |
+
+---
+
+## Directional Formulas (10) — DIRECTIONAL surface
+
+Live implementations in `app/options_rules/directional/`. Validated against the combined registry (OTA-840). Eight are bound to the three directional strategies (`directional_income`/`growth`/`longshot`); two are reserved (registered, no junction binding).
+
+### Bound — scoring (6)
+
+| Name | Intent | Inputs | Output |
+|---|---|---|---|
+| `dir_probability` | Probability of profit scaled to [0,100]. | `prob_of_profit` | score 0–100 |
+| `dir_buffer` | Breakeven-vs-target buffer, capped and scaled. | `buffer_pct` | score 0–100 |
+| `dir_expected_value` | EV unified across spreads (`ev_raw`) and naked longs (`total_ev`), tanh-scaled to [0,100]. | `ev_raw`, `total_ev` | score 0–100 |
+| `dir_max_loss_pct` | Budget consumption: `max_loss / thesis_risk_budget`, lower is better. | `max_loss`, `thesis_risk_budget` | score 0–100 |
+| `dir_reward_risk` | Reward-to-risk ratio scaled to [0,100]; null (naked, unlimited) scores full. | `reward_risk_ratio` | score 0–100 |
+| `dir_payoff_multiple` | Target-based payoff multiple scaled to [0,100]. | `structure_type`, `cost`, `strike`, `thesis_target_price`, `option_type`, `reward_risk_ratio` | score 0–100 |
+
+### Bound — gate (2)
+
+| Name | Intent | Inputs | Output |
+|---|---|---|---|
+| `dir_earnings` | Fail when `next_earnings_date <= expiration + buffer_days`; unknown earnings fail-open. | `next_earnings_date`, `expiration` | bool |
+| `dir_negative_ev` | Fail when resolved EV (`ev_raw` else `total_ev`) < threshold; both null defers to data-completeness. | `ev_raw`, `total_ev` | bool |
+
+### Reserved / unbound (2)
+
+| Name | Intent | Inputs | Output | Notes |
+|---|---|---|---|---|
+| `dir_budget_fit` | Binary budget-fit score. | `fits_budget` | score 0–100 | Registered live; bound by no strategy. Carried in the SHARED contract so the global drift check balances against the union registry. Do not deregister. |
+| `dir_defined_risk` | Defined-risk-structure preference. | `structure_type` | score 0–100 | Registered live; bound by no strategy. Same contract rationale as `dir_budget_fit`. |

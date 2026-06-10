@@ -44,7 +44,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Callable
 
 from sqlalchemy import text
@@ -53,11 +53,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.insight_engine import (
     CandidateSnapshot,
     ConfigSource,
+    ConfigValidationError,
     EngineConfig,
     EvaluationDecision,
+    FormulaRegistry,
     PersistenceSink,
     load_config,
-    validate_and_raise,
+    validate_by_surface,
 )
 from app.insight_engine.config_source import RawRow
 
@@ -490,7 +492,95 @@ async def compute_persisted_loadable_version(
     return load_config(source, app_ids=app_ids).loadable_version
 
 
-# ── Startup hydration (OTA-818 + OTA-758) ─────────────────────────────────
+# ── Surface-scoped hydration policy (OTA-840) ─────────────────────────────
+
+
+# Decision (ii): which consumer_surfaces are load-critical. A validation fault in
+# a REQUIRED surface (or any whole-engine invariant) is fatal — hydration raises
+# and the app crash-loops LOUD (insight_engine.md §6.6). A fault in any other
+# (optional) surface degrades that surface alone: it is pruned from the runtime
+# while every healthy surface still serves. Declarative and keyed on
+# consumer_surface — NOT per-strategy (no `if strategy_key ==` branching). There
+# is no engine_apps column that carries this cheaply (apps are OTA/SHARED/FFL/…,
+# not surfaces), so a named constant is the data-light home the prompt sanctions.
+REQUIRED_SURFACES: frozenset[str] = frozenset({"SCREENING"})
+
+
+class _CompositeFormulaRegistry:
+    """Union of multiple FormulaRegistry instances (screening ∪ directional).
+
+    Structurally satisfies the engine's FormulaRegistry Protocol. OTA-840 Path 1:
+    surface-scoped validation balances the single SHARED contract against the
+    union of every surface's live registry — so the global drift check sees all
+    registered formulas, and each surface's formula-in-live check resolves through
+    the same union. Surface formula namespaces are disjoint today (screening vs.
+    `dir_*`), so the first-owner-wins invoke order is immaterial.
+    """
+
+    def __init__(self, registries: list[FormulaRegistry]) -> None:
+        self._registries = list(registries)
+
+    def has(self, name: str) -> bool:
+        return any(r.has(name) for r in self._registries)
+
+    def registered_names(self) -> frozenset[str]:
+        names: set[str] = set()
+        for r in self._registries:
+            names |= set(r.registered_names())
+        return frozenset(names)
+
+    def invoke(
+        self, name: str, named_values: dict[str, Any], params: dict[str, Any]
+    ) -> Any:
+        for r in self._registries:
+            if r.has(name):
+                return r.invoke(name, named_values, params)
+        raise KeyError(f"No formula registered for '{name}' in any surface registry")
+
+
+def build_combined_registry() -> FormulaRegistry:
+    """The union of every surface's live formula registry (OTA-840).
+
+    The single source of "the combined registry" — used by ``init_engine_runtime``
+    (startup hydration), the OTA-783 save-time validator (parity), and the
+    mixed-surface boot test. Imported lazily so the engine package stays
+    import-clean and this module has no hard dependency on the rule libraries at
+    import time.
+    """
+    from app.options_rules.directional import get_registry as _directional_registry
+    from app.options_rules.screening import get_registry as _screening_registry
+
+    return _CompositeFormulaRegistry(
+        [_screening_registry(), _directional_registry()]
+    )
+
+
+def _prune_config_to_surfaces(
+    config: EngineConfig, surfaces: set[str]
+) -> EngineConfig:
+    """Return a copy of *config* keeping only strategies in *surfaces*.
+
+    Used when an OPTIONAL surface fails validation: its rule_sets are dropped so
+    the runtime never serves an unvalidated surface, and the existing route
+    fail-closed guard (``_unknown_keys`` → 422) handles requests for the dropped
+    strategies with no route change. ``config_version`` / ``loadable_version``
+    (provenance hashes over the DB rows) are intentionally left unchanged;
+    ``rules`` / ``lookups`` / ``apps`` are shared and kept intact.
+    """
+    kept_rule_sets = {
+        k: rs
+        for k, rs in config.rule_sets.items()
+        if rs.strategy.consumer_surface in surfaces
+    }
+    kept_strategies = {
+        k: s
+        for k, s in config.strategies.items()
+        if s.consumer_surface in surfaces
+    }
+    return replace(config, rule_sets=kept_rule_sets, strategies=kept_strategies)
+
+
+# ── Startup hydration (OTA-818 + OTA-758 + OTA-840) ───────────────────────
 
 
 async def init_engine_runtime(
@@ -499,53 +589,89 @@ async def init_engine_runtime(
     formula_registry: Any = None,
     app_ids: tuple[str, ...] = ("SHARED", "OTA"),
 ) -> EngineRuntime:
-    """Hydrate, validate, and stash the engine runtime once at startup.
+    """Hydrate, validate (surface-scoped), and stash the engine runtime at startup.
 
     1. Build :class:`AzureSqlConfigSource` (pre-loads the five tables).
     2. ``load_config`` resolves per-strategy RuleSets + the config-version hash.
-    3. The OTA-699 validator runs (fail-closed). A validation failure raises
-       :class:`ConfigValidationError` — loud and **fatal** to hydration, never
-       swallowed (acceptance criterion). Per the prompt, a validator failure on
-       the live seed is OTA-815 territory — do not patch config to pass.
-    4. Construct :class:`BronzeSqlSink` and stash both behind the accessor.
+    3. **Surface-scoped** validation (OTA-840 mechanism a):
+       ``validate_by_surface`` partitions the §6.6 checks by ``consumer_surface``
+       and runs the whole-engine invariants (junction FKs + registry drift) once.
+       - a global-invariant fault → **fatal** (``ConfigValidationError``, crash-loop);
+       - a fault in a :data:`REQUIRED_SURFACES` surface → **fatal**;
+       - a fault in any optional surface → that surface is **pruned** and the
+         runtime serves the rest (degrade, not die).
+       Validation runs against the **combined** registry (screening ∪ directional)
+       so the single SHARED contract balances and every surface's formulas resolve.
+    4. Stamp the runtime with only the surfaces that validated, behind the accessor.
 
-    The input catalog is intentionally **not** passed (see OTA-818 decision):
-    the live ``CatalogEntry`` shape differs from the engine ``NamedValue``
-    shape, so the named-value-completeness and null-semantic validator
-    sub-checks are skipped here, exactly as the proven test wiring does. The
-    weight-sum, monotonic-band, formula-coverage, parameter-conformance, and
-    junction-FK checks all still run.
+    The input catalog is intentionally **not** passed (OTA-818/OTA-820 decision):
+    the live ``CatalogEntry`` shape differs from the engine ``NamedValue`` shape,
+    so the named-value-completeness and null-semantic checks stay off the boot
+    critical path. The weight-sum, monotonic-band, formula-coverage,
+    parameter-conformance, and junction-FK checks all still run.
     """
     if formula_registry is None:
-        # Live screening formula registry (OTA-726). Imported lazily so the
-        # engine package stays import-clean and this module has no hard
-        # dependency on the registry module at import time.
-        from app.options_rules.screening import get_registry
-
-        formula_registry = get_registry()
+        formula_registry = build_combined_registry()
 
     source = await AzureSqlConfigSource.load(session_factory)
     config = load_config(source, app_ids=app_ids)
 
-    # Fail-closed startup validation (OTA-699). Raises on any failure.
-    validate_and_raise(config, formula_registry=formula_registry, source=source)
+    # Surface-scoped fail-closed validation (OTA-840).
+    result = validate_by_surface(
+        config, formula_registry=formula_registry, source=source
+    )
+
+    # Whole-engine invariants (FK + registry drift) are fatal — LOUD crash-loop
+    # (insight_engine.md §6.6). A drift/FK defect would also fail SCREENING, so it
+    # belongs in the fatal bucket regardless.
+    if not result.global_valid:
+        logger.error(
+            "Engine hydration FATAL — whole-engine invariant failed:\n%s",
+            result.global_report.summary(),
+        )
+        raise ConfigValidationError(result.global_report)
+
+    # Per-surface: required-surface fault is fatal; optional-surface fault degrades.
+    healthy: set[str] = set()
+    for surface, report in result.per_surface.items():
+        if report.is_valid:
+            healthy.add(surface)
+        elif surface in REQUIRED_SURFACES:
+            logger.error(
+                "Engine hydration FATAL — required surface %r failed validation:\n%s",
+                surface,
+                report.summary(),
+            )
+            raise ConfigValidationError(report)
+        else:
+            logger.error(
+                "Engine surface %r DEGRADED — failed validation; pruning it from the "
+                "runtime (other surfaces still serve). Errors:\n%s",
+                surface,
+                report.summary(),
+            )
+
+    # Stamp the runtime with only the surfaces that validated.
+    healthy_config = _prune_config_to_surfaces(config, healthy)
 
     loop = asyncio.get_running_loop()
     sink = BronzeSqlSink(session_factory=session_factory, loop=loop)
 
     runtime = EngineRuntime(
-        config=config,
+        config=healthy_config,
         sink=sink,
         source=source,
-        config_version=config.config_version,
-        loadable_version=config.loadable_version,
+        config_version=healthy_config.config_version,
+        loadable_version=healthy_config.loadable_version,
     )
     set_engine_runtime(runtime)
 
     logger.info(
-        "Engine runtime hydrated: config_version=%s strategies=%d (%s)",
-        config.config_version,
-        len(config.rule_sets),
-        ", ".join(sorted(config.rule_sets)) or "(none)",
+        "Engine runtime hydrated: config_version=%s healthy_surfaces=%s "
+        "strategies=%d (%s)",
+        healthy_config.config_version,
+        sorted(healthy) or "(none)",
+        len(healthy_config.rule_sets),
+        ", ".join(sorted(healthy_config.rule_sets)) or "(none)",
     )
     return runtime

@@ -186,9 +186,11 @@ from app.insight_engine.sink import (  # noqa: E402
 # ── Startup validation (OTA-699) ─────────────────────────────────────────
 from app.insight_engine.validation import (  # noqa: E402
     ConfigValidationError,
+    SurfaceValidationResult,
     ValidationError,
     ValidationReport,
     validate_and_raise,
+    validate_by_surface,
     validate_config,
 )
 
@@ -250,11 +252,13 @@ __all__ = [
     "invoke_formula",
     "is_formula_ref",
     "validate_expression",
-    # Startup validation (OTA-699)
+    # Startup validation (OTA-699, OTA-840)
     "ConfigValidationError",
     "ValidationError",
     "ValidationReport",
+    "SurfaceValidationResult",
     "validate_and_raise",
+    "validate_by_surface",
     "validate_config",
     # Enums
     "Tier",

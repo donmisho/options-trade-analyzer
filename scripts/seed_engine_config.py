@@ -2809,6 +2809,80 @@ def _dir_gate_junction_specs():
     return specs
 
 
+# ── OTA-840: DIRECTIONAL dir_* entries for the SHARED formula_registry contract ─
+#
+# Path 1 (Don's decision i): one SHARED contract + a combined live registry
+# (screening ∪ directional). The screening transform's build_formula_registry()
+# runs BEFORE the directional block is appended (and must — see the OTA-833 note
+# above), so it never scans these dir_* refs. We therefore emit their contract
+# rows explicitly here so the SHARED contract (26 screening) grows to 36:
+#   - 8 BOUND formulas referenced by directional rules, and
+#   - 2 RESERVED formulas (dir_budget_fit / dir_defined_risk) that are registered
+#     in the live directional registry but bound by no strategy. They MUST appear
+#     in the contract or the GLOBAL registry-drift check (validated against the
+#     union registry) flags them as live-not-in-contract. Per Don: do NOT
+#     deregister the reserved pair — carry them as reserved/unbound contract rows.
+#
+# (lookup_key, output_type, inputs, intent, reserved?)
+_DIR_FORMULA_CONTRACT = [
+    ("dir_probability", "score 0-100", ["prob_of_profit"],
+     "Probability of profit scaled to [0,100] (OTA-755).", False),
+    ("dir_buffer", "score 0-100", ["buffer_pct"],
+     "Breakeven-vs-target buffer, capped and scaled (OTA-755).", False),
+    ("dir_expected_value", "score 0-100", ["ev_raw", "total_ev"],
+     "Expected value unified across spreads (ev_raw) and naked longs (total_ev), "
+     "tanh-scaled to [0,100] (OTA-834).", False),
+    ("dir_max_loss_pct", "score 0-100", ["max_loss", "thesis_risk_budget"],
+     "Budget consumption: max_loss / thesis_risk_budget, lower is better (OTA-834).", False),
+    ("dir_reward_risk", "score 0-100", ["reward_risk_ratio"],
+     "Reward-to-risk ratio scaled to [0,100]; null (naked, unlimited) scores full "
+     "(OTA-834).", False),
+    ("dir_payoff_multiple", "score 0-100",
+     ["structure_type", "cost", "strike", "thesis_target_price", "option_type",
+      "reward_risk_ratio"],
+     "Target-based payoff multiple scaled to [0,100] (OTA-834).", False),
+    ("dir_earnings", "bool", ["next_earnings_date", "expiration"],
+     "Earnings gate (OTA-837): fail when next_earnings_date <= expiration + "
+     "buffer_days; unknown earnings fail-open.", False),
+    ("dir_negative_ev", "bool", ["ev_raw", "total_ev"],
+     "Negative-EV gate (OTA-837): fail when resolved EV (ev_raw else total_ev) < "
+     "threshold; both null defers to data-completeness.", False),
+    # ── RESERVED / unbound (registered in the live directional registry only) ──
+    ("dir_budget_fit", "score 0-100", ["fits_budget"],
+     "RESERVED/unbound: binary budget-fit score. Registered in the live "
+     "directional registry but bound by no strategy.", True),
+    ("dir_defined_risk", "score 0-100", ["structure_type"],
+     "RESERVED/unbound: defined-risk-structure preference. Registered in the live "
+     "directional registry but bound by no strategy.", True),
+]
+
+
+def _build_directional_contract_lookups():
+    """SHARED formula_registry rows for the 10 dir_* formulas (OTA-840)."""
+    rows = []
+    for i, (name, output_type, inputs, intent, reserved) in enumerate(
+        _DIR_FORMULA_CONTRACT, start=1
+    ):
+        payload = {
+            "status": "reserved" if reserved else "pending",
+            "intent": intent,
+            "inputs": inputs,
+            "output_type": output_type,
+            "surface": "DIRECTIONAL",
+        }
+        if reserved:
+            payload["notes"] = "Reserved/unbound — live impl only, no junction binding."
+        rows.append({
+            "owner_app_id": "SHARED",
+            "lookup_set": "formula_registry",
+            "lookup_key": name,
+            "payload": payload,
+            # Sort after the 26 screening rows (which use 1..26).
+            "sort_order": 100 + i,
+        })
+    return rows
+
+
 def build_directional_config():
     """Build hand-authored engine_* rows for the three DIRECTIONAL objectives.
 
@@ -2824,23 +2898,50 @@ def build_directional_config():
     junctions: list[dict] = []
     lookups: list[dict] = []
 
-    # ── OTA-836 Phase A: directional surface PARKED disabled ─────────────
-    # The 3 directional strategies are seeded with enabled=0 and their rules /
-    # junctions are NOT emitted this pass. Rationale: the engine validates ONE
-    # config across all surfaces against the SCREENING formula registry; the
-    # directional dir_* formulas live only in the directional registry, so a
-    # loaded directional surface fails validate_and_raise — which, caught by the
-    # OTA-830 safety net, leaves the runtime null and dead. Disabling the
-    # strategies keeps their rows present (FK-valid, audit-preserved) but unloaded
-    # (load_config skips disabled strategies, so their junctions never bind and
-    # dir_* never reaches validation). Emitting enabled=0 also flips any prior
-    # enabled=1 directional strategy rows from an earlier reseed.
-    #
-    # Directional returns in Phase B (surface-scoped validation + safety-net
-    # removal), which re-emits the rules/junctions. Verdict-label lookup sets are
-    # still seeded so the verdict domain is ready when the surface re-enables.
+    # ── OTA-840 Phase B: directional surface RE-ENABLED ──────────────────
+    # Reverses the OTA-836 Phase-A park. The 3 directional strategies are emitted
+    # enabled=1 with their full gate + scoring rule and junction set. This is safe
+    # now because hydration is surface-scoped (OTA-840 mechanism a): the engine
+    # validates each consumer_surface independently against the COMBINED registry
+    # (screening ∪ directional), so the directional dir_* formulas resolve, and a
+    # directional-only fault degrades directional alone — it no longer nulls the
+    # screening runtime. The dir_* refs also enter the SHARED contract via
+    # _build_directional_contract_lookups() so the global drift check balances 36.
 
-    # ── engine_strategies (3, DISABLED) + verdict-band lookup sets ──
+    # ── engine_rules — gates (9) + scoring (6), defined once, bound per strategy ──
+    for g in _DIR_GATE_RULES:
+        rules.append({
+            "owner_app_id": "OTA",
+            "rule_key": g["rule_key"],
+            "phase": "gate",
+            "tier": g["tier"],
+            "intent": g["intent"],
+            "condition_expression": g["condition_expression"],
+            "formula_ref": g["formula_ref"],
+            "referenced_named_values": g["referenced_named_values"],
+            "parameter_schema": g["parameter_schema"],
+            "null_semantics": g["null_semantics"],
+            "enabled": True,
+        })
+    for s in _DIR_SCORING_RULES:
+        rules.append({
+            "owner_app_id": "OTA",
+            "rule_key": s["rule_key"],
+            "phase": "scoring",
+            "tier": None,
+            "intent": s["intent"],
+            "condition_expression": None,
+            "formula_ref": s["formula_ref"],
+            "referenced_named_values": s["referenced_named_values"],
+            "parameter_schema": s["parameter_schema"],
+            "null_semantics": None,
+            "enabled": True,
+        })
+
+    # ── engine_strategies (3, ENABLED) + verdict-label lookup sets ──
+    gate_specs = _dir_gate_junction_specs()
+    scoring_params = {s["rule_key"]: s["params"] for s in _DIR_SCORING_RULES}
+
     for strat_key, display_name, set_name, description in _DIR_STRATEGY_META:
         bands = _DIR_VERDICT_BANDS[strat_key]
         strategies.append({
@@ -2853,10 +2954,12 @@ def build_directional_config():
             "verdict_band_set": bands,
             "dte_min": None,
             "dte_max": None,
-            "enabled": False,  # OTA-836 Phase A — parked; re-enabled in Phase B
+            "enabled": True,  # OTA-840 Phase B — re-enabled
         })
 
-        # Per-strategy verdict-label lookup set (verdict domain only; OTA-835).
+        # Per-strategy verdict-label lookup set (verdict domain only; the engine
+        # reads bands from verdict_band_set above, so the payload is empty per the
+        # OTA-835 strip of vestigial {min_score,max_score}).
         for i, band in enumerate(bands, 1):
             lookups.append({
                 "owner_app_id": "OTA",
@@ -2866,9 +2969,37 @@ def build_directional_config():
                 "sort_order": i,
             })
 
-    # NOTE: _DIR_GATE_RULES, _DIR_SCORING_RULES, _dir_gate_junction_specs(), and
-    # _DIR_SCORING_WEIGHTS are intentionally NOT emitted in Phase A. They remain
-    # defined above and are re-wired in Phase B.
+        # Gate junctions (9)
+        for spec in gate_specs[strat_key]:
+            junctions.append({
+                "strategy_key": strat_key,
+                "rule_key": spec["rule_key"],
+                "evaluation_order": spec["evaluation_order"],
+                "stop_if_fail": spec["stop_if_fail"],
+                "score_penalty": spec["score_penalty"],
+                "weight": None,
+                "parameters": spec["parameters"],
+                "terminal_verdict": None,
+                "enabled": True,
+            })
+
+        # Scoring junctions (6)
+        weights = _DIR_SCORING_WEIGHTS[strat_key]
+        for rule_key, weight in weights.items():
+            junctions.append({
+                "strategy_key": strat_key,
+                "rule_key": rule_key,
+                "evaluation_order": _DIR_SCORING_ORDER[rule_key],
+                "stop_if_fail": False,
+                "score_penalty": None,
+                "weight": weight,
+                "parameters": dict(scoring_params[rule_key]),
+                "terminal_verdict": None,
+                "enabled": True,
+            })
+
+    # ── SHARED formula_registry contract rows for the 10 dir_* (OTA-840) ──
+    lookups.extend(_build_directional_contract_lookups())
 
     return rules, strategies, junctions, lookups
 
@@ -2932,11 +3063,12 @@ def build_all_rows(xlsx_path: Path):
     lookups.extend(formula_lookups)
     log.info(f"Formula registry: {len(formula_lookups)} formulas registered")
 
-    # OTA-833 / OTA-836: Append the DIRECTIONAL block AFTER the SCREENING chain.
-    # Phase A (OTA-836) emits the 3 directional strategies DISABLED with no
-    # rules/junctions, so dir_* formulas never enter the SHARED contract or the
-    # validated/loaded config.
-    log.info("Appending DIRECTIONAL surface block (OTA-833 / OTA-836 Phase A)...")
+    # OTA-833 / OTA-840: Append the DIRECTIONAL block AFTER the SCREENING chain
+    # (so set_gate_mechanics / canonicalize_expressions / build_formula_registry
+    # never touch these rows). Phase B (OTA-840) emits the 3 directional strategies
+    # ENABLED with their full rule/junction set, plus explicit SHARED contract rows
+    # for the dir_* formulas (the screening build_formula_registry already ran).
+    log.info("Appending DIRECTIONAL surface block (OTA-833 / OTA-840 Phase B)...")
     dir_rules, dir_strategies, dir_junctions, dir_lookups = build_directional_config()
     rules.extend(dir_rules)
     strategies.extend(dir_strategies)

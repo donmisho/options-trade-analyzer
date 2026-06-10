@@ -114,39 +114,18 @@ def validate_config(
     """
     report = ValidationReport()
     registry = formula_registry or StubFormulaRegistry()
-
-    # Collect contract formula names from SHARED lookups
     contract_names = _get_contract_formula_names(config)
 
-    # Collect all formula refs actually used by loaded rules
-    live_formula_refs: set[str] = set()
+    # ── Per-strategy / per-binding checks across the whole config ─────
+    for rule_set in config.rule_sets.values():
+        _run_per_ruleset_checks(
+            report, rule_set, config, contract_names, registry, input_catalog
+        )
 
-    # ── Per-strategy checks ──────────────────────────────────────────
-    for _strategy_key, rule_set in config.rule_sets.items():
-        _check_scoring_weights(report, rule_set)
-        _check_verdict_bands_monotonic(report, rule_set)
-        _check_eval_order_uniqueness(report, rule_set, config)
-        _check_terminal_verdict_domain(report, rule_set, config)
-
-        for binding in rule_set.bindings:
-            _check_junction_params_supplied(report, binding)
-            _check_junction_param_types(report, binding)
-            _check_gate_junction_fields(report, binding)
-            if input_catalog is not None:
-                _check_named_values_in_catalog(report, binding, input_catalog)
-                _check_null_semantics(report, binding, input_catalog)
-            _check_formula_in_contract(report, binding, contract_names)
-            _check_formula_in_live_registry(report, binding, registry)
-
-            # Track formula refs for drift check
-            fname = _extract_formula_name(binding.rule)
-            if fname is not None:
-                live_formula_refs.add(fname)
-
-    # ── Cross-cutting: formula registry drift (OD-1) ─────────────────
-    _check_formula_registry_drift(report, contract_names, registry, live_formula_refs)
-
-    # ── FK validation (needs raw data) ───────────────────────────────
+    # ── Cross-cutting global checks (whole-engine invariants) ─────────
+    _check_formula_registry_drift(
+        report, contract_names, registry, _collect_referenced_formulas(config)
+    )
     if source is not None:
         _check_junction_fks(report, config, source)
 
@@ -175,7 +154,130 @@ def validate_and_raise(
         raise ConfigValidationError(report)
 
 
+# ── Surface-scoped validation (OTA-840) ─────────────────────────────────
+
+
+@dataclass
+class SurfaceValidationResult:
+    """Per-surface + global validation outcome (OTA-840 mechanism a).
+
+    The per-surface reports hold only the checks that are scoped to a single
+    ``consumer_surface`` (weights, bands, eval-order, params, formula-in-contract,
+    formula-in-live). The global report holds the whole-engine invariants
+    (junction FKs + registry drift) that cannot be attributed to one surface.
+
+    The hydration layer (``engine_runtime.init_engine_runtime``) reads this to
+    decide: a global fault or a *required* surface fault is fatal (crash-loop);
+    an *optional* surface fault degrades that surface alone while the rest serve.
+    """
+
+    per_surface: dict[str, ValidationReport] = field(default_factory=dict)
+    global_report: ValidationReport = field(default_factory=ValidationReport)
+
+    @property
+    def global_valid(self) -> bool:
+        return self.global_report.is_valid
+
+    def valid_surfaces(self) -> set[str]:
+        return {s for s, r in self.per_surface.items() if r.is_valid}
+
+    def invalid_surfaces(self) -> set[str]:
+        return {s for s, r in self.per_surface.items() if not r.is_valid}
+
+
+def validate_by_surface(
+    config: EngineConfig,
+    *,
+    input_catalog: dict[str, NamedValue] | None = None,
+    formula_registry: FormulaRegistry | None = None,
+    source: ConfigSource | None = None,
+) -> SurfaceValidationResult:
+    """Run the §6.6 suite partitioned by ``consumer_surface`` (OTA-840).
+
+    Same checks as :func:`validate_config`, but the per-strategy/per-binding
+    checks are collected into one report **per surface** (so a fault attributes
+    to exactly the surface that owns the strategy), while the cross-cutting
+    invariants — formula-registry drift and junction FK integrity — run once
+    against the whole config and land in :attr:`SurfaceValidationResult.global_report`.
+
+    The ``formula_registry`` must be the **union** across surfaces (e.g. screening
+    ∪ directional) so the global drift check balances against the single SHARED
+    contract and the per-surface formula-in-live check resolves every surface's
+    formulas. See ``engine_runtime`` for how the combined registry is built.
+    """
+    registry = formula_registry or StubFormulaRegistry()
+    contract_names = _get_contract_formula_names(config)
+
+    # Group rule_sets by their strategy's consumer_surface.
+    by_surface: dict[str, list[RuleSet]] = {}
+    for rule_set in config.rule_sets.values():
+        surface = rule_set.strategy.consumer_surface
+        by_surface.setdefault(surface, []).append(rule_set)
+
+    per_surface: dict[str, ValidationReport] = {}
+    for surface, rule_sets in by_surface.items():
+        report = ValidationReport()
+        for rule_set in rule_sets:
+            _run_per_ruleset_checks(
+                report, rule_set, config, contract_names, registry, input_catalog
+            )
+        per_surface[surface] = report
+
+    # Whole-engine invariants — not attributable to a single surface.
+    global_report = ValidationReport()
+    _check_formula_registry_drift(
+        global_report, contract_names, registry, _collect_referenced_formulas(config)
+    )
+    if source is not None:
+        _check_junction_fks(global_report, config, source)
+
+    return SurfaceValidationResult(
+        per_surface=per_surface, global_report=global_report
+    )
+
+
 # ── Helpers ─────────────────────────────────────────────────────────────
+
+
+def _run_per_ruleset_checks(
+    report: ValidationReport,
+    rule_set: RuleSet,
+    config: EngineConfig,
+    contract_names: frozenset[str],
+    registry: FormulaRegistry,
+    input_catalog: dict[str, NamedValue] | None,
+) -> None:
+    """Run every per-surface-scopable check for a single rule_set.
+
+    These are the checks that belong to exactly one consumer_surface (the one
+    that owns the strategy). The cross-cutting drift + FK checks are deliberately
+    NOT here — they run once over the whole config (see callers).
+    """
+    _check_scoring_weights(report, rule_set)
+    _check_verdict_bands_monotonic(report, rule_set)
+    _check_eval_order_uniqueness(report, rule_set, config)
+    _check_terminal_verdict_domain(report, rule_set, config)
+
+    for binding in rule_set.bindings:
+        _check_junction_params_supplied(report, binding)
+        _check_junction_param_types(report, binding)
+        _check_gate_junction_fields(report, binding)
+        if input_catalog is not None:
+            _check_named_values_in_catalog(report, binding, input_catalog)
+            _check_null_semantics(report, binding, input_catalog)
+        _check_formula_in_contract(report, binding, contract_names)
+        _check_formula_in_live_registry(report, binding, registry)
+
+
+def _collect_referenced_formulas(config: EngineConfig) -> set[str]:
+    """All formula names referenced by loaded rules (for the drift check)."""
+    refs: set[str] = set()
+    for rule_set in config.rule_sets.values():
+        for binding in rule_set.bindings:
+            fname = _extract_formula_name(binding.rule)
+            if fname is not None:
+                refs.add(fname)
+    return refs
 
 
 def _extract_formula_name(rule: Rule) -> str | None:

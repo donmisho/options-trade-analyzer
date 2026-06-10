@@ -22,13 +22,18 @@ non-loadable state is ever persisted (ticket AC).
 
 Parity with startup wiring
 --------------------------
-Matches ``init_engine_runtime`` exactly: ``formula_registry`` is the live
-screening registry (``app.options_rules.screening.get_registry``); ``input_catalog``
-is intentionally NOT passed (named-value-completeness and null-semantics checks
-are skipped at startup, so they are correctly absent here too); ``source`` is
-passed so the junction-FK check runs.
+Matches ``init_engine_runtime``: ``formula_registry`` is the **combined** live
+registry (screening ∪ directional — OTA-840 ``build_combined_registry``), so the
+formula-in-live and registry-drift checks resolve every surface's formulas;
+``input_catalog`` is intentionally NOT passed (named-value-completeness and
+null-semantics checks are skipped at startup, so they are correctly absent here
+too); ``source`` is passed so the junction-FK check runs.
 
-OTA-783
+Note: save-time validation stays whole-config all-or-nothing (``validate_config``),
+deliberately stricter than startup's surface-scoped degrade — a write that would
+break any surface is rejected rather than silently degrading that surface.
+
+OTA-783, OTA-840
 """
 
 from __future__ import annotations
@@ -69,15 +74,17 @@ class ConfigSaveValidationError(Exception):
 
 
 def _get_registry():
-    """Return the live formula registry used at startup.
+    """Return the combined live formula registry used at startup (OTA-840).
 
     Indirected through a function (and imported lazily) so tests can monkeypatch
     it — e.g. to a ``StubFormulaRegistry`` — without standing up the real
-    screening registry.
+    registries. Uses the same ``build_combined_registry`` (screening ∪ directional)
+    that ``init_engine_runtime`` injects, so save-time validation does not falsely
+    reject directional formulas as missing-from-live.
     """
-    from app.options_rules.screening import get_registry
+    from app.ota_adapters.engine_runtime import build_combined_registry
 
-    return get_registry()
+    return build_combined_registry()
 
 
 async def _fetch(session: AsyncSession, table) -> list[dict[str, Any]]:
