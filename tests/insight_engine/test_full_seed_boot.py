@@ -45,7 +45,7 @@ EXPECTED_CONTRACT_COUNT = 36
 
 def _build_rows():
     """Build the full seed row set with synthetic ids (DB IDENTITY stand-ins)."""
-    rules, strategies, junctions, lookups = build_all_rows(DEFAULT_XLSX)
+    rules, strategies, junctions, lookups, _ = build_all_rows(DEFAULT_XLSX)
 
     rule_id = {r["rule_key"]: 1000 + i for i, r in enumerate(rules)}
     strat_id = {s["strategy_key"]: 100 + i for i, s in enumerate(strategies)}

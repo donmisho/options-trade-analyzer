@@ -237,8 +237,11 @@ class TestScopingExclusions:
 
 
 # (gate_key, expr, lhs_named_value, expected_catalog_semantics)
-# chart_state_valid_alignment included for parity coverage only — its value
-# semantics are not modified here (the IN value-mismatch is tracked separately).
+# The final row exercises an IN gate over the SKIP-nullable chart_state LHS for
+# null-semantics parity only — this is a synthetic in-memory gate, not the
+# seeded config. OTA-839 retired the real chart_state_valid_alignment rule (its
+# IN-list literals were outside the adapter domain), so the label here is a
+# generic synthetic name; the engine-level null-LHS-never-halts coverage stands.
 _SEVEN_GATES = [
     ("credit_pct_of_width_floor",   ">=", "credit_width_pct",       "SKIP"),
     ("debit_pct_of_width_ceiling",  "<=", "debit_width_pct",        "SKIP"),
@@ -246,7 +249,7 @@ _SEVEN_GATES = [
     ("per_leg_open_interest_floor", ">=", "min_leg_open_interest",  "FAIL_OPEN"),
     ("per_leg_volume_floor",        ">=", "min_leg_volume",         "FAIL_OPEN"),
     ("total_expected_value",        ">=", "total_ev",               "SKIP"),
-    ("chart_state_valid_alignment", "IN", "chart_state",            "SKIP"),
+    ("chart_state_in_gate",         "IN", "chart_state",            "SKIP"),
 ]
 
 

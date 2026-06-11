@@ -673,7 +673,18 @@ def _make_atomic(base_rule, *, rule_key, intent, condition_expr=None,
 
 
 def _decompose_chart_state(rules):
-    """1. Chart state confirms direction → 2 atomic rules."""
+    """1. Chart state confirms direction → 1 atomic rule.
+
+    OTA-839: the former second atom `chart_state_valid_alignment` (an IN-list
+    over chart_state with literals 'Bullish Alignment'/'Bearish Alignment' that
+    are NOT members of the adapter-published domain {Bullish,Bearish,Mixed,
+    Neutral}) was a value-domain mismatch — it could never match, so it silently
+    terminal-halted every TR/LT candidate. It is retired: the live formula gate
+    `chart_state_matches_trade_direction` (formula:chart_state_matches_direction,
+    made live by OTA-836) already fully subsumes its intent — it rejects
+    Mixed/Neutral and opposite-direction alignments for any directional trade —
+    so the IN-list atom contributed nothing it did not already enforce.
+    """
     compound = _find_compound(rules, "chart_state", "direction", phase="gate")
     if not compound:
         compound = _find_compound(rules, "chart_state", "confirms", phase="gate")
@@ -681,13 +692,6 @@ def _decompose_chart_state(rules):
         return None
 
     atoms = [
-        (_make_atomic(
-            compound,
-            rule_key="chart_state_valid_alignment",
-            intent="Chart state must be Bullish Alignment or Bearish Alignment",
-            condition_expr="chart_state IN ('Bullish Alignment', 'Bearish Alignment')",
-            ref_values=["chart_state"],
-        ), None),
         (_make_atomic(
             compound,
             rule_key="chart_state_matches_trade_direction",
@@ -897,7 +901,8 @@ def decompose_compound_rules(rules, junctions):
     """
     OTA-683: Decompose compound rules into atomic engine_rules rows.
 
-    Six compounds are decomposed into 14 total atomic rules (2+2+2+4+2+2).
+    Six compounds are decomposed into 13 total atomic rules (1+2+2+4+2+2;
+    chart_state contributes 1 after OTA-839 retired chart_state_valid_alignment).
     BETWEEN-style conditions become two comparison rows; the runtime BETWEEN
     operator is deferred to the engine-core expression library.
     Earnings routes mirror earnings_gate.py; stop_if_fail is intrinsic per route.
@@ -1619,7 +1624,8 @@ _GATE_ORDER_PRIORITY = [
     "cushion_vs_atr",
     "spread_width_tier_compliance",
     # Tier 10: Chart state (DERIVED)
-    "chart_state_valid_alignment",
+    # OTA-839: chart_state_valid_alignment retired (value-domain mismatch);
+    # chart_state_matches_trade_direction (formula gate) is the sole chart-state gate.
     "chart_state_matches_trade_direction",
     # Tier 11: Trade type gates (structure validation)
     "theta_load_fraction",
@@ -2056,11 +2062,10 @@ _CANONICAL_EXPRESSIONS = {
     "data_completeness_delta":     {"expr": "IS NOT NULL"},
     "data_completeness_iv_rank":   {"expr": "IS NOT NULL"},
     # Set / enum membership over chart_state.
-    "chart_state_valid_alignment": {
-        "expr": "IN",
-        "ref": ["chart_state"],
-        "param": {"allowed_values": ["Bullish Alignment", "Bearish Alignment"]},
-    },
+    # OTA-839: chart_state_valid_alignment retired — its IN-list literals
+    # ('Bullish Alignment'/'Bearish Alignment') were outside the adapter domain
+    # {Bullish,Bearish,Mixed,Neutral} and could never match. The live formula
+    # gate chart_state_matches_trade_direction now solely enforces the intent.
     "adj_mixed_chart_signal_on_directional_strategy": {
         "expr": "EQUALS_ENUM",
         "ref": ["chart_state"],
@@ -2410,6 +2415,15 @@ def cleanup_decomposed_compounds(cursor, compound_rule_keys: set[str]):
     # Additional compound rules whose atoms already exist but that the decomposer
     # doesn't catch (debit_of_width is standalone, not found by credit/debit search)
     extra_retirements = {"debit_of_width"}
+
+    # OTA-839: chart_state_valid_alignment is a retired ATOM (no longer produced
+    # by _decompose_chart_state). Its IN-list literals were outside the adapter's
+    # chart_state domain {Bullish,Bearish,Mixed,Neutral} so it could never pass —
+    # silently terminal-halting every TR/LT screening candidate. The upsert-only
+    # model never deletes it on its own, so the prior-run rule row + its TR/LT
+    # junctions must be explicitly removed here, exactly like a retired compound.
+    extra_retirements |= {"chart_state_valid_alignment"}
+
     all_keys = compound_rule_keys | extra_retirements
 
     if not all_keys:
@@ -3009,10 +3023,17 @@ def build_directional_config():
 def build_all_rows(xlsx_path: Path):
     """Run the full SCREENING transform chain + the DIRECTIONAL append.
 
-    Returns ``(rules, strategies, junctions, lookups)`` as id-less row dicts in
-    the exact shape ``main()`` upserts. Extracted (OTA-836) so the in-memory
-    Gate-A re-check hydrates the identical row set the seed writes, with no
-    duplicated ordering of the transform steps.
+    Returns ``(rules, strategies, junctions, lookups, compound_removals)`` as
+    id-less row dicts in the exact shape ``main()`` upserts, plus the set of
+    compound rule keys decomposed away (needed by ``cleanup_decomposed_compounds``
+    to delete them from the DB). Extracted (OTA-836) so the in-memory Gate-A
+    re-check hydrates the identical row set the seed writes, with no duplicated
+    ordering of the transform steps.
+
+    OTA-839: the OTA-836 extraction dropped ``compound_removals`` from the return
+    tuple while ``main()`` still referenced it, raising ``NameError`` after the
+    DB upserts and rolling back every reseed. Returning it here restores a clean
+    reseed (pre-existing blocker surfaced while landing the chart_state fix).
     """
     log.info(f"Parsing workbook: {xlsx_path}")
     rules, strategies, junctions, lookups = parse_workbook(xlsx_path)
@@ -3079,7 +3100,7 @@ def build_all_rows(xlsx_path: Path):
         f"+{len(dir_junctions)} junctions, +{len(dir_lookups)} lookups"
     )
 
-    return rules, strategies, junctions, lookups
+    return rules, strategies, junctions, lookups, compound_removals
 
 
 def main():
@@ -3092,7 +3113,7 @@ def main():
         log.error(f"Workbook not found: {args.xlsx}")
         sys.exit(1)
 
-    rules, strategies, junctions, lookups = build_all_rows(args.xlsx)
+    rules, strategies, junctions, lookups, compound_removals = build_all_rows(args.xlsx)
 
     if args.dry_run:
         log.info("DRY RUN — no database writes")
