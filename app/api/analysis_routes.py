@@ -40,7 +40,13 @@ from app.analysis.vertical_engine import (
 from app.analysis.long_call_engine import (
     LongCallEngine, LongCallWeights, LongCallFilters
 )
-from app.analysis.directional_engine import DirectionalEngine, Thesis
+# OTA-765: directional comparison runs through the Insight Engine, not the
+# retired directional_engine.py. The adapter builds thesis candidates; the engine
+# owns the per-strategy verdict + weighted score.
+from app.insight_engine import evaluate
+from app.ota_adapters.directional import DirectionalAdapter
+from app.options_rules.directional import get_registry as get_directional_registry
+from app.ota_adapters.engine_runtime import get_engine_runtime
 from app.ota_adapters._shared.sma import compute_sma_signal
 from app.services.symbol_normalization import canonicalize
 from app.services.symbol_cache import to_api_symbol_cached
@@ -1235,18 +1241,103 @@ async def analyze_long_calls(
     return result
 
 
+# ─── OTA-765: directional comparison through the engine ──────────────────────
+#
+# All three directional objective strategies run over the SAME candidate set the
+# directional adapter builds; each is a scoring lens, not a separate structure.
+# The engine owns the verdict (per-strategy EXECUTE/WAIT/PASS band) and the
+# weighted score. The legacy fitness_score is struck — it never appears here.
+
+_DIRECTIONAL_STRATEGY_KEYS = (
+    "directional_income",
+    "directional_growth",
+    "directional_longshot",
+)
+
+# Verdict tier ranking for recommendation. Tier-FIRST is deliberate: a gate-failed
+# PASS can still carry a score, and must never outrank a clean EXECUTE (OTA-765).
+_DIRECTIONAL_VERDICT_TIER = {"EXECUTE": 3, "WAIT": 2, "PASS": 1}
+
+
+def _directional_rank(verdict: Optional[str], score: Optional[float]) -> tuple[int, float]:
+    """(verdict_tier, score) sort key — higher is better. Halt/None score → -1."""
+    tier = _DIRECTIONAL_VERDICT_TIER.get(verdict or "", 0)
+    return (tier, score if score is not None else -1.0)
+
+
+def _directional_strikes(nv: dict) -> str:
+    """'525/530' for spreads, '520' for naked longs."""
+    long_strike = nv.get("long_strike")
+    short_strike = nv.get("short_strike")
+    if long_strike is not None and short_strike is not None:
+        return f"{long_strike:g}/{short_strike:g}"
+    strike = nv.get("strike")
+    return f"{strike:g}" if strike is not None else ""
+
+
+def _directional_strategy_name(nv: dict) -> str:
+    """Human label for the candidate structure — mirrors the legacy display names
+    ('Bull Call 525/530', 'Bear Put 525/520', 'Long 520 Put')."""
+    structure = nv.get("spread_type", "")
+    strikes = _directional_strikes(nv)
+    if structure == "bull_call":
+        return f"Bull Call {strikes}".strip()
+    if structure == "bear_put":
+        return f"Bear Put {strikes}".strip()
+    opt = (nv.get("option_type") or "").title()
+    return f"Long {strikes} {opt}".strip()
+
+
+def _directional_row(strategy_key: str, record, candidate) -> dict:
+    """Build one comparison row from a strategy's best candidate + engine result.
+
+    Display fields are sourced UNCHANGED from the adapter's named_values; only
+    composite_score and verdict are engine-owned (OTA-765). Numerics coerce to
+    floats so the existing frontend (which formats every cell) never sees a null.
+    """
+    nv = candidate.named_values if candidate is not None else {}
+    structure_type = nv.get("structure_type", "")
+    max_profit = nv.get("max_profit")
+    is_naked = structure_type == "long_option" or max_profit is None
+    return {
+        "strategy_key": strategy_key,
+        "strategy_name": _directional_strategy_name(nv),
+        "strategy_type": structure_type or ("long_option" if is_naked else "vertical_spread"),
+        "cost": float(nv.get("cost") or 0.0),
+        "max_profit": 0.0 if is_naked else float(max_profit or 0.0),
+        "max_profit_str": "Unlimited" if is_naked else f"${float(max_profit or 0.0):,.2f}",
+        "max_loss": float(nv.get("max_loss") or 0.0),
+        "breakeven": float(nv.get("breakeven") or 0.0),
+        "required_move_pct": float(nv.get("required_move_pct") or 0.0),
+        "prob_of_profit": float(nv.get("prob_of_profit") or 0.0),
+        "fits_budget": bool(nv.get("fits_budget")),
+        "buffer_pct": float(nv.get("buffer_pct") or 0.0),
+        "contracts": int(nv.get("contracts") or 0),
+        "expiration": nv.get("expiration"),
+        "strikes": _directional_strikes(nv),
+        "option_type": nv.get("option_type"),
+        # Engine-owned: verdict + weighted score replace the legacy fitness_score.
+        "composite_score": record.final_score,
+        "verdict": record.verdict,
+        "is_recommended": False,  # set after cross-strategy ranking
+    }
+
+
 @router.post("/directional")
 async def analyze_directional(
     req: DirectionalRequest,
     user: dict = Depends(require_read),
 ):
     """
-    Compare strategies for a directional thesis.
+    Compare directional strategies for a thesis — engine-backed (OTA-765).
 
-    NEW functionality — takes your trade thesis and returns a
-    structured comparison of 2-4 strategies, each evaluated for
-    cost, max profit, breakeven, probability, and thesis fit.
-    One strategy is flagged as "recommended."
+    The directional input adapter builds thesis-compatible candidates (debit
+    spreads + naked longs in the direction's chain). Each of the three directional
+    objective strategies (income / growth / longshot) is evaluated through the
+    Insight Engine (one engine.evaluate per strategy, source_app_id "OTA") over the
+    SAME candidate set. Each strategy contributes one comparison row — its best
+    candidate by (verdict tier, score). The engine owns the verdict + weighted
+    score; no fitness_score and no directional_engine.py path remain.
     """
     if req.direction not in ("bullish", "bearish"):
         raise HTTPException(
@@ -1254,28 +1345,94 @@ async def analyze_directional(
             detail="Direction must be 'bullish' or 'bearish'"
         )
 
-    adapter = await _adapter_fetch(
-        req.symbol, user,
-        min_dte=req.min_dte,
-        max_dte=req.max_dte,
-        strike_range_pct=req.strike_range_pct,
+    # Fail-closed (insight_engine.md §3.8): never invent a verdict for a strategy
+    # the live engine config does not carry. If the directional surface was pruned
+    # (e.g. engine_* not seeded for it), 422 rather than serve stale math.
+    runtime = get_engine_runtime()
+    _missing = [k for k in _DIRECTIONAL_STRATEGY_KEYS if k not in runtime.config.rule_sets]
+    if _missing:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Directional strategies not present in the engine config: {_missing}. "
+                "Fail-closed — the engine_* tables are not seeded for the directional "
+                "surface."
+            ),
+        )
+
+    adapter = DirectionalAdapter()
+    candidates = await adapter.produce_candidates({
+        "symbol": canonicalize(req.symbol),
+        "direction": req.direction,
+        "target_price": req.target_price,
+        "timeframe_days": req.timeframe_days,
+        "risk_budget": req.risk_budget,
+        "strike_range_pct": req.strike_range_pct,
+        "user_id": user.get("sub"),
+    })
+
+    price = (
+        float(candidates[0].named_values.get("underlying_price") or 0.0)
+        if candidates else 0.0
     )
-    contracts = adapter.contracts
-    price = adapter.underlying_price
+    thesis = {
+        "symbol": canonicalize(req.symbol),
+        "direction": req.direction,
+        "target_price": req.target_price,
+        "timeframe_days": req.timeframe_days,
+        "risk_budget": req.risk_budget,
+        "current_price": price,
+    }
 
-    thesis = Thesis(
-        symbol=canonicalize(req.symbol),
-        direction=req.direction,
-        target_price=req.target_price,
-        timeframe_days=req.timeframe_days,
-        risk_budget=req.risk_budget,
-        current_price=price,
+    if not candidates:
+        return {"thesis": thesis, "strategies": [], "recommended": None}
+
+    # LHS null-semantics from the §5.1 catalog (OTA-838): a null gate input honors
+    # its declared SKIP/FAIL_OPEN/FAIL_CLOSED rather than mechanically failing closed.
+    null_semantics = {
+        e.name: e.null_semantics
+        for e in adapter.input_catalog()
+        if e.null_semantics is not None
+    }
+    registry = get_directional_registry()
+    by_id = {c.candidate_id: c for c in candidates}
+
+    # One engine.evaluate per strategy over the shared candidate set. Each row is
+    # the strategy's best candidate by (verdict tier, score). Passing runtime.sink
+    # lands bronze candidate snapshots + decisions (OTA-758).
+    rows: list[dict] = []
+    for _key in _DIRECTIONAL_STRATEGY_KEYS:
+        records = evaluate(
+            candidates=candidates,
+            strategy_key=_key,
+            source_app_id="OTA",
+            config=runtime.config,
+            registry=registry,
+            adapter=adapter,
+            sink=runtime.sink,
+            null_semantics=null_semantics,
+        )
+        if not records:
+            continue
+        best = max(records, key=lambda r: _directional_rank(r.verdict, r.final_score))
+        rows.append(_directional_row(_key, best, by_id.get(best.candidate_id)))
+
+    if not rows:
+        return {"thesis": thesis, "strategies": [], "recommended": None}
+
+    # Recommend across strategies by the SAME rule: best verdict tier first, then
+    # highest score. Display order follows rank (best first), recommended row first.
+    rows.sort(
+        key=lambda r: _directional_rank(r["verdict"], r["composite_score"]),
+        reverse=True,
     )
+    rows[0]["is_recommended"] = True
 
-    engine = DirectionalEngine()
-    result = engine.compare(thesis=thesis, contracts=contracts)
-
-    return result
+    return {
+        "thesis": thesis,
+        "strategies": rows,
+        "recommended": rows[0]["strategy_name"],
+    }
 
 
 @router.post("/scorecard", response_model=ScorecardResponse)

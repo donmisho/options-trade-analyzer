@@ -397,7 +397,8 @@ function DirectionalTab({ symbol, setSymbol, thesis, setThesis, loading, error, 
                       <td style={tdS}>{(s.prob_of_profit * 100)?.toFixed(0)}%</td>
                       <td style={{ ...tdS, color: s.buffer_pct > 0 ? C.accent : C.red }}>{s.buffer_pct > 0 ? '±' : ''}{s.buffer_pct?.toFixed(1)}%</td>
                       <td style={tdS}>
-                        <span style={badge(s.verdict === 'Best match' ? 'green' : s.verdict === 'Over budget' || s.verdict === 'Needs bigger move' ? 'red' : 'yellow')}>
+                        {/* OTA-765: engine verdict band — EXECUTE green / WAIT amber / PASS red */}
+                        <span style={badge(s.verdict === 'EXECUTE' ? 'green' : s.verdict === 'WAIT' ? 'yellow' : 'red')}>
                           {s.verdict}
                         </span>
                       </td>
