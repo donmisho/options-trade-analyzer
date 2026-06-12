@@ -1,10 +1,9 @@
 """
 Analysis engines for the Options Analyzer.
 
-Phase 2 adds three engines:
+Phase 2 adds two engines:
   - VerticalSpreadEngine: Score and rank bull call + bear put spreads
   - LongCallEngine: Score and rank long call candidates
-  - DirectionalEngine: Compare strategies for a directional thesis
 """
 
 from .vertical_engine import (
@@ -19,11 +18,6 @@ from .long_call_engine import (
     LongCallFilters,
     ScoredLongCall,
 )
-from .directional_engine import (
-    DirectionalEngine,
-    Thesis,
-    StrategyCandidate,
-)
 
 __all__ = [
     "VerticalSpreadEngine",
@@ -34,7 +28,4 @@ __all__ = [
     "LongCallWeights",
     "LongCallFilters",
     "ScoredLongCall",
-    "DirectionalEngine",
-    "Thesis",
-    "StrategyCandidate",
 ]
