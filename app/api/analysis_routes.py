@@ -34,12 +34,6 @@ from app.providers.factory import ProviderRegistry
 from app.models.session import get_db
 from app.models.database import OptionChainSnapshot, AnalysisRun, AnalyzedTrade, TradeCandidate
 from app.ota_adapters.options_chain import OptionsChainAdapter
-from app.analysis.vertical_engine import (
-    VerticalSpreadEngine, ScoringWeights, SpreadFilters
-)
-from app.analysis.long_call_engine import (
-    LongCallEngine, LongCallWeights, LongCallFilters
-)
 # OTA-765: directional comparison runs through the Insight Engine, not the
 # retired directional_engine.py. The adapter builds thesis candidates; the engine
 # owns the per-strategy verdict + weighted score.
@@ -51,14 +45,8 @@ from app.ota_adapters.engine_runtime import get_engine_runtime, EngineRuntime
 from app.ota_adapters._shared.sma import compute_sma_signal
 from app.services.symbol_normalization import canonicalize
 from app.services.symbol_cache import to_api_symbol_cached
-from app.analysis.strategy_definitions import (
-    STRATEGIES, OPTIONS_STRATEGY_PARAMS, OptionsStrategyParams, StrategyScore,
-)
+from app.analysis.strategy_definitions import STRATEGIES
 from app.analysis.strategy_routing import (
-    get_spread_types_for_strategy,
-    get_option_types_for_strategy,
-    uses_vertical_engine,
-    uses_long_option_engine,
     get_compatible_strategies,
     normalize_to_structure,
 )
@@ -537,20 +525,34 @@ def _compatible_screening_strategies(candidate) -> list[str]:
     return get_compatible_strategies(structure_value)
 
 
-def _screen_candidates_through_engine(
+def _evaluate_screening_grid(
     runtime: EngineRuntime,
     adapter: OptionsChainAdapter,
     candidates: list,
-) -> dict[str, tuple]:
-    """Evaluate each candidate under its structurally-compatible screening
-    strategies; return {candidate_id: (best_record, best_strategy_key)}.
+) -> dict[str, list[tuple]]:
+    """Evaluate every applicable (strategy, candidate) pair through the engine;
+    return the screening grid ``{strategy_key: [(candidate, record), ...]}``.
 
-    One engine.evaluate per applicable strategy over only the candidates that
-    strategy accepts. Fail-closed (insight_engine.md §3.8): if any applicable
-    strategy is absent from the hydrated config (e.g. its surface was pruned),
-    422 rather than silently scoring against a missing strategy. The sink is
-    passed for additive bronze (OTA-758); it never substitutes for the route's
-    operational persistence.
+    This is the SINGLE screening evaluation path (OTA-842). One engine.evaluate
+    per applicable strategy runs over exactly the candidates that strategy accepts
+    (per-candidate routing off compatible_structures via strategy_routing); the
+    resulting records are paired back to their source Candidate by candidate_id —
+    a stable key, so a credit candidate compatible with both steady-paycheck and
+    weekly-grind appears under each key referencing the SAME Candidate object (no
+    aliasing). Strategy iteration follows sorted ``applicable`` order and records
+    keep the engine's order, so both reducers below see a deterministic grid.
+
+    Two reducers consume it:
+      • _screen_candidates_through_engine — per-candidate best across strategies
+        (the /analyze/verticals + /analyze/long-calls scan routes, OTA-759).
+      • _scorecard_best_by_strategy — best candidate per strategy
+        (the /analyze/scorecard route, OTA-842).
+
+    Fail-closed (insight_engine.md §3.8): if any applicable strategy is absent
+    from the hydrated config (e.g. its surface was pruned), 422 — before any
+    evaluate runs — rather than silently scoring against a missing strategy. The
+    sink is passed for additive bronze (OTA-758); it never substitutes for a
+    route's operational persistence.
     """
     compat = {c.candidate_id: _compatible_screening_strategies(c) for c in candidates}
     applicable = sorted({k for keys in compat.values() for k in keys})
@@ -578,7 +580,8 @@ def _screen_candidates_through_engine(
         if e.null_semantics is not None
     }
 
-    best: dict[str, tuple] = {}
+    by_id = {c.candidate_id: c for c in candidates}
+    grid: dict[str, list[tuple]] = {}
     for strategy_key in applicable:
         subset = [c for c in candidates if strategy_key in compat[c.candidate_id]]
         if not subset:
@@ -593,7 +596,30 @@ def _screen_candidates_through_engine(
             sink=runtime.sink,
             null_semantics=null_semantics,
         )
-        for record in records:
+        grid[strategy_key] = [(by_id[r.candidate_id], r) for r in records]
+
+    return grid
+
+
+def _screen_candidates_through_engine(
+    runtime: EngineRuntime,
+    adapter: OptionsChainAdapter,
+    candidates: list,
+) -> dict[str, tuple]:
+    """Per-candidate reduction of the screening grid: return
+    {candidate_id: (best_record, best_strategy_key)} — each candidate's best
+    result by (verdict tier, score) across the strategies that accept it.
+
+    The scan-route reducer (/analyze/verticals, /analyze/long-calls). Output is
+    unchanged from OTA-759: the (strategy, candidate) evaluation now lives in the
+    shared _evaluate_screening_grid, but the per-candidate pick is byte-identical —
+    grid iteration preserves sorted-applicable strategy order and engine record
+    order, and the strict ``>`` keeps the first strategy seen winning ties.
+    """
+    grid = _evaluate_screening_grid(runtime, adapter, candidates)
+    best: dict[str, tuple] = {}
+    for strategy_key, pairs in grid.items():
+        for _candidate, record in pairs:
             cid = record.candidate_id
             cand_rank = _screening_rank(record.verdict, record.final_score)
             current = best.get(cid)
@@ -601,7 +627,6 @@ def _screen_candidates_through_engine(
                 current[0].verdict, current[0].final_score
             ):
                 best[cid] = (record, strategy_key)
-
     return best
 
 
@@ -723,433 +748,60 @@ def _build_engine_rows(candidates, best: dict, row_builder) -> list[dict]:
     return rows
 
 
-# ─── Scoring Orchestration (moved from strategy_scorer.py — OTA-779) ───
+# ─── OTA-842: scorecard reduction over the screening grid ─────────────────────
+#
+# /analyze/scorecard scores all four screening strategies via the SAME engine
+# path the scan routes use (_evaluate_screening_grid). It reduces the grid
+# PER-STRATEGY — each strategy's single best candidate by (verdict tier, score) —
+# because the scorecard shows one score per strategy (all four), not one across
+# all candidates. composite_score is the engine's ABSOLUTE weighted score,
+# replacing the retired per-strategy min-max composite (legacy _scorer_normalize /
+# _score_credit_spread_strategy / _score_long_option_strategy / score_all_strategies,
+# struck in OTA-842). Display-only: the sink is additive bronze (OTA-758); the
+# route adds no operational persistence.
+
+_NAKED_STRUCTURES = ("long_call", "long_put")
 
 
-def _scorer_normalize(values: list, higher_is_better: bool = True) -> list:
-    """Min-max normalize a list of floats to 0-1.
-
-    NOTE: vertical_engine.py and long_call_engine.py each have their own
-    inline copies. A future cleanup (audit §7.5 #3) should consolidate all
-    three into a single engine-core function.
+def _scorecard_best_by_strategy(grid: dict[str, list[tuple]]) -> dict[str, tuple]:
+    """Per-strategy reduction of the screening grid: return
+    {strategy_key: (best_candidate, best_record)} — each strategy's single best
+    candidate by (verdict tier, score). ``max`` keeps the first record on a tie,
+    matching the engine's record order.
     """
-    if not values:
-        return []
-    mn, mx = min(values), max(values)
-    rng = mx - mn
-    if rng == 0:
-        return [0.5] * len(values)
-    if higher_is_better:
-        return [(v - mn) / rng for v in values]
-    return [(mx - v) / rng for v in values]
+    out: dict[str, tuple] = {}
+    for strategy_key, pairs in grid.items():
+        out[strategy_key] = max(
+            pairs, key=lambda pr: _screening_rank(pr[1].verdict, pr[1].final_score)
+        )
+    return out
 
 
-def _dte_from_expiration(expiration: str) -> int:
-    """Calculate DTE from YYYY-MM-DD string."""
-    try:
-        exp_date = datetime.strptime(expiration, "%Y-%m-%d").date()
-        return max(0, (exp_date - date.today()).days)
-    except (ValueError, TypeError):
-        return 0
+def _scorecard_best_trade(candidate, record) -> dict:
+    """best_trade dict for one scorecard strategy row.
 
-
-def _get_atm_iv(contracts: list, underlying_price: float) -> float:
-    """Estimate ATM IV from the closest call options.
-    Returns annualized IV as a decimal (0.25 = 25%). Defaults to 0.30.
+    Reuses the OTA-759 engine row builders (single-path) so the displayed fields
+    — and the additive verdict + score_components — come from one place. Spread
+    structures use the vertical row; naked longs the long-option row.
     """
-    if not contracts or underlying_price <= 0:
-        return 0.30
-    calls = [c for c in contracts if c.get("option_type") == "call"]
-    if not calls:
-        return 0.30
-    calls_sorted = sorted(calls, key=lambda c: abs(c.get("strike", 0) - underlying_price))
-    ivs = []
-    for c in calls_sorted[:5]:
-        iv = c.get("implied_volatility", 0) or 0
-        if iv > 0:
-            ivs.append(iv)
-    return sum(ivs) / len(ivs) if ivs else 0.30
+    structure = candidate.named_values.get("spread_type")
+    if structure in _NAKED_STRUCTURES:
+        return _long_option_engine_row(candidate, record)
+    return _vertical_engine_row(candidate, record)
 
 
-def cushion_penalty(
-    trade: dict,
-    current_price: float,
-    severe_threshold: float,
-    moderate_threshold: float,
-) -> tuple:
-    """Deterministic scoring penalty for thin short strike cushion.
-
-    cushion_pct = |current_price - short_strike| / current_price * 100
-    Returns (penalty: int, cushion_pct: float).
+def _scorecard_signal_summary(record, best_trade: dict) -> str:
+    """Concise per-strategy summary for the scorecard row. Leads with the engine
+    verdict (additive in OTA-842), then the winning structure + PoP when present.
     """
-    short_strike = trade.get("short_strike") or trade.get("sell_strike")
-    if short_strike is None or current_price is None or current_price == 0:
-        return 0, 0.0
-    pct = abs(current_price - short_strike) / current_price * 100
-    if pct < severe_threshold:
-        return -20, pct
-    elif pct < moderate_threshold:
-        return -10, pct
-    return 0, pct
-
-
-def _score_credit_spread_strategy(
-    strategy_key: str,
-    contracts: list,
-    underlying_price: float,
-    user_config: dict,
-    atm_iv: float,
-) -> Optional[StrategyScore]:
-    """Score a credit spread strategy (steady-paycheck or weekly-grind)."""
-    strategy = STRATEGIES[strategy_key]
-    cfg = user_config or {}
-    weights = strategy.scoring_weights
-
-    dte_min = int(cfg.get("dte_min", strategy.dte_min))
-    dte_max = int(cfg.get("dte_max", strategy.dte_max))
-    delta_max = float(cfg.get("delta_max", 0.30))
-
-    spread_types = get_spread_types_for_strategy(strategy_key)
-    if not spread_types:
-        return None
-
-    filters = SpreadFilters(
-        spread_types=spread_types,
-        min_short_delta=0.05,
-        max_short_delta=delta_max,
-        min_volume=1,
-        min_open_interest=10,
-        min_reward_risk=0.10,
-        min_ev_threshold=-999.0,
+    verdict = record.verdict or "—"
+    structure = best_trade.get("spread_type") or (
+        f"long_{best_trade.get('option_type')}" if best_trade.get("option_type") else ""
     )
-    engine = VerticalSpreadEngine(filters=filters)
-    result = engine.analyze(contracts, underlying_price)
-    spreads = result.get("spreads", [])
-
-    spreads = [
-        s for s in spreads
-        if dte_min <= _dte_from_expiration(s.get("expiration", "")) <= dte_max
-    ]
-
-    if not spreads:
-        return StrategyScore(
-            strategy_key=strategy_key,
-            label=strategy.label,
-            score=0,
-            best_trade=None,
-            signal_summary=f"No credit spreads found in {dte_min}-{dte_max} DTE range",
-            metric_scores={},
-        )
-
-    def theta_margin_ratio(s):
-        ml = s.get("max_loss", 0)
-        return abs(s.get("net_theta", 0)) / ml if ml > 0 else 0
-
-    def theta_gamma_ratio(s):
-        ml = s.get("max_loss", 0)
-        return abs(s.get("net_theta", 0)) / ml if ml > 0 else 0
-
-    def credit_width_pct(s):
-        credit = abs(s.get("net_debit", 0))
-        width = s.get("spread_width", 1)
-        return (credit / width * 100) if width > 0 else 0
-
-    def liquidity_metric(s):
-        return (
-            s.get("long_volume", 0) + s.get("short_volume", 0) +
-            s.get("long_oi", 0) + s.get("short_oi", 0)
-        )
-
-    metric_fns = {
-        "theta_margin_ratio":    theta_margin_ratio,
-        "theta_gamma_ratio":     theta_gamma_ratio,
-        "probability_of_profit": lambda s: s.get("prob_of_profit", 0),
-        "expected_value":        lambda s: s.get("ev_raw", 0),
-        "reward_risk":           lambda s: s.get("reward_risk_ratio", 0),
-        "credit_width_pct":      credit_width_pct,
-        "liquidity":             liquidity_metric,
-    }
-
-    raw = {k: [metric_fns[k](s) for s in spreads] for k in weights if k in metric_fns}
-    iv_rank_norm = min(1.0, max(0.0, atm_iv / 0.60)) if atm_iv > 0 else 0.5
-    norm = {k: _scorer_normalize(raw[k], higher_is_better=True) for k in raw}
-
-    composite_scores = []
-    for i in range(len(spreads)):
-        cs = 0.0
-        for k, w in weights.items():
-            if k == "iv_rank":
-                cs += iv_rank_norm * w
-            elif k in norm:
-                cs += norm[k][i] * w
-        composite_scores.append(cs)
-
-    best_idx = composite_scores.index(max(composite_scores))
-    best = spreads[best_idx]
-    best_score = composite_scores[best_idx]
-    raw_score = min(100, max(0, round(best_score * 100)))
-
-    breakdown = []
-    for k, w in weights.items():
-        if k == "iv_rank":
-            comp_norm = iv_rank_norm
-        elif k in norm:
-            comp_norm = norm[k][best_idx]
-        else:
-            comp_norm = 0.0
-        comp_score = min(100, max(0, round(comp_norm * 100)))
-        contribution = round(comp_norm * w * 100, 1)
-        breakdown.append({"key": k, "score": comp_score, "weight": w, "contribution": contribution})
-
-    _opts = OPTIONS_STRATEGY_PARAMS.get(strategy_key, OptionsStrategyParams())
-    _cushion_penalty, _cushion_pct = cushion_penalty(
-        best, underlying_price,
-        severe_threshold=_opts.cushion_severe_threshold,
-        moderate_threshold=_opts.cushion_moderate_threshold,
-    )
-    score = raw_score
-    penalty_reason = None
-    if _cushion_penalty != 0:
-        score = max(0, raw_score + _cushion_penalty)
-        penalty_reason = "cushion penalty"
-
-    best_metrics = {k: round(float(metric_fns[k](best)), 4) for k in weights if k in metric_fns}
-    if "iv_rank" in weights:
-        best_metrics["iv_rank"] = round(iv_rank_norm, 4)
-    best_metrics["cushion_pct"] = round(_cushion_pct, 2)
-    if _cushion_penalty != 0:
-        best_metrics["cushion_penalty"] = _cushion_penalty
-
-    signal_summary = (
-        f"{len(spreads)} credit spreads in range. "
-        f"Best: {best.get('spread_type', '').replace('_', ' ').title()} "
-        f"short {best.get('short_strike', '')} | "
-        f"exp {best.get('expiration', '')[:7]} | "
-        f"PoP {best.get('prob_of_profit', 0):.0%} | "
-        f"R:R {best.get('reward_risk_ratio', 0):.2f}"
-    )
-
-    return StrategyScore(
-        strategy_key=strategy_key,
-        label=strategy.label,
-        score=score,
-        best_trade=best,
-        signal_summary=signal_summary,
-        metric_scores=best_metrics,
-        raw_score=raw_score if penalty_reason else None,
-        component_breakdown=breakdown,
-        penalty_reason=penalty_reason,
-    )
-
-
-def _score_long_option_strategy(
-    strategy_key: str,
-    contracts: list,
-    underlying_price: float,
-    user_config: dict,
-    atm_iv: float,
-) -> Optional[StrategyScore]:
-    """Score a long option strategy (trend-rider or lottery-ticket)."""
-    strategy = STRATEGIES[strategy_key]
-    cfg = user_config or {}
-    weights = strategy.scoring_weights
-
-    dte_min = int(cfg.get("dte_min", strategy.dte_min))
-    dte_max = int(cfg.get("dte_max", strategy.dte_max))
-    delta_min = float(cfg.get("delta_min", 0.05))
-    delta_max = float(cfg.get("delta_max", 0.85))
-
-    option_types = get_option_types_for_strategy(strategy_key)
-    if not option_types:
-        return None
-
-    filters = LongCallFilters(
-        min_delta=delta_min,
-        max_delta=delta_max,
-        min_days_to_exp=dte_min,
-        max_days_to_exp=dte_max,
-        max_premium=cfg.get("max_cost_per_contract", 10000.0),
-        min_volume=1,
-        min_open_interest=10,
-        max_bid_ask_spread_pct=0.50,
-        option_types=option_types,
-    )
-    engine = LongCallEngine(filters=filters)
-    result = engine.analyze(contracts, underlying_price)
-    options = result.get("options", [])
-
-    if not options:
-        return StrategyScore(
-            strategy_key=strategy_key,
-            label=strategy.label,
-            score=0,
-            best_trade=None,
-            signal_summary=f"No long call candidates in {dte_min}-{dte_max} DTE range",
-            metric_scores={},
-        )
-
-    sma_score = float(cfg.get("sma_alignment_score", 0.5))
-
-    if strategy_key == "trend-rider":
-        delta_center = (float(cfg.get("delta_min", 0.50)) + float(cfg.get("delta_max", 0.70))) / 2
-        delta_half_range = max(0.10, (float(cfg.get("delta_max", 0.70)) - float(cfg.get("delta_min", 0.50))) / 2)
-    else:
-        delta_center = 0.10
-        delta_half_range = 0.10
-
-    def delta_quality(o):
-        d = o.get("delta", 0)
-        return max(0.0, 1.0 - abs(d - delta_center) / (delta_half_range + 0.05))
-
-    def delta_otm_score(o):
-        d = o.get("delta", 0)
-        return max(0.0, 1.0 - d / 0.25)
-
-    def payout_ratio(o):
-        cost = o.get("premium_dollars", 0)
-        if cost <= 0:
-            return 0.0
-        return (o.get("delta", 0) * underlying_price * 0.10 * 100) / cost
-
-    def bid_ask_tightness(o):
-        ba_pct = o.get("bid_ask_spread_pct", 100)
-        return max(0.0, 1.0 - ba_pct / 100.0)
-
-    def iv_percentile_cost(o):
-        iv_pct = o.get("iv", 100)
-        iv_decimal = iv_pct / 100 if iv_pct > 1 else iv_pct
-        return max(0.0, 1.0 - iv_decimal / 1.0)
-
-    def runway_score(o):
-        return float(o.get("theta_runway_days", 0))
-
-    def expected_value(o):
-        mid = o.get("mid_price", 0)
-        return o.get("delta", 0) * underlying_price * 0.05 - mid
-
-    def open_interest_metric(o):
-        return float(o.get("open_interest", 0))
-
-    metric_fns = {
-        "sma_alignment_score": lambda o: sma_score,
-        "delta_quality":        delta_quality,
-        "expected_value":       expected_value,
-        "iv_percentile_cost":   iv_percentile_cost,
-        "runway_score":         runway_score,
-        "payout_ratio":         payout_ratio,
-        "delta_otm_score":      delta_otm_score,
-        "bid_ask_tightness":    bid_ask_tightness,
-        "open_interest":        open_interest_metric,
-    }
-
-    raw = {k: [metric_fns[k](o) for o in options] for k in weights if k in metric_fns}
-    norm = {k: _scorer_normalize(raw[k], higher_is_better=True) for k in raw}
-
-    composite_scores = []
-    for i in range(len(options)):
-        cs = sum(norm[k][i] * weights[k] for k in norm)
-        composite_scores.append(cs)
-
-    best_idx = composite_scores.index(max(composite_scores))
-    best = options[best_idx]
-    best_score = composite_scores[best_idx]
-    score = min(100, max(0, round(best_score * 100)))
-
-    breakdown = []
-    for k, w in weights.items():
-        if k in norm:
-            comp_norm = norm[k][best_idx]
-        else:
-            comp_norm = 0.0
-        comp_score = min(100, max(0, round(comp_norm * 100)))
-        contribution = round(comp_norm * w * 100, 1)
-        breakdown.append({"key": k, "score": comp_score, "weight": w, "contribution": contribution})
-
-    best_metrics = {k: round(float(metric_fns[k](best)), 4) for k in weights if k in metric_fns}
-
-    signal_summary = (
-        f"{len(options)} call candidates found. "
-        f"Best: {best.get('option_type', 'call').title()} {best.get('strike', '')} @ "
-        f"exp {best.get('expiration', '')[:7]} | "
-        f"Δ {best.get('delta', 0):.2f} | "
-        f"Premium {best.get('premium_dollars', 0):.0f}"
-    )
-
-    return StrategyScore(
-        strategy_key=strategy_key,
-        label=strategy.label,
-        score=score,
-        best_trade=best,
-        signal_summary=signal_summary,
-        metric_scores=best_metrics,
-        raw_score=None,
-        component_breakdown=breakdown,
-        penalty_reason=None,
-    )
-
-
-async def score_all_strategies(
-    symbol: str,
-    provider,
-    user_config: dict = None,
-) -> tuple:
-    """Fetch options chain ONCE, run all strategy scoring, return (scores, underlying_price).
-
-    CRITICAL: exactly one provider.get_chain() call regardless of strategy count.
-    """
-    try:
-        api_sym = to_api_symbol_cached(symbol, "schwab")
-        chain_data = await provider.get_chain(
-            symbol=api_sym,
-            min_dte=0,
-            max_dte=70,
-            strike_range_pct=20.0,
-        )
-    except Exception as e:
-        log.warning(f"Chain fetch failed for {symbol}: {e}")
-        return [
-            StrategyScore(
-                strategy_key=k, label=s.label, score=0, best_trade=None,
-                signal_summary="Chain fetch failed", metric_scores={},
-            )
-            for k, s in STRATEGIES.items()
-        ], 0.0
-
-    contracts = chain_data.get("contracts", [])
-    underlying_price = chain_data.get("underlying_price", 0)
-
-    if not contracts or underlying_price <= 0:
-        return [
-            StrategyScore(
-                strategy_key=k, label=s.label, score=0, best_trade=None,
-                signal_summary="No chain data available", metric_scores={},
-            )
-            for k, s in STRATEGIES.items()
-        ], 0.0
-
-    atm_iv = _get_atm_iv(contracts, underlying_price)
-
-    def _cfg_for(key: str) -> dict:
-        if not user_config:
-            return {}
-        return user_config.get(key, {})
-
-    scores: list[Optional[StrategyScore]] = []
-    for strategy_key, strategy in STRATEGIES.items():
-        cfg = _cfg_for(strategy_key)
-        if uses_vertical_engine(strategy_key):
-            result = _score_credit_spread_strategy(
-                strategy_key, contracts, underlying_price, cfg, atm_iv
-            )
-        elif uses_long_option_engine(strategy_key):
-            result = _score_long_option_strategy(
-                strategy_key, contracts, underlying_price, cfg, atm_iv
-            )
-        else:
-            result = None
-        scores.append(result)
-
-    return scores, underlying_price
+    label = _structure_human_label(structure) if structure else ""
+    pop = best_trade.get("prob_of_profit")
+    pop_str = f" · PoP {pop * 100:.0f}%" if isinstance(pop, (int, float)) and pop else ""
+    return f"{verdict} · {label}{pop_str}".strip(" ·")
 
 
 # ─── Endpoints ────────────────────────────────────────────────────
@@ -1649,44 +1301,64 @@ async def get_strategy_scorecard(
     user: dict = Depends(require_read),
 ):
     """
-    Score all four strategies for a symbol using a single chain fetch.
+    Score all four screening strategies for a symbol via the Insight Engine.
 
-    Returns a 0-100 score per strategy plus the best candidate trade and
-    a signal summary. Scores are normalized within each strategy independently
-    using min-max scaling across candidates.
+    Candidates are built ONCE through OptionsChainAdapter (all structures), then
+    each strategy scores only its structurally-compatible subset (routing off
+    compatible_structures via strategy_routing — no route→strategy table). Each
+    strategy's row is its best candidate by (verdict tier, score). composite_score
+    is the engine's ABSOLUTE weighted score (OTA-842), replacing the legacy
+    per-strategy min-max composite; verdict is an additive field carried on
+    best_trade.
 
-    Accepts optional user_config overrides (dte_min, delta_max, sma_alignment_score, etc.).
-    Pass sma_alignment_score (0-1) from the frontend SMA indicator to influence trend-rider.
+    Display-only: no operational persistence is added; like /analyze/directional
+    the route takes no db dependency, and the engine sink is additive bronze
+    (OTA-758) only.
 
-    IMPORTANT: exactly one chain fetch happens regardless of how many strategies are scored.
+    IMPORTANT: exactly one chain fetch happens regardless of how many strategies
+    are scored.
     """
     sym = canonicalize(req.symbol)
     api_sym = to_api_symbol_cached(sym, settings.default_market_data_provider)
     registry = _get_registry()
     provider = registry.get_market_data(settings.default_market_data_provider, user_id=user.get("sub"))
 
-    # Fetch strategy scores, quote, and price history in parallel
-    scores_task = score_all_strategies(symbol=sym, provider=provider, user_config=req.user_config)
+    # Engine runtime resolved once (insight_engine.md §6.5). SCREENING is a
+    # REQUIRED surface, so a healthy boot guarantees it is hydrated; the
+    # per-strategy fail-closed guard lives in _evaluate_screening_grid.
+    runtime = get_engine_runtime()
 
+    # ONE adapter fetch — all structures — over the union DTE envelope of the four
+    # screening strategies. structure_types=None builds every structure so each of
+    # the four has a compatible candidate subset; the engine's per-strategy DTE
+    # gates decide eligibility within the window.
+    env_min = min(s.dte_min for s in STRATEGIES.values())
+    env_max = max(s.dte_max for s in STRATEGIES.values())
+    adapter, candidates = await _adapter_fetch(
+        sym, user,
+        min_dte=env_min,
+        max_dte=env_max,
+        strike_range_pct=20.0,
+        structure_types=None,
+    )
+    underlying_price = adapter.underlying_price
+
+    # Quote + price history power the QuoteBar + SMA signal (display extras), run
+    # in parallel with each other. The chain fetch above is the route's only chain
+    # call — the one-fetch invariant is preserved.
     has_price_history = hasattr(provider, "get_price_history")
     if has_price_history:
-        results = await asyncio.gather(
-            scores_task,
+        quote_result, history_result = await asyncio.gather(
             provider.get_quote(api_sym),
             provider.get_price_history(api_sym),
             return_exceptions=True,
         )
-        scores_result, quote_result, history_result = results
     else:
-        results = await asyncio.gather(
-            scores_task,
+        (quote_result,) = await asyncio.gather(
             provider.get_quote(api_sym),
             return_exceptions=True,
         )
-        scores_result, quote_result = results
         history_result = []
-
-    scores, underlying_price = scores_result if not isinstance(scores_result, Exception) else ([], 0.0)
 
     quote_data = None
     if not isinstance(quote_result, Exception):
@@ -1706,19 +1378,29 @@ async def get_strategy_scorecard(
     if candles and price_for_sma:
         sma_signal = compute_sma_signal(candles, price_for_sma)
 
-    # OTA-649: Return all four strategies in canonical order (SP, WG, TR, LT).
-    # None entries from score_all_strategies become score=null + reason for N/A display.
+    # Per-strategy best candidate via the shared screening grid (single engine path).
+    grid = _evaluate_screening_grid(runtime, adapter, candidates)
+    best_by_strategy = _scorecard_best_by_strategy(grid)
+
+    # OTA-649: Return all four strategies in canonical order (SP, WG, TR, LT). A
+    # strategy with no structurally-compatible candidate is N/A (score=null +
+    # reason); one with candidates carries the engine's absolute composite + the
+    # additive verdict (on best_trade).
     strategy_items = []
-    for i, (strategy_key, strategy_def) in enumerate(STRATEGIES.items()):
-        s = scores[i] if i < len(scores) else None
-        if s is not None:
+    for strategy_key, strategy_def in STRATEGIES.items():
+        winner = best_by_strategy.get(strategy_key)
+        if winner is not None:
+            candidate, record = winner
+            best_trade = _scorecard_best_trade(candidate, record)
             strategy_items.append(StrategyScoreItem(
-                strategy_key=s.strategy_key,
-                label=s.label,
-                score=s.score,
-                best_trade=s.best_trade,
-                signal_summary=s.signal_summary,
-                metric_scores=s.metric_scores,
+                strategy_key=strategy_key,
+                label=strategy_def.label,
+                score=int(round(record.final_score or 0)),
+                best_trade=best_trade,
+                signal_summary=_scorecard_signal_summary(record, best_trade),
+                metric_scores={
+                    c["key"]: c["score"] for c in best_trade.get("score_components", [])
+                },
             ))
         else:
             structures = ", ".join(
