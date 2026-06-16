@@ -32,6 +32,7 @@ import pyodbc
 # Add project root to path so we can import app.core.config
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.core.config import settings
+from app.analysis.strategy_definitions import STRATEGIES as _CANONICAL_STRATEGIES
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
 log = logging.getLogger(__name__)
@@ -39,13 +40,42 @@ log = logging.getLogger(__name__)
 # ── Default workbook path ────────────────────────────────────────────────
 DEFAULT_XLSX = Path(__file__).resolve().parent.parent / "requirements" / "Configuration" / "Scoring Parameters.xlsx"
 
+
+# ── Canonical screening strategy keys (OTA-841) ──────────────────────────
+# The engine seed must emit the system-canonical value domain — hyphen strategy
+# keys + lowercase compatible_structures — so engine config matches
+# strategy_definitions / strategy_classifier / export_routes / the frontend
+# roster. The engine seed was the lone underscore + UPPERCASE outlier (the
+# OTA-762 read endpoint surfaced it). Sourcing each key from the canonical dict
+# (matched by display label) rather than hand-typing a literal makes any future
+# drift fail loudly here instead of silently re-seeding the old domain.
+#
+# SCREENING ONLY. The directional strategies (directional_income/growth/longshot)
+# keep their underscore keys — a separate surface with no canonical hyphen form,
+# matched by hardcoded underscore in analysis_routes.py, never surfaced by OTA-762.
+def _canonical_screening_key(display_name: str) -> str:
+    for key, cfg in _CANONICAL_STRATEGIES.items():
+        if cfg.label == display_name:
+            return key
+    raise RuntimeError(
+        f"OTA-841: no canonical screening strategy_key for display "
+        f"{display_name!r}; strategy_definitions labels = "
+        f"{sorted(c.label for c in _CANONICAL_STRATEGIES.values())}"
+    )
+
+
+_SP = _canonical_screening_key("Steady Paycheck")   # "steady-paycheck"
+_WG = _canonical_screening_key("Weekly Grind")       # "weekly-grind"
+_TR = _canonical_screening_key("Trend Rider")        # "trend-rider"
+_LT = _canonical_screening_key("Lottery Ticket")     # "lottery-ticket"
+
 # ── Strategy column mapping (0-indexed column letters → indices) ─────────
 # Each strategy occupies 4 columns: Include, Low, High, Weight
 STRATEGIES = [
-    {"key": "steady_paycheck",  "display": "Steady Paycheck",  "cols": {"include": 6, "low": 7, "high": 8, "weight": 9}},   # G H I J
-    {"key": "weekly_grind",     "display": "Weekly Grind",      "cols": {"include": 10, "low": 11, "high": 12, "weight": 13}}, # K L M N
-    {"key": "trend_rider",      "display": "Trend Rider",       "cols": {"include": 14, "low": 15, "high": 16, "weight": 17}}, # O P Q R
-    {"key": "lottery_ticket",   "display": "Lottery Ticket",    "cols": {"include": 18, "low": 19, "high": 20, "weight": 21}}, # S T U V
+    {"key": _SP,  "display": "Steady Paycheck",  "cols": {"include": 6, "low": 7, "high": 8, "weight": 9}},   # G H I J
+    {"key": _WG,  "display": "Weekly Grind",      "cols": {"include": 10, "low": 11, "high": 12, "weight": 13}}, # K L M N
+    {"key": _TR,  "display": "Trend Rider",       "cols": {"include": 14, "low": 15, "high": 16, "weight": 17}}, # O P Q R
+    {"key": _LT,  "display": "Lottery Ticket",    "cols": {"include": 18, "low": 19, "high": 20, "weight": 21}}, # S T U V
 ]
 
 # ── Scan parameters from rows 69-72 (per strategy, same column order) ───
@@ -56,10 +86,10 @@ SCAN_PARAM_ROWS = {
     72: "output_rank_cap",
 }
 SCAN_PARAM_COLS = {
-    "steady_paycheck": 6,   # G
-    "weekly_grind": 10,      # K
-    "trend_rider": 14,       # O
-    "lottery_ticket": 18,    # S
+    _SP: 6,   # G
+    _WG: 10,  # K
+    _TR: 14,  # O
+    _LT: 18,  # S
 }
 
 # ── Canonical screening verdict labels (OTA-815; thresholds removed OTA-835) ──────────────────────────
@@ -322,22 +352,22 @@ def parse_workbook(xlsx_path: Path):
     # so bands can diverge independently. All start at 70/50 (matching
     # _assign_verdict literals that OTA-761 will remove).
     _SCREENING_VERDICT_BANDS = {
-        "steady_paycheck": [
+        _SP: [
             {"verdict": "EXECUTE", "min_score": 70, "max_score": 100},
             {"verdict": "WAIT",    "min_score": 50, "max_score": 69.99},
             {"verdict": "PASS",    "min_score": 0,  "max_score": 49.99},
         ],
-        "weekly_grind": [
+        _WG: [
             {"verdict": "EXECUTE", "min_score": 70, "max_score": 100},
             {"verdict": "WAIT",    "min_score": 50, "max_score": 69.99},
             {"verdict": "PASS",    "min_score": 0,  "max_score": 49.99},
         ],
-        "trend_rider": [
+        _TR: [
             {"verdict": "EXECUTE", "min_score": 70, "max_score": 100},
             {"verdict": "WAIT",    "min_score": 50, "max_score": 69.99},
             {"verdict": "PASS",    "min_score": 0,  "max_score": 49.99},
         ],
-        "lottery_ticket": [
+        _LT: [
             {"verdict": "EXECUTE", "min_score": 70, "max_score": 100},
             {"verdict": "WAIT",    "min_score": 50, "max_score": 69.99},
             {"verdict": "PASS",    "min_score": 0,  "max_score": 49.99},
@@ -374,7 +404,11 @@ def parse_workbook(xlsx_path: Path):
                     # Only add specific trade types, not meta-rules
                     if desc in ("BULL_PUT_CREDIT", "BEAR_CALL_CREDIT", "BULL_CALL_DEBIT",
                                 "BEAR_PUT_DEBIT", "LONG_CALL", "LONG_PUT", "IRON_CONDOR"):
-                        compat.append(desc)
+                        # OTA-841: workbook trade-type rows are UPPERCASE; emit the
+                        # canonical lowercase structure domain (matches spread_type /
+                        # strategy_definitions / frontend). Membership check stays
+                        # UPPERCASE because `desc` comes straight from the workbook.
+                        compat.append(desc.lower())
 
         strategy = {
             "owner_app_id": "OTA",
@@ -990,19 +1024,19 @@ def decompose_compound_rules(rules, junctions):
 
 
 # Strategies that use cushion-based adjustments (credit spreads with a short strike)
-_CUSHION_PENALTY_STRATEGIES = ["steady_paycheck", "weekly_grind"]
+_CUSHION_PENALTY_STRATEGIES = [_SP, _WG]
 
 
 # Per-strategy cushion penalty thresholds (OTA-770).
 # SP and WG start with identical values; junction independence lets them diverge later.
 _CUSHION_PENALTY_PARAMS = {
     "adj_cushion_penalty_severe": {
-        "steady_paycheck": {"threshold": 1.0},
-        "weekly_grind":    {"threshold": 1.0},
+        _SP: {"threshold": 1.0},
+        _WG: {"threshold": 1.0},
     },
     "adj_cushion_penalty_moderate": {
-        "steady_paycheck": {"lower_threshold": 1.0, "upper_threshold": 2.0},
-        "weekly_grind":    {"lower_threshold": 1.0, "upper_threshold": 2.0},
+        _SP: {"lower_threshold": 1.0, "upper_threshold": 2.0},
+        _WG: {"lower_threshold": 1.0, "upper_threshold": 2.0},
     },
 }
 
@@ -1312,7 +1346,7 @@ def backfill_missing_rules(rules, junctions):
     code_only_rules.append(dte_penalty_rule)
 
     # DTE penalty applies to all strategies
-    for strat_key in ["steady_paycheck", "weekly_grind", "trend_rider", "lottery_ticket"]:
+    for strat_key in [_SP, _WG, _TR, _LT]:
         code_only_junctions.append({
             "rule_key": "adj_dte_8_13_penalty",
             "strategy_key": strat_key,
@@ -1356,7 +1390,7 @@ def backfill_missing_rules(rules, junctions):
     code_only_rules.append(asym_penalty_rule)
 
     # Asymmetry penalty applies to all strategies
-    for strat_key in ["steady_paycheck", "weekly_grind", "trend_rider", "lottery_ticket"]:
+    for strat_key in [_SP, _WG, _TR, _LT]:
         code_only_junctions.append({
             "rule_key": "adj_probability_asymmetry_penalty",
             "strategy_key": strat_key,
@@ -1493,24 +1527,24 @@ _DIVERGENCE_NOTES = {
 # Junction-level rationale notes (strategy-specific divergences)
 _JUNCTION_DIVERGENCE_NOTES = {
     # DTE window divergences per strategy
-    ("steady_paycheck", "dte_window"): (
+    (_SP, "dte_window"): (
         "DIVERGENCE: sheet SP 21-45; code 14-45 (min is 14 in code, 21 in sheet). "
         "Sheet value seeded; revisit in tuning."
     ),
-    ("weekly_grind", "dte_window"): (
+    (_WG, "dte_window"): (
         "DIVERGENCE: sheet WG 14-20; code 14-21 (max is 21 in code, 20 in sheet). "
         "Sheet value seeded; revisit in tuning."
     ),
-    ("trend_rider", "dte_window"): (
+    (_TR, "dte_window"): (
         "DIVERGENCE: sheet TR 30-45; code 14-60 (both min and max differ). "
         "Sheet value seeded; revisit in tuning."
     ),
-    ("lottery_ticket", "dte_window"): (
+    (_LT, "dte_window"): (
         "DIVERGENCE: sheet LT 30-60; code 7-60 (min is 7 in code, 30 in sheet). "
         "Sheet value seeded; revisit in tuning."
     ),
     # Cushion per-strategy divergence
-    ("weekly_grind", "cushion_of_price"): (
+    (_WG, "cushion_of_price"): (
         "DIVERGENCE: sheet WG >= 1.5%; code uses same 1%/2% graduated penalty as SP "
         "(no WG-specific threshold). Sheet value seeded; revisit in tuning."
     ),
@@ -1518,22 +1552,22 @@ _JUNCTION_DIVERGENCE_NOTES = {
 
 # Trade type structure divergences — junction rationale on structure gates
 _STRUCTURE_DIVERGENCE_NOTES = {
-    ("weekly_grind", "long_call"): (
+    (_WG, "long_call"): (
         "DIVERGENCE: sheet includes LONG_CALL for WG; code/business-rules.md = "
         "credit-only. Sheet value seeded per OTA-687; differs from business-rules.md — "
         "reconcile during tuning."
     ),
-    ("weekly_grind", "long_put"): (
+    (_WG, "long_put"): (
         "DIVERGENCE: sheet includes LONG_PUT for WG; code/business-rules.md = "
         "credit-only. Sheet value seeded per OTA-687; differs from business-rules.md — "
         "reconcile during tuning."
     ),
-    ("lottery_ticket", "iron_condor"): (
+    (_LT, "iron_condor"): (
         "DIVERGENCE: sheet includes IRON_CONDOR for LT; code has LONG_CALL + LONG_PUT, "
         "no iron condor. Sheet value seeded per OTA-687; differs from code — "
         "reconcile during tuning."
     ),
-    ("lottery_ticket", "long_put"): (
+    (_LT, "long_put"): (
         "DIVERGENCE: sheet LT = LONG_PUT + IRON_CONDOR; code/business-rules.md = "
         "LONG_CALL + LONG_PUT (adds LONG_CALL, omits IRON_CONDOR). Sheet structures "
         "seeded per OTA-687; reconcile during tuning."
@@ -1673,7 +1707,7 @@ _LONG_DTE_RATIONALE = (
 # These match what the scorer injects at runtime today; seeding them on the
 # junction row makes the junction self-contained for OTA-779 (scorer deletion).
 _DELTA_QUALITY_PARAMS = {
-    "trend_rider": {"delta_center": 0.60, "delta_half_range": 0.10},
+    _TR: {"delta_center": 0.60, "delta_half_range": 0.10},
 }
 
 
@@ -1776,7 +1810,7 @@ def set_gate_mechanics(rules, junctions):
     # verdict. LT's stop_if_fail=true with terminal_verdict=NULL is a known gap
     # flagged for follow-up under OTA-680.
     for j in junctions:
-        if j["strategy_key"] == "lottery_ticket" and j["rule_key"].startswith("earnings_route"):
+        if j["strategy_key"] == _LT and j["rule_key"].startswith("earnings_route"):
             j["terminal_verdict"] = None
 
     # Verify no duplicates
@@ -2155,7 +2189,7 @@ def canonicalize_expressions(rules, junctions):
 #    re-enable is deferred to backtesting.
 #      * spread_width_tier_compliance — needs the 5-tier Width Configuration
 #        producer (OTA-690), not built. NOTE: it is a HARD-STOP gate on
-#        steady_paycheck / weekly_grind / trend_rider, so parking removes a kill
+#        steady-paycheck / weekly-grind / trend-rider, so parking removes a kill
 #        gate for the parked window (accepted by Don).
 #      * stock_extended_against_entry / stock_extended_in_trade_direction —
 #        soft gates (-10) whose magnitude signal overlaps the adjustment-phase
@@ -2468,6 +2502,102 @@ def cleanup_decomposed_compounds(cursor, compound_rule_keys: set[str]):
     """)
     if cursor.rowcount:
         log.info("  Disabled rule 'days_until_next_earnings' (kept for divergence record)")
+
+
+# ── OTA-841: retire the pre-rename underscore SCREENING strategies ────────
+#
+# The seed now emits the canonical hyphen strategy_key domain. Because the
+# upsert model is keyed on (owner_app_id, strategy_key) and never deletes, a
+# re-run against a DB seeded with the OLD underscore keys would INSERT the new
+# hyphen rows ALONGSIDE the orphaned underscore ones (same hazard
+# cleanup_decomposed_compounds handles for renamed rules). This explicitly
+# removes the four retired underscore SCREENING strategies and everything that
+# hangs off them.
+_OTA841_RETIRED_SCREENING_KEYS = (
+    "steady_paycheck",
+    "weekly_grind",
+    "trend_rider",
+    "lottery_ticket",
+)
+
+
+def cleanup_renamed_screening_strategies(cursor):
+    """Delete the pre-OTA-841 underscore SCREENING strategies (+ dependents).
+
+    Destructive, so deliberately precise:
+      * scoped to an EXPLICIT underscore key list AND consumer_surface='SCREENING'
+        (owner OTA) — a directional_* underscore key can never be caught;
+      * FK-safe cascade — dependent junctions and the underscore scan_parameters
+        lookups first, then the strategy rows (verdict bands live in the strategy
+        row's verdict_band_set JSON column — no separate band table to clear);
+      * idempotent — a no-op when the underscore rows are already gone, so the
+        prod reseed at go-live (where they never existed) and any dev re-run are
+        both safe.
+    """
+    key_ph = ",".join("?" for _ in _OTA841_RETIRED_SCREENING_KEYS)
+
+    # Resolve the old underscore SCREENING strategy_ids (surface-filtered so a
+    # directional underscore key is structurally excluded).
+    cursor.execute(
+        f"""
+        SELECT strategy_id, strategy_key FROM dbo.engine_strategies
+        WHERE owner_app_id = 'OTA' AND consumer_surface = 'SCREENING'
+          AND strategy_key IN ({key_ph})
+        """,
+        *_OTA841_RETIRED_SCREENING_KEYS,
+    )
+    rows = cursor.fetchall()
+    if not rows:
+        log.info("OTA-841 cleanup: no retired underscore screening strategies present (no-op)")
+        return
+
+    old_ids = [r[0] for r in rows]
+    old_keys = [r[1] for r in rows]
+    id_ph = ",".join("?" for _ in old_ids)
+
+    # 1. Dependent junctions (FK → engine_strategies.strategy_id).
+    cursor.execute(
+        f"DELETE FROM dbo.engine_strategy_rule_junction WHERE strategy_id IN ({id_ph})",
+        *old_ids,
+    )
+    log.info(f"OTA-841 cleanup: deleted {cursor.rowcount} junction row(s) for {old_keys}")
+
+    # 2. Underscore per-strategy scan_parameters lookups (keyed by the old key).
+    cursor.execute(
+        f"""
+        DELETE FROM dbo.engine_lookups
+        WHERE owner_app_id = 'OTA' AND lookup_set = 'scan_parameters'
+          AND lookup_key IN ({key_ph})
+        """,
+        *_OTA841_RETIRED_SCREENING_KEYS,
+    )
+    log.info(f"OTA-841 cleanup: deleted {cursor.rowcount} scan_parameters lookup row(s)")
+
+    # 3. The retired strategy rows themselves.
+    cursor.execute(
+        f"""
+        DELETE FROM dbo.engine_strategies
+        WHERE owner_app_id = 'OTA' AND consumer_surface = 'SCREENING'
+          AND strategy_id IN ({id_ph})
+        """,
+        *old_ids,
+    )
+    log.info(
+        f"OTA-841 cleanup: deleted {cursor.rowcount} retired screening strategy row(s): {old_keys}"
+    )
+
+    # 4. Verify no orphan junction still references a deleted strategy_id.
+    cursor.execute(
+        f"SELECT COUNT(*) FROM dbo.engine_strategy_rule_junction WHERE strategy_id IN ({id_ph})",
+        *old_ids,
+    )
+    orphans = cursor.fetchone()[0]
+    if orphans:
+        raise RuntimeError(
+            f"OTA-841 cleanup: {orphans} orphan junction row(s) still reference "
+            f"deleted strategy_ids {old_ids}"
+        )
+    log.info("OTA-841 cleanup: verified zero orphan junctions for deleted screening strategy_ids")
 
 
 # ── OTA-833: DIRECTIONAL surface — three thesis-comparison objectives ─────
@@ -3146,6 +3276,11 @@ def main():
         # OTA-683 follow-up: remove decomposed compounds + unbind days_until_next_earnings
         log.info("Cleaning up decomposed compound rules (OTA-683 follow-up)...")
         cleanup_decomposed_compounds(cursor, compound_removals)
+
+        # OTA-841 follow-up: retire the pre-rename underscore SCREENING strategies
+        # left orphaned by the strategy_key rename (upsert-only never deletes).
+        log.info("Retiring pre-rename underscore screening strategies (OTA-841)...")
+        cleanup_renamed_screening_strategies(cursor)
 
         conn.commit()
         log.info("Seed import committed successfully.")

@@ -582,9 +582,9 @@ def _sp_rules():
 def _sp_strategies():
     return [{
         "strategy_id": 100, "owner_app_id": "OTA",
-        "strategy_key": "steady_paycheck",
+        "strategy_key": "steady-paycheck",
         "display_name": "Steady Paycheck", "consumer_surface": "SCREENING",
-        "description": None, "compatible_structures": ["BULL_PUT_CREDIT", "BEAR_CALL_CREDIT"],
+        "description": None, "compatible_structures": ["bull_put_credit", "bear_call_credit"],
         "verdict_band_set": [
             {"verdict": "EXECUTE", "min_score": 70, "max_score": 100},
             {"verdict": "WAIT", "min_score": 50, "max_score": 69.99},
@@ -698,9 +698,9 @@ def _tr_rules():
 def _tr_strategies():
     return [{
         "strategy_id": 200, "owner_app_id": "OTA",
-        "strategy_key": "trend_rider",
+        "strategy_key": "trend-rider",
         "display_name": "Trend Rider", "consumer_surface": "SCREENING",
-        "description": None, "compatible_structures": ["BULL_CALL_DEBIT", "LONG_CALL"],
+        "description": None, "compatible_structures": ["bull_call_debit", "long_call"],
         "verdict_band_set": [
             {"verdict": "EXECUTE", "min_score": 70, "max_score": 100},
             {"verdict": "WAIT", "min_score": 50, "max_score": 69.99},
@@ -785,7 +785,7 @@ class TestEndToEndSteadyPaycheck:
 
         results = evaluate(
             candidates=[c],
-            strategy_key="steady_paycheck",
+            strategy_key="steady-paycheck",
             source_app_id="OTA",
             config=config,
             registry=registry,
@@ -834,7 +834,7 @@ class TestEndToEndSteadyPaycheck:
 
         results = evaluate(
             candidates=[c],
-            strategy_key="steady_paycheck",
+            strategy_key="steady-paycheck",
             source_app_id="OTA",
             config=config,
             registry=registry,
@@ -881,7 +881,7 @@ class TestEndToEndSteadyPaycheck:
 
         results = evaluate(
             candidates=[c],
-            strategy_key="steady_paycheck",
+            strategy_key="steady-paycheck",
             source_app_id="OTA",
             config=config,
             registry=registry,
@@ -921,7 +921,7 @@ class TestEndToEndTrendRider:
 
         results = evaluate(
             candidates=[c],
-            strategy_key="trend_rider",
+            strategy_key="trend-rider",
             source_app_id="OTA",
             config=config,
             registry=registry,
@@ -977,7 +977,7 @@ class TestEndToEndMultiCandidate:
 
         results = evaluate(
             candidates=[good, bad],
-            strategy_key="steady_paycheck",
+            strategy_key="steady-paycheck",
             source_app_id="OTA",
             config=config,
             registry=registry,

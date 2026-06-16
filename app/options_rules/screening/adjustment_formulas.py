@@ -192,7 +192,7 @@ def adj_dte_8_13_penalty(named_values: dict, params: dict) -> float:
 #
 # Replaces the non-§6.3 workbook condition "REDUCE SCORE BY 15 IF price is
 # positioned against the trade direction across all 3 SMAs" on the rule
-# `adj_sma_alignment_against_trade` (bound to steady_paycheck + weekly_grind),
+# `adj_sma_alignment_against_trade` (bound to steady-paycheck + weekly-grind),
 # which blocked load_config. Cross-field (price vs sma_8/21/50 vs
 # trade_direction) → cannot be a §6.3 atom, so it is a formula. Replicates the
 # captured penalty: -15 when price is on the wrong side of all three SMAs for

@@ -38,7 +38,10 @@ pytestmark = pytest.mark.skipif(
     reason=f"seed workbook not available at {DEFAULT_XLSX}",
 )
 
-SCREENING_STRATEGIES = {"steady_paycheck", "weekly_grind", "trend_rider", "lottery_ticket"}
+# OTA-841: SCREENING strategy keys are the system-canonical hyphen form (the
+# engine seed was the lone underscore outlier). DIRECTIONAL keys stay underscore
+# — a separate surface with no canonical hyphen form.
+SCREENING_STRATEGIES = {"steady-paycheck", "weekly-grind", "trend-rider", "lottery-ticket"}
 DIRECTIONAL_STRATEGIES = {"directional_income", "directional_growth", "directional_longshot"}
 EXPECTED_CONTRACT_COUNT = 36
 

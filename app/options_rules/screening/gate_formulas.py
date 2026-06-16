@@ -150,7 +150,7 @@ def earnings_route4_pre_momentum_play(named_values: dict, params: dict) -> bool:
 # Contract-only formula given a live implementation. The rule
 # `chart_state_matches_trade_direction` (engine_rules) carries
 # formula_ref="formula:chart_state_matches_direction" and binds to the
-# directional screening strategies (trend_rider, lottery_ticket) as a
+# directional screening strategies (trend-rider, lottery-ticket) as a
 # stop_if_fail gate. Before OTA-836 the formula was in the contract but had no
 # live impl, firing FORMULA_REGISTRY_DRIFT / FORMULA_MISSING_FROM_LIVE_REGISTRY.
 #
