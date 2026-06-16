@@ -46,7 +46,8 @@ from app.analysis.long_call_engine import (
 from app.insight_engine import evaluate
 from app.ota_adapters.directional import DirectionalAdapter
 from app.options_rules.directional import get_registry as get_directional_registry
-from app.ota_adapters.engine_runtime import get_engine_runtime
+from app.options_rules.screening import get_registry as get_screening_registry
+from app.ota_adapters.engine_runtime import get_engine_runtime, EngineRuntime
 from app.ota_adapters._shared.sma import compute_sma_signal
 from app.services.symbol_normalization import canonicalize
 from app.services.symbol_cache import to_api_symbol_cached
@@ -58,6 +59,8 @@ from app.analysis.strategy_routing import (
     get_option_types_for_strategy,
     uses_vertical_engine,
     uses_long_option_engine,
+    get_compatible_strategies,
+    normalize_to_structure,
 )
 from app.analysis.black_scholes import compute_probability_matrix
 from app.models.schemas import (
@@ -187,22 +190,27 @@ async def _adapter_fetch(
     max_dte: int = 60,
     strike_range_pct: float = 10.0,
     option_type: Optional[str] = None,
-) -> OptionsChainAdapter:
+    structure_types: Optional[list[str]] = None,
+) -> tuple[OptionsChainAdapter, list]:
     """
-    Fetch options chain via OptionsChainAdapter.
+    Fetch options chain via OptionsChainAdapter and build engine candidates.
 
-    Returns the adapter instance; callers access adapter.contracts,
-    adapter.underlying_price, and adapter.chain_data for backward
-    compat with existing analysis engines.
+    Returns ``(adapter, candidates)``. ``candidates`` is the §5 Candidate
+    stream the Insight Engine evaluates (OTA-759); ``adapter`` still exposes
+    ``contracts`` / ``underlying_price`` / ``chain_data`` for chain-snapshot
+    persistence. ``structure_types`` restricts the structures the adapter
+    builds (e.g. exactly the request's spread_types) — None builds every
+    structure, matching the legacy chain-fetch behaviour.
     """
     adapter = OptionsChainAdapter()
     try:
-        await adapter.produce_candidates({
+        candidates = await adapter.produce_candidates({
             "symbol": symbol,
             "min_dte": min_dte,
             "max_dte": max_dte,
             "strike_range_pct": strike_range_pct,
             "option_type": option_type,
+            "structure_types": structure_types,
             "user_id": user.get("sub"),
         })
     except Exception as e:
@@ -219,7 +227,7 @@ async def _adapter_fetch(
             detail=f"Could not determine underlying price for {symbol.upper()}"
         )
 
-    return adapter
+    return adapter, candidates
 
 
 async def _persist_chain_snapshot(
@@ -345,47 +353,21 @@ def _build_vertical_candidate(
         "prob_of_profit": spread.get("prob_of_profit"),
     }
 
-    # Per-component scores from the engine (raw 0-100 values)
-    engine_scores = {
-        "ev_score": spread.get("ev_score"),
-        "rr_score": spread.get("rr_score"),
-        "prob_score": spread.get("prob_score"),
-        "liquidity_score": spread.get("liquidity_score"),
-        "theta_score": spread.get("theta_score"),
-    }
-
-    # OTA-643 precursor: structured component breakdown for score table rendering.
-    # Maps engine score keys to display labels and captures weight + contribution.
-    _VERTICAL_COMPONENT_MAP = [
-        ("ev_score",        "Expected value (EV)",            0.35),
-        ("rr_score",        "Structure fit (vs profile)",     0.25),
-        ("prob_score",      "Cushion / strike placement",     0.20),
-        ("liquidity_score", "Liquidity (bid-ask, volume)",    0.15),
-        ("theta_score",     "IV environment",                 0.05),
-    ]
-    component_breakdown = []
-    raw_total = 0.0
-    for key, label, default_weight in _VERTICAL_COMPONENT_MAP:
-        score_val = engine_scores.get(key) or 0
-        score_int = min(100, max(0, round(float(score_val))))
-        contribution = round(float(score_val) * default_weight, 1)
-        raw_total += contribution
-        component_breakdown.append({
-            "key": key, "label": label,
-            "score": score_int, "weight": default_weight,
-            "contribution": contribution,
-        })
-    raw_total = round(raw_total, 1)
-
+    # OTA-759: pipeline_components rebuilt from the engine ScoringBreakdown,
+    # carried on the row as ``score_components`` (C-3). The legacy fixed min-max
+    # component map is retired; pipeline_score/verdict are engine-owned. The
+    # export reader (_build_score_breakdown) consumes component_breakdown +
+    # raw_total + adjusted_total, so those keys are preserved.
+    components = spread.get("score_components") or []
+    raw_total = round(sum(float(c.get("contribution") or 0) for c in components), 1)
     pipeline_components = {
-        **engine_scores,
-        "component_breakdown": component_breakdown,
+        "component_breakdown": components,
         "raw_total": raw_total,
         "adjusted_total": spread.get("composite_score"),
+        "verdict": spread.get("verdict"),
     }
 
     structure = spread.get("spread_type", "vertical")
-    strategies = spread.get("fitting_strategies", [])
 
     return TradeCandidate(
         trade_key=trade_key,
@@ -399,7 +381,9 @@ def _build_vertical_candidate(
         pipeline_score=spread.get("composite_score"),
         pipeline_components=json.dumps(pipeline_components),
         scan_source="/analyze/verticals",
-        scan_strategy_key=strategies[0] if strategies else None,
+        # The strategy whose engine verdict/score won this candidate (best by
+        # verdict tier, then score). Was fitting_strategies[0] (a DTE tag) before.
+        scan_strategy_key=spread.get("scoring_strategy_key"),
         scanned_at=datetime.now(timezone.utc),
     )
 
@@ -434,41 +418,15 @@ def _build_long_option_candidate(
         "iv_rank": option.get("iv_rank"),
     }
 
-    engine_scores = {
-        "delta_score": option.get("delta_score"),
-        "theta_score": option.get("theta_score"),
-        "iv_score": option.get("iv_score"),
-        "rr_score": option.get("rr_score"),
-        "liquidity_score": option.get("liquidity_score"),
-    }
-
-    # OTA-643 precursor: structured component breakdown for long options.
-    _LONG_COMPONENT_MAP = [
-        ("delta_score",     "Technical alignment (SMAs)",     0.30),
-        ("rr_score",        "Expected value (EV)",            0.25),
-        ("iv_score",        "IV environment",                 0.20),
-        ("theta_score",     "DTE fit",                        0.15),
-        ("liquidity_score", "Liquidity (bid-ask, volume)",    0.10),
-    ]
-    component_breakdown = []
-    raw_total = 0.0
-    for key, label, default_weight in _LONG_COMPONENT_MAP:
-        score_val = engine_scores.get(key) or 0
-        score_int = min(100, max(0, round(float(score_val))))
-        contribution = round(float(score_val) * default_weight, 1)
-        raw_total += contribution
-        component_breakdown.append({
-            "key": key, "label": label,
-            "score": score_int, "weight": default_weight,
-            "contribution": contribution,
-        })
-    raw_total = round(raw_total, 1)
-
+    # OTA-759: pipeline_components rebuilt from the engine ScoringBreakdown
+    # carried on the row as ``score_components`` (C-3).
+    components = option.get("score_components") or []
+    raw_total = round(sum(float(c.get("contribution") or 0) for c in components), 1)
     pipeline_components = {
-        **engine_scores,
-        "component_breakdown": component_breakdown,
+        "component_breakdown": components,
         "raw_total": raw_total,
         "adjusted_total": option.get("composite_score"),
+        "verdict": option.get("verdict"),
     }
 
     return TradeCandidate(
@@ -483,7 +441,7 @@ def _build_long_option_candidate(
         pipeline_score=option.get("composite_score"),
         pipeline_components=json.dumps(pipeline_components),
         scan_source="/analyze/long-calls",
-        scan_strategy_key=None,
+        scan_strategy_key=option.get("scoring_strategy_key"),
         scanned_at=datetime.now(timezone.utc),
     )
 
@@ -498,6 +456,271 @@ async def _persist_trade_candidates(
         await db.flush()
     except Exception as e:
         log.warning(f"Failed to persist trade candidates: {e}")
+
+
+# ─── OTA-759: engine-backed screening for the scan routes ────────────────────
+#
+# /analyze/verticals and /analyze/long-calls run their candidates through the
+# Insight Engine (insight_engine.md §1: all rule-based evaluation flows through
+# the engine — there is no second scoring path). Routing is PER-CANDIDATE off
+# compatible_structures (via strategy_routing), never a route→strategy table and
+# never an `if strategy_key ==` branch: each candidate is evaluated only under
+# the screening strategies whose compatible_structures include its structure,
+# and its row takes the best result by (verdict tier, score) — the /analyze/
+# directional precedent. composite_score = ResultRecord.final_score (absolute
+# engine score, replacing the legacy strategy-agnostic min-max composite);
+# verdict is an additive field. The OTA-758 sink is passed as additive bronze
+# only — operational persistence (chain snapshot / AnalysisRun / AnalyzedTrade /
+# TradeCandidate) is rebuilt at the route and never delegated to the sink.
+
+# Verdict-tier ranking for the per-candidate cross-strategy pick. Tier FIRST,
+# then score (mirrors _DIRECTIONAL_VERDICT_TIER): a clean EXECUTE outranks any
+# WAIT/PASS regardless of raw score. WAIT_FOR_EARNINGS is a halt verdict that
+# sits with WAIT. Unknown / None verdict ranks below PASS.
+_SCREENING_VERDICT_TIER = {
+    "EXECUTE": 3,
+    "WAIT": 2,
+    "WAIT_FOR_EARNINGS": 2,
+    "PASS": 1,
+}
+
+
+def _screening_rank(verdict: Optional[str], score: Optional[float]) -> tuple[int, float]:
+    """(verdict_tier, score) sort key — higher is better. Halt/None score → -1."""
+    tier = _SCREENING_VERDICT_TIER.get(verdict or "", 0)
+    return (tier, score if score is not None else -1.0)
+
+
+def _humanize_rule_key(rule_key: str) -> str:
+    """Display label for an engine scoring-criterion rule_key (e.g.
+    'theta_margin_ratio' → 'Theta Margin Ratio'). The engine's per-strategy
+    criteria differ from the retired fixed component map, so the label is
+    derived from the rule_key rather than a hardcoded table."""
+    return rule_key.replace("_", " ").title()
+
+
+def _score_components_from_record(record) -> list[dict]:
+    """Rebuild the UI/persistence component breakdown from the engine
+    ScoringBreakdown (OTA-759 C-3). Shape matches the export reader
+    (_build_score_breakdown): {key, label, score, weight, contribution}.
+
+    raw_value is the criterion's absolute [0,100] output; weighted_contribution
+    is its share of the final score. Returns [] for a halted candidate that
+    never reached scoring.
+    """
+    out: list[dict] = []
+    for sb in record.scoring_breakdown:
+        out.append({
+            "key": sb.rule_key,
+            "label": _humanize_rule_key(sb.rule_key),
+            "score": min(100, max(0, round(float(sb.raw_value or 0)))),
+            "weight": sb.weight,
+            "contribution": round(float(sb.weighted_contribution or 0), 1),
+        })
+    return out
+
+
+def _compatible_screening_strategies(candidate) -> list[str]:
+    """Screening strategy keys structurally compatible with this candidate.
+
+    Per-candidate routing off compatible_structures (strategy_routing): the
+    candidate's structure (named_values['spread_type'], e.g. 'bull_call' or
+    'long_call') is normalised to a compatible_structures value and reverse-
+    mapped to the strategies that accept it. Spread structures map via
+    normalize_to_structure; naked structures ('long_call'/'long_put') are
+    already canonical compatible_structures values.
+    """
+    structure = candidate.named_values.get("spread_type")
+    if not structure:
+        return []
+    structure_value = normalize_to_structure(spread_type=structure) or structure
+    return get_compatible_strategies(structure_value)
+
+
+def _screen_candidates_through_engine(
+    runtime: EngineRuntime,
+    adapter: OptionsChainAdapter,
+    candidates: list,
+) -> dict[str, tuple]:
+    """Evaluate each candidate under its structurally-compatible screening
+    strategies; return {candidate_id: (best_record, best_strategy_key)}.
+
+    One engine.evaluate per applicable strategy over only the candidates that
+    strategy accepts. Fail-closed (insight_engine.md §3.8): if any applicable
+    strategy is absent from the hydrated config (e.g. its surface was pruned),
+    422 rather than silently scoring against a missing strategy. The sink is
+    passed for additive bronze (OTA-758); it never substitutes for the route's
+    operational persistence.
+    """
+    compat = {c.candidate_id: _compatible_screening_strategies(c) for c in candidates}
+    applicable = sorted({k for keys in compat.values() for k in keys})
+    if not applicable:
+        return {}
+
+    missing = [k for k in applicable if k not in runtime.config.rule_sets]
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Screening strategies not present in the engine config: {missing}. "
+                "Fail-closed — the engine_* tables are not seeded (or the SCREENING "
+                "surface was pruned) for these strategies."
+            ),
+        )
+
+    registry = get_screening_registry()
+    # LHS null-semantics from the §5.1 catalog (OTA-838): a null gate input
+    # honors its declared SKIP/FAIL_OPEN/FAIL_CLOSED rather than mechanically
+    # failing closed. Same construction as /analyze/directional.
+    null_semantics = {
+        e.name: e.null_semantics
+        for e in adapter.input_catalog()
+        if e.null_semantics is not None
+    }
+
+    best: dict[str, tuple] = {}
+    for strategy_key in applicable:
+        subset = [c for c in candidates if strategy_key in compat[c.candidate_id]]
+        if not subset:
+            continue
+        records = evaluate(
+            candidates=subset,
+            strategy_key=strategy_key,
+            source_app_id="OTA",
+            config=runtime.config,
+            registry=registry,
+            adapter=adapter,
+            sink=runtime.sink,
+            null_semantics=null_semantics,
+        )
+        for record in records:
+            cid = record.candidate_id
+            cand_rank = _screening_rank(record.verdict, record.final_score)
+            current = best.get(cid)
+            if current is None or cand_rank > _screening_rank(
+                current[0].verdict, current[0].final_score
+            ):
+                best[cid] = (record, strategy_key)
+
+    return best
+
+
+def _vertical_engine_row(candidate, record) -> dict:
+    """Build one /analyze/verticals response row from a candidate's named_values
+    + its winning engine ResultRecord (OTA-759).
+
+    Display/math fields are sourced UNCHANGED from the adapter's named_values;
+    composite_score (= final_score) and verdict are engine-owned. score_components
+    is the rebuilt breakdown (C-3) used by both the response and TradeCandidate
+    persistence. The legacy min-max ev_score/rr_score/... and score_breakdown
+    (norm_min/norm_max) are not produced by the engine and are dropped — the live
+    consumer (TradesPage) reads composite_score + fitting_strategies + display
+    fields only, not the per-component min-max breakdown.
+    """
+    nv = candidate.named_values
+    price = nv.get("underlying_price") or 0.0
+    structure = nv.get("spread_type")
+
+    long_delta = nv.get("long_delta") or 0.0
+    short_delta = nv.get("short_delta") or 0.0
+    net_delta = round(abs(long_delta) - abs(short_delta), 4)
+
+    breakeven = nv.get("breakeven") or 0.0
+    if structure in ("bull_call", "bear_call"):
+        required_move = ((breakeven - price) / price * 100) if price else 0.0
+    else:
+        required_move = ((price - breakeven) / price * 100) if price else 0.0
+
+    return {
+        "spread_type": structure,
+        "long_strike": nv.get("long_strike"),
+        "short_strike": nv.get("short_strike"),
+        "option_type": nv.get("option_type"),
+        "expiration": nv.get("expiration"),
+        "dte": nv.get("dte"),
+        "net_debit": nv.get("net_debit"),
+        "max_profit": nv.get("max_profit"),
+        "max_loss": nv.get("max_loss"),
+        "breakeven": breakeven,
+        "spread_width": nv.get("spread_width"),
+        "net_delta": net_delta,
+        "net_theta": nv.get("net_theta"),
+        "prob_of_profit": nv.get("prob_of_profit"),
+        "reward_risk_ratio": nv.get("reward_risk_ratio"),
+        "ev_raw": nv.get("ev_raw"),
+        "required_move_pct": round(required_move, 2),
+        "iv": nv.get("short_iv") or nv.get("long_iv"),
+        # Leg-level fields (for TradeCandidate leg detail + display)
+        "long_bid": nv.get("long_bid"),
+        "long_ask": nv.get("long_ask"),
+        "short_bid": nv.get("short_bid"),
+        "short_ask": nv.get("short_ask"),
+        "long_delta": long_delta,
+        "short_delta": short_delta,
+        "long_iv": nv.get("long_iv"),
+        "short_iv": nv.get("short_iv"),
+        "long_volume": nv.get("long_volume"),
+        "short_volume": nv.get("short_volume"),
+        "long_oi": nv.get("long_oi"),
+        "short_oi": nv.get("short_oi"),
+        # Engine-owned (OTA-759): verdict + absolute weighted score.
+        "composite_score": record.final_score,
+        "verdict": record.verdict,
+        "score_components": _score_components_from_record(record),
+        # Additive (OTA-759): the strategy whose verdict/score won this candidate.
+        "scoring_strategy_key": None,  # set by _build_engine_rows after the pick
+    }
+
+
+def _long_option_engine_row(candidate, record) -> dict:
+    """Build one /analyze/long-calls response row from a candidate's named_values
+    + its winning engine ResultRecord (OTA-759). See _vertical_engine_row."""
+    nv = candidate.named_values
+    theta = nv.get("theta") or 0.0
+    return {
+        "strike": nv.get("strike"),
+        "option_type": nv.get("option_type"),
+        "expiration": nv.get("expiration"),
+        "days_to_exp": nv.get("dte"),
+        "bid": nv.get("bid"),
+        "ask": nv.get("ask"),
+        "mid_price": nv.get("mid_price"),
+        "premium_dollars": nv.get("premium_dollars"),
+        "delta": nv.get("delta"),
+        "theta_per_day_dollars": round(abs(theta) * 100, 2),
+        "theta_runway_days": nv.get("theta_runway_days"),
+        "breakeven": nv.get("breakeven"),
+        "breakeven_distance_pct": nv.get("breakeven_distance_pct"),
+        "iv": nv.get("iv"),
+        "volume": nv.get("volume"),
+        "open_interest": nv.get("open_interest"),
+        "occ_symbol": None,
+        # Engine-owned (OTA-759).
+        "composite_score": record.final_score,
+        "verdict": record.verdict,
+        "score_components": _score_components_from_record(record),
+        # Additive (OTA-759): the strategy whose verdict/score won this candidate.
+        "scoring_strategy_key": None,  # set by _build_engine_rows after the pick
+    }
+
+
+def _build_engine_rows(candidates, best: dict, row_builder) -> list[dict]:
+    """Assemble response rows for the candidates the engine scored, ranked best
+    first by (verdict tier, score). ``best`` is {candidate_id: (record, key)}."""
+    by_id = {c.candidate_id: c for c in candidates}
+    rows: list[dict] = []
+    for cid, (record, strategy_key) in best.items():
+        candidate = by_id.get(cid)
+        if candidate is None:
+            continue
+        row = row_builder(candidate, record)
+        row["scoring_strategy_key"] = strategy_key
+        rows.append(row)
+    rows.sort(
+        key=lambda r: _screening_rank(r.get("verdict"), r.get("composite_score")),
+        reverse=True,
+    )
+    return rows
 
 
 # ─── Scoring Orchestration (moved from strategy_scorer.py — OTA-779) ───
@@ -958,55 +1181,40 @@ async def analyze_verticals(
     else:
         _env_min, _env_max = req.min_dte, req.max_dte
 
-    adapter = await _adapter_fetch(
+    # Engine runtime resolved once (insight_engine.md §6.5). SCREENING is a
+    # REQUIRED surface, so a healthy boot guarantees it is hydrated; the
+    # per-strategy fail-closed guard lives in _screen_candidates_through_engine.
+    runtime = get_engine_runtime()
+
+    # Build engine candidates for EXACTLY the requested spread structures — the
+    # candidate universe scanned is unchanged from before (no added structures).
+    adapter, candidates = await _adapter_fetch(
         req.symbol, user,
         min_dte=_env_min,
         max_dte=_env_max,
         strike_range_pct=req.strike_range_pct,
+        structure_types=list(req.spread_types),
     )
-    contracts = adapter.contracts
     price = adapter.underlying_price
     chain_data = adapter.chain_data
 
-    # Build weights (use overrides if provided, else defaults)
-    weights = ScoringWeights()
-    if req.ev_weight is not None:
-        weights.expected_value = req.ev_weight
-    if req.rr_weight is not None:
-        weights.reward_risk = req.rr_weight
-    if req.prob_weight is not None:
-        weights.probability = req.prob_weight
-    if req.liq_weight is not None:
-        weights.liquidity = req.liq_weight
-    if req.theta_weight is not None:
-        weights.theta_efficiency = req.theta_weight
+    # Per-candidate engine evaluation → best (verdict tier, score) per spread.
+    # composite_score = engine final_score; verdict additive. The request's
+    # weight/filter overrides are no longer applied — gates and weights are the
+    # engine config's (insight_engine.md §2.1, tables are the source of truth).
+    best = _screen_candidates_through_engine(runtime, adapter, candidates)
+    spreads = _build_engine_rows(candidates, best, _vertical_engine_row)
 
-    try:
-        weights.validate()
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
+    result = {
+        "spreads": spreads,
+        "total_valid": len(spreads),
+        "underlying_price": price,
+    }
 
-    filters = SpreadFilters(
-        spread_types=req.spread_types,
-        min_short_delta=req.min_short_delta,
-        max_short_delta=req.max_short_delta,
-        max_spread_width=req.max_spread_width,
-        min_net_delta=req.min_net_delta,
-        max_net_theta=req.max_net_theta,
-        min_open_interest=req.min_open_interest,
-        min_volume=req.min_volume,
-        min_reward_risk=req.min_reward_risk,
-        min_ev_threshold=req.min_ev_threshold,
-    )
-    engine = VerticalSpreadEngine(weights=weights, filters=filters)
-
-    result = engine.analyze(
-        contracts=contracts,
-        underlying_price=price,
-        max_results=None,  # don't truncate before strategy filter
-    )
-
-    # OTA-559: Tag each spread with fitting strategies and filter
+    # OTA-559: Tag each spread with fitting strategies and filter. UNCHANGED —
+    # a DTE-band membership tag, intentionally decoupled from the structural
+    # scoring set (a spread can be DTE-tagged for one strategy yet scored by
+    # another it is structurally compatible with).
     if _strategy_bands:
         tagged = []
         for s in result.get("spreads", []):
@@ -1023,12 +1231,11 @@ async def analyze_verticals(
     # ── Persist analysis data (never block the response on failure) ──
     try:
         now = datetime.now(timezone.utc)
-        weights_dict = {
-            "expected_value": weights.expected_value,
-            "reward_risk": weights.reward_risk,
-            "probability": weights.probability,
-            "liquidity": weights.liquidity,
-            "theta_efficiency": weights.theta_efficiency,
+        # Per-strategy weights now live in the engine config, not a single
+        # request weight set; record provenance instead.
+        scoring_weights = {
+            "source": "insight_engine",
+            "config_version": runtime.config_version,
         }
         filter_dict = {
             "spread_types": req.spread_types,
@@ -1050,7 +1257,7 @@ async def analyze_verticals(
             analysis_type="verticals",
             underlying_price=price,
             chain_snapshot_id=chain_id,
-            scoring_weights=weights_dict,
+            scoring_weights=scoring_weights,
             filter_params=filter_dict,
             result_count=len(spreads),
             total_valid=result.get("total_valid", len(spreads)),
@@ -1060,6 +1267,7 @@ async def analyze_verticals(
         await db.flush()
 
         for s in spreads:
+            _components = s.get("score_components") or []
             db.add(AnalyzedTrade(
                 run_id=run.id,
                 user_id=user_id,
@@ -1083,15 +1291,15 @@ async def analyze_verticals(
                 short_volume=s.get("short_volume"),
                 long_oi=s.get("long_oi"),
                 short_oi=s.get("short_oi"),
-                composite_score=s.get("composite_score", 0),
+                composite_score=s.get("composite_score") or 0,
+                # Engine ScoringBreakdown (criterion → absolute score) + verdict
+                # + winning strategy. Replaces the legacy fixed min-max keys.
                 score_breakdown={
-                    "ev_score": s.get("ev_score"),
-                    "rr_score": s.get("rr_score"),
-                    "prob_score": s.get("prob_score"),
-                    "liquidity_score": s.get("liquidity_score"),
-                    "theta_score": s.get("theta_score"),
+                    **{c["key"]: c["score"] for c in _components},
+                    "verdict": s.get("verdict"),
+                    "strategy_key": s.get("scoring_strategy_key"),
                 },
-                scoring_weights=weights_dict,
+                scoring_weights={c["key"]: c["weight"] for c in _components},
                 captured_at=now,
             ))
 
@@ -1131,42 +1339,44 @@ async def analyze_long_calls(
     if len(req.option_types) == 1:
         chain_type = req.option_types[0]
 
-    adapter = await _adapter_fetch(
+    runtime = get_engine_runtime()
+
+    # Naked long candidates for exactly the requested option types → these route
+    # (per compatible_structures) to lottery-ticket only. trend-rider is a debit-
+    # spread strategy and is structurally unreachable on the naked surface — by
+    # design, not omission.
+    structure_types = [f"long_{t}" for t in req.option_types]
+    adapter, candidates = await _adapter_fetch(
         req.symbol, user,
         min_dte=req.min_dte,
         max_dte=req.max_dte,
         strike_range_pct=req.strike_range_pct,
         option_type=chain_type,
+        structure_types=structure_types,
     )
-    contracts = adapter.contracts
     price = adapter.underlying_price
     chain_data = adapter.chain_data
 
-    filters = LongCallFilters(
-        max_premium=req.max_premium or 1500.0,
-        min_days_to_exp=req.min_dte,
-        max_days_to_exp=req.max_dte,
-        option_types=req.option_types,
-    )
-    engine = LongCallEngine(filters=filters)
+    # Per-candidate engine evaluation → best (verdict tier, score) per option.
+    best = _screen_candidates_through_engine(runtime, adapter, candidates)
+    options = _build_engine_rows(candidates, best, _long_option_engine_row)
+    if req.max_results:
+        options = options[:req.max_results]
 
-    result = engine.analyze(
-        contracts=contracts,
-        underlying_price=price,
-        max_results=req.max_results,
-    )
-    result["symbol"] = sym
+    result = {
+        "calls": options,
+        "total_valid": len(options),
+        "underlying_price": price,
+        "symbol": sym,
+    }
 
     # ── Persist analysis data (never block the response on failure) ──
     try:
         now = datetime.now(timezone.utc)
-        # LongCallEngine uses default weights internally — capture them
-        default_lc_weights = {
-            "delta": 0.30,
-            "theta_efficiency": 0.25,
-            "iv_value": 0.20,
-            "reward_risk": 0.15,
-            "liquidity": 0.10,
+        # Per-strategy weights now live in the engine config; record provenance.
+        scoring_weights = {
+            "source": "insight_engine",
+            "config_version": runtime.config_version,
         }
         filter_dict = {
             "option_types": req.option_types,
@@ -1178,14 +1388,13 @@ async def analyze_long_calls(
 
         chain_id = await _persist_chain_snapshot(db, user_id, sym, price, chain_data)
 
-        options = result.get("calls") or result.get("options", [])
         run = AnalysisRun(
             user_id=user_id,
             symbol=sym,
             analysis_type="naked",
             underlying_price=price,
             chain_snapshot_id=chain_id,
-            scoring_weights=default_lc_weights,
+            scoring_weights=scoring_weights,
             filter_params=filter_dict,
             result_count=len(options),
             total_valid=result.get("total_valid", len(options)),
@@ -1196,6 +1405,7 @@ async def analyze_long_calls(
 
         for o in options:
             opt_type = o.get("option_type", chain_type or "call")
+            _components = o.get("score_components") or []
             db.add(AnalyzedTrade(
                 run_id=run.id,
                 user_id=user_id,
@@ -1214,15 +1424,13 @@ async def analyze_long_calls(
                 breakeven=o.get("breakeven"),
                 long_volume=o.get("volume"),
                 long_oi=o.get("open_interest"),
-                composite_score=o.get("composite_score", 0),
+                composite_score=o.get("composite_score") or 0,
                 score_breakdown={
-                    "delta_score": o.get("delta_score"),
-                    "theta_score": o.get("theta_score"),
-                    "iv_score": o.get("iv_score"),
-                    "rr_score": o.get("rr_score"),
-                    "liquidity_score": o.get("liquidity_score"),
+                    **{c["key"]: c["score"] for c in _components},
+                    "verdict": o.get("verdict"),
+                    "strategy_key": o.get("scoring_strategy_key"),
                 },
-                scoring_weights=default_lc_weights,
+                scoring_weights={c["key"]: c["weight"] for c in _components},
                 captured_at=now,
             ))
 
