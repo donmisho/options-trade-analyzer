@@ -242,6 +242,10 @@ def screening_halted_candidate() -> Candidate:
 
 DIRECTIONAL_STRATEGY = "directional_income"
 
+# The seeded non-stopping (stop_if_fail=False) gate the budget-overrun fixture
+# trips — used by OTA-798 to exercise the §4.2 non-stopping-failure trace clause.
+DIRECTIONAL_NONSTOPPING_GATE = "dir_budget_flag"
+
 
 def _directional_thesis() -> dict[str, Any]:
     return {
@@ -324,6 +328,47 @@ def directional_halted_candidate() -> Candidate:
     }
     candidate = Candidate(
         candidate_id="directional-halt",
+        candidate_type="directional",
+        symbol="TEST",
+        subject_type="THESIS_COMPARISON",
+        named_values=nv,
+    )
+    _directional_compute_derived(candidate)
+    _directional_market_context(nv)
+    return candidate
+
+
+def directional_nonstopping_failure_candidate() -> Candidate:
+    """A thesis-fit bull_call spread whose cost exceeds the risk budget.
+
+    Identical to the passing spread except ``thesis_risk_budget`` (100) is below
+    the trade cost (~185), so the DERIVED ``fits_budget`` is False and the
+    non-stopping ``dir_budget_flag`` gate (stop_if_fail=False) **fails and is
+    recorded** while the candidate continues to a verdict. This is the OTA-798
+    fixture that exercises the §4.2 mandatory-trace clauses in one run: a
+    non-stopping gate failure (recorded, not terminal) and a zero-penalty decision
+    (``held_penalty`` is None → ``score_contribution`` None in bronze).
+    """
+    exp = _future_exp(30)
+    nv: dict[str, Any] = {
+        **_directional_thesis(),
+        "thesis_risk_budget": 100.0,   # below the ~185 trade cost → fits_budget False
+        "underlying_price": 200.0,
+        "spread_type": "bull_call",
+        "option_type": "call",
+        "expiration": exp,
+        "long_strike": 200.0,
+        "short_strike": 210.0,
+        "spread_width": 10.0,
+        "long_bid": 3.00, "long_ask": 3.40,
+        "short_bid": 1.20, "short_ask": 1.50,
+        "long_delta": 0.55, "short_delta": 0.35,
+        "long_theta": -0.03, "short_theta": 0.02,
+        "long_iv": 0.30, "short_iv": 0.28,
+        "open_interest": 500, "volume": 200,
+    }
+    candidate = Candidate(
+        candidate_id="directional-nonstopping-fail",
         candidate_type="directional",
         symbol="TEST",
         subject_type="THESIS_COMPARISON",
