@@ -3148,6 +3148,59 @@ def build_directional_config():
     return rules, strategies, junctions, lookups
 
 
+# ── OTA-844: POSITION_HEALTH dir_* entries for the SHARED formula_registry contract ─
+#
+# Same rationale as _build_directional_contract_lookups (OTA-840): the screening
+# transform's build_formula_registry() runs BEFORE the POSITION_HEALTH block is
+# appended (and must — see the OTA-833 note above), so it never scans these PH
+# formula_refs into the SHARED contract. We emit their contract rows explicitly
+# here so the single SHARED contract balances the COMBINED live registry
+# (screening ∪ directional ∪ position_health) and the GLOBAL registry-drift check
+# (_check_formula_registry_drift, validated against the union registry) stays
+# clean. All 4 are BOUND by junctions — there are no reserved/unbound PH rows.
+#
+# (lookup_key, output_type, inputs, intent)
+_PH_FORMULA_CONTRACT = [
+    ("exit_level_safety_score", "score 0-100",
+     ["warning_breached", "stop_breached", "warning_proximity_ratio"],
+     "Exit-level safety: 0 if stop breached, graduated value approaching warning, "
+     "100 when well clear (OTA-745)."),
+    ("pnl_band_score", "score 0-100", ["pnl_pct"],
+     "P&L band score: positive P&L scores high, increasingly negative P&L scores "
+     "progressively lower (OTA-746)."),
+    ("stop_breached_floor", "adjustment (score replacement)", ["stop_breached"],
+     "Post-scoring floor: force final score to a floor (→F) when stop breached. "
+     "Categorical guarantee stop→F (OTA-747)."),
+    ("warning_breached_cap", "adjustment (score replacement)",
+     ["warning_breached", "stop_breached"],
+     "Post-scoring cap: cap final score (→D) when warning breached and stop is "
+     "not. Categorical guarantee warning→D (OTA-747)."),
+]
+
+
+def _build_position_health_contract_lookups():
+    """SHARED formula_registry rows for the 4 position-health formulas (OTA-844)."""
+    rows = []
+    for i, (name, output_type, inputs, intent) in enumerate(
+        _PH_FORMULA_CONTRACT, start=1
+    ):
+        rows.append({
+            "owner_app_id": "SHARED",
+            "lookup_set": "formula_registry",
+            "lookup_key": name,
+            "payload": {
+                "status": "active",
+                "intent": intent,
+                "inputs": inputs,
+                "output_type": output_type,
+                "surface": "POSITION_HEALTH",
+            },
+            # Sort after the 26 screening (1..26) and 10 directional (101..110) rows.
+            "sort_order": 200 + i,
+        })
+    return rows
+
+
 # ── Main ─────────────────────────────────────────────────────────────────
 
 def build_all_rows(xlsx_path: Path):
@@ -3228,6 +3281,32 @@ def build_all_rows(xlsx_path: Path):
     log.info(
         f"DIRECTIONAL: +{len(dir_rules)} rules, +{len(dir_strategies)} strategies, "
         f"+{len(dir_junctions)} junctions, +{len(dir_lookups)} lookups"
+    )
+
+    # ── OTA-844: Append the POSITION_HEALTH surface block AFTER both prior chains ──
+    # Same isolation rationale as the DIRECTIONAL append: the SCREENING transform
+    # passes (set_gate_mechanics / canonicalize_expressions / build_formula_registry)
+    # must NOT touch these hand-shaped rows. The position-health config module
+    # (app/ota_adapters/position_health/config.py) is the seed source for both
+    # strategies (full + basic) and their rules, junctions, and verdict lookups.
+    # The 4 PH formula contract rows are emitted explicitly (build_formula_registry
+    # already ran on screening only) so the SHARED contract balances the combined
+    # live registry — see _build_position_health_contract_lookups. Imported lazily
+    # so the build-time seed never couples to the adapter's runtime import chain
+    # (sqlalchemy / session / schwab) at module load.
+    log.info("Appending POSITION_HEALTH surface block (OTA-844)...")
+    from app.ota_adapters.position_health.config import get_all_config_rows as _ph_config_rows
+    ph = _ph_config_rows()
+    ph_contract = _build_position_health_contract_lookups()
+    rules.extend(ph["rules"])
+    strategies.extend(ph["strategies"])
+    junctions.extend(ph["junction"])
+    lookups.extend(ph["lookups"])
+    lookups.extend(ph_contract)
+    log.info(
+        f"POSITION_HEALTH: +{len(ph['rules'])} rules, +{len(ph['strategies'])} strategies, "
+        f"+{len(ph['junction'])} junctions, +{len(ph['lookups'])} verdict lookups, "
+        f"+{len(ph_contract)} formula-contract lookups"
     )
 
     return rules, strategies, junctions, lookups, compound_removals

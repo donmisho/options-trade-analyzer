@@ -1,9 +1,9 @@
-"""Live mixed-surface boot check (OTA-836 → OTA-840).
+"""Live mixed-surface boot check (OTA-836 → OTA-840 → OTA-844).
 
 Hydrates the COMPLETE seed (all surfaces) the way the live
 ``init_engine_runtime`` does — ``build_all_rows`` → ``load_config`` →
-``validate_by_surface`` against the COMBINED screening ∪ directional registry —
-and asserts both surfaces validate.
+``validate_by_surface`` against the COMBINED screening ∪ directional ∪
+position-health registry — and asserts every surface validates.
 
 Why this exists: the per-surface tests (e.g. ``test_directional_null_semantics``)
 hydrate one surface in isolation and pass even when the *combined* live boot
@@ -12,12 +12,12 @@ that only shows up across surfaces (a drifted formula, a non-§6.3 carve-out, an
 EVAL_ORDER_DUPLICATE from BETWEEN decomposition) is caught here rather than as a
 dead engine runtime in production.
 
-OTA-840 Phase B invariants asserted:
-  * the four SCREENING strategies AND the three DIRECTIONAL strategies load;
+Invariants asserted:
+  * the four SCREENING, three DIRECTIONAL, and two POSITION_HEALTH strategies load;
   * the SHARED formula-registry contract and the combined live registry agree on
-    exactly 36 formulas (26 screening + 10 directional);
+    exactly 40 formulas (26 screening + 10 directional + 4 position-health);
   * ``validate_by_surface`` returns zero global errors and zero per-surface
-    errors (so hydration stamps both surfaces);
+    errors (so hydration stamps all three surfaces);
   * surface isolation: a directional-only config fault leaves SCREENING valid.
 """
 
@@ -43,7 +43,10 @@ pytestmark = pytest.mark.skipif(
 # — a separate surface with no canonical hyphen form.
 SCREENING_STRATEGIES = {"steady-paycheck", "weekly-grind", "trend-rider", "lottery-ticket"}
 DIRECTIONAL_STRATEGIES = {"directional_income", "directional_growth", "directional_longshot"}
-EXPECTED_CONTRACT_COUNT = 36
+# OTA-844: POSITION_HEALTH keys are underscore — a third surface, like DIRECTIONAL,
+# with no canonical hyphen form.
+POSITION_HEALTH_STRATEGIES = {"position_health_full", "position_health_basic"}
+EXPECTED_CONTRACT_COUNT = 40
 
 
 def _build_rows():
@@ -82,7 +85,7 @@ def _hydrate():
 
 
 def test_full_seed_validates_clean():
-    """The live mixed-surface boot validates with zero errors on both surfaces."""
+    """The live mixed-surface boot validates with zero errors on every surface."""
     source, config = _hydrate()
     result = validate_by_surface(
         config, formula_registry=build_combined_registry(), source=source
@@ -91,19 +94,20 @@ def test_full_seed_validates_clean():
     assert not result.invalid_surfaces(), {
         s: r.summary() for s, r in result.per_surface.items() if not r.is_valid
     }
-    assert {"SCREENING", "DIRECTIONAL"} <= set(result.per_surface)
+    assert {"SCREENING", "DIRECTIONAL", "POSITION_HEALTH"} <= set(result.per_surface)
 
 
-def test_both_surfaces_load():
-    """SCREENING and DIRECTIONAL strategies all load (directional re-enabled)."""
+def test_all_surfaces_load():
+    """SCREENING, DIRECTIONAL, and POSITION_HEALTH strategies all load (OTA-844)."""
     _source, config = _hydrate()
     loaded = set(config.rule_sets)
     assert SCREENING_STRATEGIES <= loaded
     assert DIRECTIONAL_STRATEGIES <= loaded
+    assert POSITION_HEALTH_STRATEGIES <= loaded
 
 
-def test_contract_and_registry_agree_on_36():
-    """SHARED formula contract == combined live registry == 36 formulas."""
+def test_contract_and_registry_agree_on_40():
+    """SHARED formula contract == combined live registry == 40 formulas (OTA-844)."""
     _source, config = _hydrate()
     contract = {
         e.lookup_key

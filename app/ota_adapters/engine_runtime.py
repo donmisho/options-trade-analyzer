@@ -539,19 +539,28 @@ class _CompositeFormulaRegistry:
 
 
 def build_combined_registry() -> FormulaRegistry:
-    """The union of every surface's live formula registry (OTA-840).
+    """The union of every surface's live formula registry (OTA-840, OTA-844).
 
     The single source of "the combined registry" — used by ``init_engine_runtime``
     (startup hydration), the OTA-783 save-time validator (parity), and the
     mixed-surface boot test. Imported lazily so the engine package stays
     import-clean and this module has no hard dependency on the rule libraries at
     import time.
+
+    OTA-844: the POSITION_HEALTH library adds 4 formulas (exit_level_safety_score,
+    pnl_band_score, stop_breached_floor, warning_breached_cap) → 26 screening + 10
+    directional + 4 position-health = 40. Surface formula namespaces are disjoint
+    (screening vs ``dir_*`` vs the PH names), so the first-owner-wins invoke order
+    is immaterial. The SHARED contract is balanced by
+    ``_build_position_health_contract_lookups`` in the seed — both must move
+    together or ``_check_formula_registry_drift`` flags the imbalance.
     """
     from app.options_rules.directional import get_registry as _directional_registry
+    from app.options_rules.position_health import get_registry as _position_health_registry
     from app.options_rules.screening import get_registry as _screening_registry
 
     return _CompositeFormulaRegistry(
-        [_screening_registry(), _directional_registry()]
+        [_screening_registry(), _directional_registry(), _position_health_registry()]
     )
 
 
