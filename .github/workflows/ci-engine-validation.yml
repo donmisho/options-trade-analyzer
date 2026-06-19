@@ -1,0 +1,103 @@
+name: CI — Engine Validation
+
+# OTA-799: runs the OTA-794 engine-validation suites on every change and gates
+# merge on them, plus a coverage gate over the engine / adapter / rule-library
+# packages. This workflow adds CI config only — it never touches engine, adapter,
+# rule-library, seed, or build/deploy source.
+#
+# Scope is INTENTIONALLY a list of explicit test files, never directory globs.
+# Directory-level selection would pull in the parked OTA-843 reds
+# (negative_ev_gate / tr_neg_ev unregistered: 20 failures across
+# tests/integration, tests/options_rules, tests/ota_adapters) and turn CI
+# permanently red on a known bug. The three named suites live in
+# tests/insight_engine/ and are green at Code & Test Complete.
+
+on:
+  push:
+    branches:
+      - OTA-836-build-to-testable
+      - main
+  pull_request:
+    branches:
+      - OTA-836-build-to-testable
+      - main
+
+jobs:
+  engine-validation:
+    name: Engine validation suites + coverage gate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # The three OTA-794 suites (OTA-795 / 797 / 798) run together in a single
+      # job so the coverage gate measures their COMBINED coverage of the engine,
+      # adapters, and rule libraries. They run in ~3s; a per-suite matrix would
+      # multiply runner setup cost (minutes) while fragmenting the coverage
+      # measurement the gate depends on — slower wall-clock, no real parallelism
+      # win. A failing suite or sub-threshold coverage fails the job (blocks merge).
+      - name: Run engine-validation suites with coverage gate
+        run: |
+          python -m pytest \
+            tests/insight_engine/test_cross_consumer_system.py \
+            tests/insight_engine/test_config_validation_matrix.py \
+            tests/insight_engine/test_trace_and_bronze.py \
+            --cov=app/insight_engine \
+            --cov=app/ota_adapters \
+            --cov=app/options_rules \
+            --cov-report=term-missing \
+            --cov-fail-under=60 \
+            -q
+
+  parity-796:
+    name: OTA-796 golden-path parity (guarded)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # OTA-796 (golden-path parity) is not built yet (status: Write Prompt).
+      # This step self-activates the moment its test file lands — no re-issue of
+      # the OTA-799 prompt. Expected path below; if OTA-796 names the file
+      # differently, update PARITY_PATH on this one line to match.
+      - name: Detect OTA-796 parity suite
+        id: parity_check
+        env:
+          PARITY_PATH: tests/insight_engine/test_golden_path_parity.py
+        run: |
+          if [ -f "$PARITY_PATH" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+            echo "OTA-796 parity suite present at $PARITY_PATH — running."
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "OTA-796 parity suite not present — skipping; will activate when the test lands."
+          fi
+
+      - name: Run OTA-796 golden-path parity suite
+        if: steps.parity_check.outputs.present == 'true'
+        run: |
+          python -m pytest tests/insight_engine/test_golden_path_parity.py -q
