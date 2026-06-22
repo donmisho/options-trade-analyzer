@@ -227,6 +227,9 @@ def test_accessor_raises_before_init_and_returns_after():
             apps=[], rules=[], strategies=[], junction=[], lookups=[]
         ),
         config_version="abc123",
+        # OTA-843: loadable_version is now a required field (OTA-790 startup
+        # stamp). Distinct from config_version; the accessor does not introspect.
+        loadable_version="loadable123",
     )
     set_engine_runtime(rt)
     assert get_engine_runtime() is rt

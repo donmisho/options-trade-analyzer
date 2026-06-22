@@ -1,16 +1,22 @@
 """
-Tests for the gate formulas (earnings routes + negative EV).
+Tests for the screening gate formulas (earnings routes).
 
 OTA-730: Earnings gate — four atomic route formulas.
-OTA-731: Negative EV gate — consolidated formula.
+OTA-731: Negative EV gate — consolidated formula (DEREGISTERED in OTA-836).
 
 Tests validate:
 - Registration in the live registry
 - Correct bool return types
 - Route condition matching and mutual exclusivity
 - Fail-soft on missing data
-- Legacy parity with earnings_gate.py and negative_ev_gate.py
+- Legacy parity with earnings_gate.py
 - Parameterized thresholds
+
+OTA-843: the `negative_ev_gate` screening formula was deregistered in OTA-836
+(the live screening EV gate is the `total_expected_value` BETWEEN single-value
+rule; the directional EV gate is the `dir_negative_ev` formula, OTA-837). The
+former registration/invoke tests for it are removed; one guard asserts it stays
+absent from the screening registry.
 """
 
 from __future__ import annotations
@@ -31,9 +37,16 @@ class TestGateRegistration:
         assert reg.has("earnings_route3_post_entry_better")
         assert reg.has("earnings_route4_pre_momentum_play")
 
-    def test_negative_ev_gate_registered(self):
+    def test_negative_ev_gate_deregistered(self):
+        """OTA-836/843: the screening `negative_ev_gate` formula was removed.
+
+        The live screening EV gate is the `total_expected_value` BETWEEN
+        single-value rule; the directional EV gate is the `dir_negative_ev`
+        formula (OTA-837). This guard prevents accidental re-registration into
+        the screening registry, which would re-introduce FORMULA_REGISTRY_DRIFT.
+        """
         reg = get_registry()
-        assert reg.has("negative_ev_gate")
+        assert not reg.has("negative_ev_gate")
 
 
 # ── OTA-730: Earnings Route 1 — no viable window ────────────────────────
@@ -280,69 +293,11 @@ class TestEarningsLegacyParity:
             assert r4 is False  # Route 4 fires (non-stopping, -15 penalty)
 
 
-# ── OTA-731: Negative EV gate ────────────────────────────────────────────
-
-
-class TestNegativeEVGate:
-    """Bool-returning gate. False = negative EV = gate fails."""
-
-    def test_negative_ev_fails(self):
-        reg = get_registry()
-        result = reg.invoke("negative_ev_gate", {"ev_raw": -5.0}, {})
-        assert result is False
-
-    def test_positive_ev_passes(self):
-        reg = get_registry()
-        result = reg.invoke("negative_ev_gate", {"ev_raw": 10.0}, {})
-        assert result is True
-
-    def test_zero_ev_passes(self):
-        """EV == 0 → not negative (strict <, not <=)."""
-        reg = get_registry()
-        result = reg.invoke("negative_ev_gate", {"ev_raw": 0.0}, {})
-        assert result is True
-
-    def test_missing_ev_passes(self):
-        """Fail-soft: missing EV → pass."""
-        reg = get_registry()
-        assert reg.invoke("negative_ev_gate", {}, {}) is True
-        assert reg.invoke("negative_ev_gate", {"ev_raw": None}, {}) is True
-
-    def test_returns_bool(self):
-        reg = get_registry()
-        result = reg.invoke("negative_ev_gate", {"ev_raw": -1.0}, {})
-        assert isinstance(result, bool)
-
-    def test_custom_threshold(self):
-        """Junction can raise the EV floor above 0."""
-        reg = get_registry()
-        # threshold=5.0 → EV must be >= 5.0
-        assert reg.invoke("negative_ev_gate", {"ev_raw": 3.0}, {"threshold": 5.0}) is False
-        assert reg.invoke("negative_ev_gate", {"ev_raw": 5.0}, {"threshold": 5.0}) is True
-
-    def test_legacy_parity(self):
-        """Match NegativeEVGate: EV < 0 → triggered, else not."""
-        reg = get_registry()
-        test_cases = [
-            (-10.0, False),   # negative → fail
-            (-0.01, False),   # slightly negative → fail
-            (0.0, True),      # zero → pass (strict <)
-            (0.01, True),     # slightly positive → pass
-            (50.0, True),     # positive → pass
-        ]
-        for ev, expected in test_cases:
-            result = reg.invoke("negative_ev_gate", {"ev_raw": ev}, {})
-            assert result is expected, f"EV={ev}: expected {expected}, got {result}"
-
-    def test_consolidation_with_vertical_engine_filter(self):
-        """The vertical_engine.py:265 filter uses ev_raw >= min_ev_threshold.
-
-        Our formula uses ev_raw >= threshold (default 0.0).
-        With threshold=0.0, this matches the legacy filter's default behavior
-        (min_ev_threshold=0 → only positive EV survives).
-        """
-        reg = get_registry()
-        # Default threshold=0.0 matches legacy min_ev_threshold=0
-        assert reg.invoke("negative_ev_gate", {"ev_raw": -1.0}, {}) is False
-        assert reg.invoke("negative_ev_gate", {"ev_raw": 0.0}, {}) is True
-        assert reg.invoke("negative_ev_gate", {"ev_raw": 1.0}, {}) is True
+# ── OTA-731: Negative EV gate — DEREGISTERED in OTA-836 ──────────────────
+#
+# The screening `negative_ev_gate` formula was removed in OTA-836: the live
+# screening EV gate is the `total_expected_value` BETWEEN single-value rule,
+# and the directional EV gate is the `dir_negative_ev` formula (OTA-837). The
+# former registration + invoke parity tests for `negative_ev_gate` are removed
+# (OTA-843); `TestGateRegistration.test_negative_ev_gate_deregistered` above
+# guards that it stays absent from the screening registry.

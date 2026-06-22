@@ -462,14 +462,10 @@ class TestGateFormulaParity:
     def registry(self):
         return get_registry()
 
-    def test_negative_ev_gate_passes(self, registry):
-        assert registry.invoke("negative_ev_gate", {"ev_raw": 10.0}, {"threshold": 0.0}) is True
-
-    def test_negative_ev_gate_fails(self, registry):
-        assert registry.invoke("negative_ev_gate", {"ev_raw": -5.0}, {"threshold": 0.0}) is False
-
-    def test_negative_ev_gate_missing_ev_passes(self, registry):
-        assert registry.invoke("negative_ev_gate", {}, {"threshold": 0.0}) is True
+    # OTA-843: the `negative_ev_gate` screening formula was deregistered in
+    # OTA-836 (the live screening EV gate is the `total_expected_value` BETWEEN
+    # single-value rule). Its formula-invoke parity tests are removed; the gate
+    # is now exercised as a `>=` predicate by the end-to-end fixtures below.
 
     def test_earnings_route1_no_earnings_passes(self, registry):
         assert registry.invoke("earnings_route1_no_viable_window", {}, {}) is True
@@ -532,10 +528,13 @@ def _sp_rules():
     """Minimal Steady Paycheck rule set: 1 gate + 2 scoring criteria."""
     return [
         # Gate: negative EV
+        # OTA-843: closed-set predicate gate (ev_raw >= threshold), mirroring
+        # the live screening total_expected_value rule. The old
+        # formula:negative_ev_gate was deregistered in OTA-836.
         {
             "rule_id": 100, "owner_app_id": "OTA", "rule_key": "neg_ev_gate",
             "phase": "gate", "tier": "DERIVED", "intent": "Block negative EV",
-            "condition_expression": None, "formula_ref": "formula:negative_ev_gate",
+            "condition_expression": ">=", "formula_ref": None,
             "referenced_named_values": ["ev_raw"],
             "parameter_schema": {"threshold": {"type": "number"}},
             "null_semantics": None, "enabled": True,
@@ -654,12 +653,15 @@ def _tr_rules():
     """Minimal Trend Rider rule set with COMPUTED tier gate."""
     base = [
         # Gate: negative EV (DERIVED)
+        # OTA-843: closed-set predicate gate (ev_raw >= threshold); the
+        # formula:negative_ev_gate it used was deregistered in OTA-836.
         {
             "rule_id": 200, "owner_app_id": "OTA", "rule_key": "tr_neg_ev",
             "phase": "gate", "tier": "DERIVED", "intent": "Block negative EV",
-            "condition_expression": None, "formula_ref": "formula:negative_ev_gate",
+            "condition_expression": ">=", "formula_ref": None,
             "referenced_named_values": ["ev_raw"],
-            "parameter_schema": {}, "null_semantics": None, "enabled": True,
+            "parameter_schema": {"threshold": {"type": "number"}},
+            "null_semantics": None, "enabled": True,
         },
         # Scoring: SMA alignment
         {
@@ -919,6 +921,11 @@ class TestEndToEndTrendRider:
         c.named_values["iv_percentile"] = 40.0
         c.named_values["iv_rank"] = 40.0
 
+        # OTA-843: this naked-call candidate has no spread EV (ev_raw is null;
+        # naked EV lives in total_ev). The EV gate is now a `ev_raw >= threshold`
+        # predicate, so reproduce the old formula's fail-soft-on-null behavior
+        # via the engine's OTA-838 null path: a null ev_raw fails open (does not
+        # gate), exactly as the deregistered formula:negative_ev_gate did.
         results = evaluate(
             candidates=[c],
             strategy_key="trend-rider",
@@ -927,6 +934,7 @@ class TestEndToEndTrendRider:
             registry=registry,
             adapter=adapter,
             sink=sink,
+            null_semantics={"ev_raw": "FAIL_OPEN"},
         )
 
         assert len(results) == 1
