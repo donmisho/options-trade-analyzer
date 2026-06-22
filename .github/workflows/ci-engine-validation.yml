@@ -41,6 +41,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          # openpyxl is a BUILD-TIME-ONLY dependency of scripts/seed_engine_config
+          # (the .xlsx seed importer). The OTA-794 harness imports build_all_rows
+          # from that module, so the suites need it at collection time. It is
+          # deliberately NOT in requirements.txt (the prod runtime image), so we
+          # install it here in CI only.
+          pip install openpyxl
 
       # The three OTA-794 suites (OTA-795 / 797 / 798) run together in a single
       # job so the coverage gate measures their COMBINED coverage of the engine,
@@ -79,6 +85,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          # See the engine-validation job: openpyxl is a build-time-only dep of
+          # the seed importer that the OTA-794 harness imports. CI-only install.
+          pip install openpyxl
 
       # OTA-796 (golden-path parity) is not built yet (status: Write Prompt).
       # This step self-activates the moment its test file lands — no re-issue of
