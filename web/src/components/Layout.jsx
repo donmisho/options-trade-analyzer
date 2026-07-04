@@ -7,8 +7,13 @@
  *
  * Rail sections (top → bottom):
  *   1. Logo — links to /dashboard
- *   2. Nav items — Dashboard · Security Strategies · Verticals · Puts & Calls · Positions
- *   3. Bottom — Schwab indicator · Settings gear · Sign out
+ *   2. Nav items — Dashboard · Security Strategies · Trades · Positions
+ *   3. STRATEGIES section — one item per enabled strategy
+ *   4. CONFIGURATION section — Strategy Admin (routed) · System Settings (cabinet)
+ *   5. Bottom — Schwab indicator · Change Log · Sign out
+ *
+ * System Settings opens the SystemVarsPanel cabinet (setSystemVarsPanelOpen);
+ * the old bottom "Settings" gear was consolidated into the CONFIGURATION section.
  *
  * Strategy note: clicking Verticals or Puts & Calls also calls setActiveStrategy()
  * so OptionsTerminal receives the correct config.
@@ -494,6 +499,65 @@ export default function Layout() {
           })}
         </div>
 
+        {/* Configuration section — peer to Strategies, mirrors the same pattern */}
+        <div style={{ flexShrink: 0 }}>
+          <div style={{ height: 1, backgroundColor: BORD, margin: '4px 0' }} />
+          {/* Section header — static, non-collapsible */}
+          <div style={{
+            padding: '20px 16px 6px 16px',
+            fontFamily: 'monospace', fontSize: 9,
+            fontWeight: 700, letterSpacing: '0.6px',
+            color: MUTED, textTransform: 'uppercase',
+          }}>
+            Configuration
+          </div>
+
+          {/* Configuration items — Strategy Admin (routed) + System Settings (cabinet) */}
+          {[
+            {
+              label:    'Strategy Admin',
+              isActive: location.pathname === '/strategy-admin',
+              onClick:  () => navigate('/strategy-admin'),
+            },
+            {
+              // Opens the existing System Settings cabinet — not a routed page,
+              // so it has no persistent active state.
+              label:    'System Settings',
+              isActive: false,
+              onClick:  () => setSystemVarsPanelOpen(true),
+            },
+          ].map(item => (
+            <div
+              key={item.label}
+              onClick={item.onClick}
+              style={{
+                display: 'flex', alignItems: 'center',
+                padding: '7px 16px 7px 24px',
+                fontFamily: 'monospace', fontSize: 11,
+                cursor: 'pointer', userSelect: 'none',
+                color: item.isActive ? TEAL : MUTED,
+                borderLeft: `3px solid ${item.isActive ? TEAL : 'transparent'}`,
+                backgroundColor: item.isActive ? 'rgba(45,212,191,0.08)' : 'transparent',
+                transition: 'background 0.1s, color 0.1s',
+              }}
+              onMouseEnter={e => {
+                if (!item.isActive) {
+                  e.currentTarget.style.color = TEXT;
+                  e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.04)';
+                }
+              }}
+              onMouseLeave={e => {
+                if (!item.isActive) {
+                  e.currentTarget.style.color = MUTED;
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                }
+              }}
+            >
+              {item.label}
+            </div>
+          ))}
+        </div>
+
         {/* Flex spacer — pushes bottom area to rail bottom */}
         <div style={{ flex: 1 }} />
 
@@ -527,25 +591,6 @@ export default function Layout() {
                 : 'Schwab Disconnected'}
             </span>
           </div>
-
-          {/* Settings */}
-          <button
-            onClick={() => setSystemVarsPanelOpen(true)}
-            title="System Settings"
-            aria-label="System Settings"
-            style={{
-              display: 'flex', alignItems: 'center', gap: 8,
-              padding: '8px 16px', background: 'none', border: 'none',
-              width: '100%', cursor: 'pointer', fontSize: 11,
-              color: MUTED, fontFamily: 'monospace', textAlign: 'left',
-              transition: 'color 150ms ease',
-            }}
-            onMouseEnter={onHoverIn}
-            onMouseLeave={onHoverOut}
-          >
-            <span style={{ fontSize: 14 }}>⚙</span>
-            <span>Settings</span>
-          </button>
 
           {/* Change Log */}
           <button
