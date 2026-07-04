@@ -1,0 +1,1507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>OTA Strategy Configuration — Rules Engine Prototype v2</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --bg2: #161b22;
+    --bg3: #1c232c;
+    --border: #2a3340;
+    --border-strong: #3a4453;
+    --text: #c9d1d9;
+    --text-muted: #7d8590;
+    --text-dim: #5a6370;
+    --teal: #2dd4bf;
+    --teal-dim: #1c8a7e;
+    --amber: #f59e0b;
+    --amber-dim: #b8770a;
+    --green: #22c55e;
+    --blue: #60a5fa;
+    --red: #ef4444;
+    --yellow: #eab308;
+    --orange: #f97316;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: 'Cascadia Code', 'Consolas', 'Monaco', monospace;
+    font-size: 13px;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+  }
+  .app { display: flex; min-height: 100vh; }
+
+  /* Sidebar */
+  .sidebar {
+    width: 200px;
+    background: var(--bg);
+    border-right: 1px solid var(--border);
+    padding: 16px 12px;
+    flex-shrink: 0;
+  }
+  .logo {
+    color: var(--teal);
+    font-size: 14px;
+    font-weight: 600;
+    padding: 8px;
+    margin-bottom: 24px;
+    letter-spacing: 0.5px;
+  }
+  .nav-item {
+    padding: 8px 12px;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-radius: 4px;
+    margin-bottom: 2px;
+  }
+  .nav-item:hover { background: var(--bg2); color: var(--text); }
+  .nav-section {
+    font-size: 10px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    padding: 16px 12px 4px;
+    letter-spacing: 1px;
+  }
+  .nav-strategy {
+    padding: 6px 12px 6px 20px;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 12px;
+  }
+  .nav-strategy:hover { color: var(--text); }
+  .nav-strategy.active { color: var(--teal); border-left: 2px solid var(--teal); padding-left: 18px; }
+
+  /* Main */
+  .main {
+    flex: 1;
+    padding: 20px 28px;
+    overflow-x: hidden;
+  }
+
+  /* ===== HEADER CARD (now editable) ===== */
+  .header-card {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 18px 22px;
+    margin-bottom: 20px;
+    background: var(--bg);
+  }
+  .header-card h1 {
+    margin: 0 0 6px 0;
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+  }
+  .header-card .desc {
+    color: var(--text-muted);
+    font-size: 12px;
+    margin-bottom: 16px;
+  }
+  .header-meta {
+    display: grid;
+    grid-template-columns: max-content max-content 1fr;
+    gap: 28px;
+    align-items: start;
+    font-size: 11px;
+  }
+  .meta-block .label {
+    color: var(--text-dim);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .meta-block .edit-hint {
+    color: var(--teal);
+    opacity: 0;
+    transition: opacity 0.15s;
+    font-size: 9px;
+  }
+  .meta-block:hover .edit-hint { opacity: 1; }
+  .meta-block .value {
+    color: var(--text);
+    font-size: 12px;
+  }
+
+  /* Inline editable DTE */
+  .dte-edit {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .dte-edit input {
+    background: var(--bg);
+    border: 1px solid var(--border-strong);
+    color: var(--text);
+    padding: 3px 6px;
+    font-family: inherit;
+    font-size: 12px;
+    width: 44px;
+    border-radius: 3px;
+    text-align: center;
+  }
+  .dte-edit input:focus { outline: none; border-color: var(--teal); }
+  .dte-edit .dash { color: var(--text-dim); }
+  .dte-edit .unit { color: var(--text-muted); margin-left: 4px; }
+
+  /* Structure chips */
+  .structure-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+  }
+  .chip {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 3px 8px 3px 10px;
+    border-radius: 12px;
+    font-size: 11px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .chip .x {
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+  }
+  .chip .x:hover { color: var(--red); }
+  .chip-add {
+    background: transparent;
+    border: 1px dashed var(--border-strong);
+    color: var(--text-muted);
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 11px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .chip-add:hover { border-color: var(--teal); color: var(--teal); }
+
+  /* Requirement field */
+  .req-edit {
+    background: var(--bg);
+    border: 1px solid var(--border-strong);
+    color: var(--text);
+    padding: 4px 8px;
+    font-family: inherit;
+    font-size: 12px;
+    border-radius: 3px;
+    width: 100%;
+    max-width: 360px;
+  }
+  .req-edit:focus { outline: none; border-color: var(--teal); }
+  .req-derived {
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-top: 4px;
+    font-style: italic;
+  }
+
+  /* ===== Section header ===== */
+  .section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin: 24px 0 12px 0;
+    padding-bottom: 6px;
+  }
+  .section-title {
+    font-size: 11px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .section-actions { display: flex; gap: 8px; align-items: center; }
+  .unsaved {
+    color: var(--amber);
+    font-size: 11px;
+    display: none;
+  }
+  .unsaved.show { display: inline; }
+  .unsaved::before { content: "● "; }
+
+  /* ===== Parameters section (EXISTING — preserved layout) ===== */
+  .params-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+  .param-card {
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 14px 16px;
+    background: var(--bg);
+  }
+  .param-card.highlight { border-color: var(--teal-dim); }
+  .param-card .param-name {
+    font-size: 10px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 8px;
+  }
+  .param-card .param-row {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+  .param-card .param-row input {
+    background: var(--bg);
+    border: 1px solid var(--border-strong);
+    color: var(--text);
+    padding: 4px 8px;
+    font-family: inherit;
+    font-size: 13px;
+    width: 60px;
+    border-radius: 3px;
+  }
+  .param-card .param-row input:focus { outline: none; border-color: var(--teal); }
+  .param-card .param-suffix { font-size: 11px; color: var(--text-muted); }
+  .param-card .param-default,
+  .param-card .param-range {
+    font-size: 10px;
+    color: var(--text-dim);
+  }
+
+  .params-actions { display: flex; gap: 10px; margin-bottom: 8px; }
+
+  /* ===== Scoring Weights section (EXISTING — preserved layout) ===== */
+  .scoring-weights {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px 22px;
+    margin-bottom: 8px;
+  }
+  .weight-row {
+    display: grid;
+    grid-template-columns: 200px 1fr 56px 24px;
+    gap: 14px;
+    align-items: center;
+    padding: 6px 0;
+  }
+  .weight-row .name {
+    font-size: 12px;
+    color: var(--text);
+  }
+  .weight-row .name .tag {
+    font-size: 9px;
+    padding: 1px 4px;
+    border-radius: 2px;
+    margin-left: 6px;
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--red);
+  }
+  .weight-row .bar {
+    height: 4px;
+    background: var(--bg2);
+    border-radius: 2px;
+    overflow: hidden;
+    cursor: pointer;
+    position: relative;
+  }
+  .weight-row .bar .fill {
+    height: 100%;
+    background: var(--amber);
+    transition: width 0.15s ease;
+  }
+  .weight-row .pct {
+    text-align: right;
+    color: var(--text);
+    font-size: 12px;
+  }
+  .weight-row .remove {
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 14px;
+    text-align: center;
+    opacity: 0;
+  }
+  .weight-row:hover .remove { opacity: 1; }
+  .weight-row .remove:hover { color: var(--red); }
+
+  .weight-add-row {
+    padding: 8px 0 0;
+    border-top: 1px solid var(--border);
+    margin-top: 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .weight-total-text {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .weight-total-text .total {
+    font-weight: 600;
+    color: var(--green);
+  }
+  .weight-total-text .total.bad { color: var(--red); }
+  .add-link {
+    color: var(--teal);
+    font-size: 11px;
+    cursor: pointer;
+    background: transparent;
+    border: none;
+    font-family: inherit;
+  }
+  .add-link:hover { text-decoration: underline; }
+
+  /* ===== Find Trades CTA ===== */
+  .find-trades-row {
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    margin: 18px 0 28px;
+  }
+  .find-trades-help {
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+
+  /* ===== Rule cards (NEW additive sections) ===== */
+  .rule-group {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 14px;
+    overflow: hidden;
+  }
+  .rule-group-header {
+    padding: 10px 16px;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    user-select: none;
+  }
+  .rule-group-title {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+  }
+  .rule-group-meta {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .rule-group-meta .active-count { color: var(--teal); }
+  .rule-group-body {
+    padding: 4px 0;
+    background: var(--bg);
+  }
+  .rule-group-body.collapsed { display: none; }
+  .chev {
+    color: var(--text-dim);
+    margin-left: 8px;
+    font-size: 11px;
+  }
+
+  /* Individual rule */
+  .rule {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    display: grid;
+    grid-template-columns: 24px 1fr auto;
+    gap: 14px;
+    align-items: start;
+  }
+  .rule:last-child { border-bottom: none; }
+  .rule.inactive .rule-name,
+  .rule.inactive .rule-desc { opacity: 0.45; }
+
+  .toggle {
+    width: 18px;
+    height: 18px;
+    border: 1px solid var(--border-strong);
+    border-radius: 3px;
+    cursor: pointer;
+    margin-top: 2px;
+    flex-shrink: 0;
+    position: relative;
+    background: var(--bg);
+  }
+  .toggle.on {
+    background: var(--teal);
+    border-color: var(--teal);
+  }
+  .toggle.on::after {
+    content: "✓";
+    color: var(--bg);
+    position: absolute;
+    left: 3px;
+    top: -2px;
+    font-size: 13px;
+    font-weight: bold;
+  }
+
+  .rule-name {
+    font-size: 13px;
+    color: var(--text);
+    margin-bottom: 2px;
+  }
+  .rule-desc {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .rule-tier {
+    display: inline-block;
+    font-size: 9px;
+    padding: 1px 5px;
+    border-radius: 2px;
+    margin-left: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    vertical-align: 2px;
+  }
+  .tier-raw { background: rgba(96, 165, 250, 0.15); color: var(--blue); }
+  .tier-derived { background: rgba(234, 179, 8, 0.15); color: var(--yellow); }
+  .tier-computed { background: rgba(249, 115, 22, 0.15); color: var(--orange); }
+  .tier-new { background: rgba(239, 68, 68, 0.15); color: var(--red); }
+
+  .rule-params {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .rp {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .rp-label {
+    font-size: 9px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .rp-input {
+    background: var(--bg);
+    border: 1px solid var(--border-strong);
+    color: var(--text);
+    padding: 4px 8px;
+    font-family: inherit;
+    font-size: 12px;
+    width: 60px;
+    border-radius: 3px;
+  }
+  .rp-input.wide { width: 80px; }
+  .rp-input:focus {
+    outline: none;
+    border-color: var(--teal);
+  }
+  .rule.inactive .rp-input {
+    opacity: 0.4;
+    pointer-events: none;
+  }
+
+  /* Add rule */
+  .add-rule {
+    padding: 14px 16px;
+    background: transparent;
+    border: 1px dashed var(--border-strong);
+    border-radius: 4px;
+    color: var(--text-muted);
+    text-align: center;
+    cursor: pointer;
+    font-size: 12px;
+    margin: 8px 16px;
+  }
+  .add-rule:hover {
+    border-color: var(--teal);
+    color: var(--teal);
+  }
+
+  /* Verdict bands */
+  .verdict-bands {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 8px;
+    padding: 16px;
+  }
+  .verdict-band {
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 10px 12px;
+    background: var(--bg);
+  }
+  .verdict-band .grade {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+  .verdict-band.A .grade { color: var(--green); }
+  .verdict-band.B .grade { color: var(--teal); }
+  .verdict-band.C .grade { color: var(--yellow); }
+  .verdict-band.D .grade { color: var(--orange); }
+  .verdict-band.F .grade { color: var(--red); }
+  .verdict-band .range {
+    font-size: 11px;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .verdict-band .range input {
+    background: var(--bg);
+    border: 1px solid var(--border-strong);
+    color: var(--text);
+    padding: 2px 5px;
+    font-family: inherit;
+    font-size: 11px;
+    width: 42px;
+    border-radius: 2px;
+  }
+  .verdict-band .verb {
+    font-size: 10px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-top: 6px;
+  }
+
+  /* Buttons */
+  .btn {
+    background: transparent;
+    border: 1px solid var(--teal);
+    color: var(--teal);
+    padding: 7px 14px;
+    font-family: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    border-radius: 3px;
+    letter-spacing: 0.3px;
+  }
+  .btn:hover { background: rgba(45, 212, 191, 0.1); }
+  .btn-muted {
+    border-color: var(--border-strong);
+    color: var(--text-muted);
+  }
+  .btn-muted:hover { background: var(--bg2); color: var(--text); }
+
+  /* Positions table */
+  .positions-block {
+    margin-top: 28px;
+  }
+  .positions-controls {
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    padding: 10px 14px;
+    background: var(--bg2);
+    border-radius: 4px 4px 0 0;
+    border: 1px solid var(--border);
+    border-bottom: none;
+    font-size: 11px;
+  }
+  .positions-controls select {
+    background: var(--bg);
+    border: 1px solid var(--border-strong);
+    color: var(--text);
+    padding: 3px 6px;
+    font-family: inherit;
+    font-size: 11px;
+  }
+  .positions-controls .label {
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-size: 10px;
+  }
+  .positions-controls .refresh {
+    margin-left: auto;
+    color: var(--teal);
+    cursor: pointer;
+  }
+  .positions-table {
+    width: 100%;
+    border-collapse: collapse;
+    border: 1px solid var(--border);
+    background: var(--bg);
+  }
+  .positions-table th {
+    background: var(--bg);
+    color: var(--text-dim);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 10px 12px;
+    text-align: left;
+    font-weight: 400;
+    border-bottom: 1px solid var(--border);
+  }
+  .positions-table td {
+    padding: 12px;
+    font-size: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .positions-table .pill {
+    display: inline-block;
+    padding: 2px 7px;
+    border-radius: 3px;
+    font-size: 10px;
+    text-transform: uppercase;
+    background: rgba(96, 165, 250, 0.15);
+    color: var(--blue);
+  }
+  .health-A {
+    display: inline-block;
+    width: 22px;
+    height: 22px;
+    border-radius: 4px;
+    background: rgba(34, 197, 94, 0.2);
+    color: var(--green);
+    text-align: center;
+    line-height: 22px;
+    font-weight: 600;
+    font-size: 12px;
+  }
+
+  /* Rule catalog drawer */
+  .drawer-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    display: none;
+    z-index: 100;
+  }
+  .drawer-backdrop.show { display: block; }
+  .drawer {
+    position: fixed;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 480px;
+    background: var(--bg);
+    border-left: 1px solid var(--border);
+    z-index: 101;
+    transform: translateX(100%);
+    transition: transform 0.25s ease;
+    display: flex;
+    flex-direction: column;
+  }
+  .drawer.show { transform: translateX(0); }
+  .drawer-header {
+    padding: 18px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .drawer-title { font-size: 14px; font-weight: 600; }
+  .drawer-subtitle { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+  .drawer-close {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 20px;
+    cursor: pointer;
+  }
+  .drawer-tabs {
+    display: flex;
+    padding: 0 20px;
+    border-bottom: 1px solid var(--border);
+    gap: 16px;
+  }
+  .drawer-tab {
+    padding: 10px 0;
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+  }
+  .drawer-tab.active {
+    color: var(--teal);
+    border-bottom-color: var(--teal);
+  }
+  .drawer-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px 0;
+  }
+  .catalog-rule {
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+  }
+  .catalog-rule:hover { background: var(--bg2); }
+  .catalog-rule.added { opacity: 0.4; pointer-events: none; }
+  .catalog-rule .name {
+    font-size: 12px;
+    color: var(--text);
+    margin-bottom: 3px;
+  }
+  .catalog-rule .name .added-tag {
+    font-size: 9px;
+    color: var(--text-dim);
+    margin-left: 8px;
+  }
+  .catalog-rule .desc {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  /* Structure dropdown */
+  .struct-dropdown {
+    position: absolute;
+    background: var(--bg);
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    padding: 6px 0;
+    z-index: 50;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    min-width: 220px;
+  }
+  .struct-dropdown .opt {
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  .struct-dropdown .opt:hover { background: var(--bg2); color: var(--teal); }
+  .struct-dropdown .opt.disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+  .struct-dropdown .opt.disabled:hover { background: transparent; color: var(--text); }
+
+  /* Footer */
+  .status-footer {
+    border-top: 1px solid var(--border);
+    padding: 10px 28px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .schwab-status::before { content: "● "; color: var(--green); }
+
+  /* Calibration note */
+  .calibration-banner {
+    background: rgba(239, 68, 68, 0.08);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: 4px;
+    padding: 10px 14px;
+    margin-bottom: 16px;
+    font-size: 11px;
+    color: var(--text);
+  }
+  .calibration-banner .icon { color: var(--red); margin-right: 6px; }
+  .calibration-banner .strong { color: var(--red); }
+
+  .source-label {
+    display: inline-block;
+    font-size: 9px;
+    padding: 1px 4px;
+    border-radius: 2px;
+    margin-left: 4px;
+    background: var(--bg3);
+    color: var(--text-dim);
+    font-family: 'Cascadia Code', monospace;
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <div class="sidebar">
+    <div class="logo">Λ Options Analyzer</div>
+    <div class="nav-item">Dashboard</div>
+    <div class="nav-item">Security Strategies</div>
+    <div class="nav-item">Trades</div>
+    <div class="nav-item">Positions</div>
+    <div class="nav-section">Strategies</div>
+    <div class="nav-strategy active">Steady Paycheck</div>
+    <div class="nav-strategy">Weekly Grind</div>
+    <div class="nav-strategy">Trend Rider</div>
+    <div class="nav-strategy">Lottery Ticket</div>
+  </div>
+
+  <div style="flex: 1; display: flex; flex-direction: column;">
+    <div class="main">
+
+      <!-- ===== HEADER CARD (now editable) ===== -->
+      <div class="header-card">
+        <h1>Steady Paycheck</h1>
+        <div class="desc">30-45 DTE credit spreads, high IV rank, income focus</div>
+        <div class="header-meta">
+          <div class="meta-block">
+            <div class="label">DTE Range <span class="edit-hint">editable</span></div>
+            <div class="dte-edit">
+              <input type="number" id="hdr-dte-min" value="14" onchange="syncDteFromHeader()">
+              <span class="dash">–</span>
+              <input type="number" id="hdr-dte-max" value="45" onchange="syncDteFromHeader()">
+              <span class="unit">days</span>
+            </div>
+          </div>
+          <div class="meta-block">
+            <div class="label">Structures <span class="edit-hint">click chips</span></div>
+            <div class="structure-chips" id="struct-chips">
+              <span class="chip">Bull Put Credit <span class="x" onclick="removeStruct(this, 'Bull Put Credit')">×</span></span>
+              <span class="chip">Bear Call Credit <span class="x" onclick="removeStruct(this, 'Bear Call Credit')">×</span></span>
+              <button class="chip-add" onclick="openStructDropdown(event)">+ Add</button>
+            </div>
+          </div>
+          <div class="meta-block">
+            <div class="label">Requirement <span class="edit-hint">editable</span></div>
+            <input class="req-edit" id="req-text" value="Requires credit spread structure">
+            <div class="req-derived">Auto-derived from structures: <em>credit spread structure</em></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Calibration banner -->
+      <div class="calibration-banner">
+        <span class="icon">⚠</span>
+        <span class="strong">Calibration session 2026-05-20:</span>
+        New rules introduced from MSFT/GS/KO failures need review — <em>Long-leg Liquidity</em>, <em>Trend Pressure Penalty</em>, <em>Liquidity Trap Penalty</em>, <em>Delta OTM Score</em>, <em>Bid/Ask Tightness</em>. Tagged <span style="color: var(--red);">NEW</span> below.
+      </div>
+
+      <!-- ===== PARAMETERS (EXISTING — preserved) ===== -->
+      <div class="section-header">
+        <div class="section-title">Parameters</div>
+        <div class="section-actions">
+          <span class="unsaved show" id="unsaved">Unsaved changes</span>
+        </div>
+      </div>
+
+      <div class="params-grid">
+        <div class="param-card">
+          <div class="param-name">Min DTE</div>
+          <div class="param-row">
+            <input id="param-min-dte" type="number" value="14" onchange="syncDteFromParams()">
+            <span class="param-suffix">days</span>
+          </div>
+          <div class="param-default">Default: 14 days</div>
+          <div class="param-range">Range: 7 – 30d</div>
+        </div>
+        <div class="param-card">
+          <div class="param-name">Max DTE</div>
+          <div class="param-row">
+            <input id="param-max-dte" type="number" value="45" onchange="syncDteFromParams()">
+            <span class="param-suffix">days</span>
+          </div>
+          <div class="param-default">Default: 45 days</div>
+          <div class="param-range">Range: 21 – 60d</div>
+        </div>
+        <div class="param-card highlight">
+          <div class="param-name">Max Short Delta</div>
+          <div class="param-row">
+            <input type="number" value="0.4" step="0.01">
+            <span class="param-suffix">Δ</span>
+          </div>
+          <div class="param-default">Default: 0.30 Δ</div>
+          <div class="param-range">Range: 0.1 – 0.45</div>
+        </div>
+        <div class="param-card">
+          <div class="param-name">Min IV Rank</div>
+          <div class="param-row">
+            <input type="number" value="40">
+            <span class="param-suffix">%</span>
+          </div>
+          <div class="param-default">Default: 40%</div>
+          <div class="param-range">Range: 0 – 100</div>
+        </div>
+        <div class="param-card">
+          <div class="param-name">Take Profit At</div>
+          <div class="param-row">
+            <input type="number" value="50">
+            <span class="param-suffix">%</span>
+          </div>
+          <div class="param-default">Default: 50%</div>
+          <div class="param-range">Range: 25 – 90</div>
+        </div>
+        <div class="param-card">
+          <div class="param-name">Stop Loss (Credit ×)</div>
+          <div class="param-row">
+            <input type="number" value="2" step="0.1">
+            <span class="param-suffix">×</span>
+          </div>
+          <div class="param-default">Default: 2×</div>
+          <div class="param-range">Range: 1.5× – 4×</div>
+        </div>
+      </div>
+
+      <div class="params-actions">
+        <button class="btn">Apply</button>
+        <button class="btn btn-muted">Reset to defaults</button>
+      </div>
+
+      <!-- ===== SCORING WEIGHTS (EXISTING — preserved, now extensible) ===== -->
+      <div class="section-header">
+        <div class="section-title">Scoring Weights</div>
+      </div>
+
+      <div class="scoring-weights" id="weights-block">
+        <div class="weight-row">
+          <div class="name">Theta Margin Ratio</div>
+          <div class="bar" onclick="adjustBar(this, event, 0)"><div class="fill" style="width: 30%;"></div></div>
+          <div class="pct">30%</div>
+          <div class="remove" onclick="removeWeight(this)">×</div>
+        </div>
+        <div class="weight-row">
+          <div class="name">Probability of Profit</div>
+          <div class="bar" onclick="adjustBar(this, event, 1)"><div class="fill" style="width: 25%;"></div></div>
+          <div class="pct">25%</div>
+          <div class="remove" onclick="removeWeight(this)">×</div>
+        </div>
+        <div class="weight-row">
+          <div class="name">Expected Value</div>
+          <div class="bar" onclick="adjustBar(this, event, 2)"><div class="fill" style="width: 20%;"></div></div>
+          <div class="pct">20%</div>
+          <div class="remove" onclick="removeWeight(this)">×</div>
+        </div>
+        <div class="weight-row">
+          <div class="name">Reward / Risk</div>
+          <div class="bar" onclick="adjustBar(this, event, 3)"><div class="fill" style="width: 15%;"></div></div>
+          <div class="pct">15%</div>
+          <div class="remove" onclick="removeWeight(this)">×</div>
+        </div>
+        <div class="weight-row">
+          <div class="name">IV Rank</div>
+          <div class="bar" onclick="adjustBar(this, event, 4)"><div class="fill" style="width: 10%;"></div></div>
+          <div class="pct">10%</div>
+          <div class="remove" onclick="removeWeight(this)">×</div>
+        </div>
+
+        <div class="weight-add-row">
+          <div class="weight-total-text">
+            Total: <span class="total" id="weight-total">100%</span>
+            <span style="margin-left: 8px; color: var(--text-dim);">(must equal 100)</span>
+          </div>
+          <button class="add-link" onclick="openDrawer('scoring')">+ Add scoring criterion from catalog</button>
+        </div>
+      </div>
+
+      <!-- ===== FIND TRADES (EXISTING) ===== -->
+      <div class="find-trades-row">
+        <button class="btn">Find trades →</button>
+        <span class="find-trades-help">Opens Trades page filtered to Steady Paycheck parameters</span>
+      </div>
+
+      <!-- ===== NEW: ADDITIONAL HARD GATES ===== -->
+      <div class="section-header">
+        <div class="section-title">Additional Hard Gates · beyond core parameters</div>
+        <div class="section-actions">
+          <span style="font-size: 10px; color: var(--text-dim);">RAW / DERIVED tiers · no Claude calls</span>
+        </div>
+      </div>
+
+      <div class="rule-group">
+        <div class="rule-group-header" onclick="toggleGroup(this)">
+          <div class="rule-group-title">Filters applied before scoring <span class="chev">▼</span></div>
+          <div class="rule-group-meta">
+            <span class="active-count">5 active</span> · 9 in catalog
+          </div>
+        </div>
+        <div class="rule-group-body">
+
+          <div class="rule">
+            <div class="toggle on" onclick="toggleRule(this)"></div>
+            <div>
+              <div class="rule-name">
+                Strategy-Structure Compatibility
+                <span class="rule-tier tier-raw">RAW</span>
+                <span class="source-label">strategy_scorer.py</span>
+              </div>
+              <div class="rule-desc">Only score candidates whose structure is in the configured Structures list (header). Universal — cannot be disabled.</div>
+            </div>
+            <div class="rule-params">
+              <span style="font-size: 10px; color: var(--text-dim); font-style: italic;">Configured via Structures chips above</span>
+            </div>
+          </div>
+
+          <div class="rule">
+            <div class="toggle on" onclick="toggleRule(this)"></div>
+            <div>
+              <div class="rule-name">
+                Earnings in Window
+                <span class="rule-tier tier-raw">RAW</span>
+                <span class="source-label">hard_gates/EarningsInWindowGate</span>
+              </div>
+              <div class="rule-desc">FAIL candidates with earnings announcement within N days of expiration.</div>
+            </div>
+            <div class="rule-params">
+              <div class="rp">
+                <div class="rp-label">Days</div>
+                <input class="rp-input" value="5" type="number">
+              </div>
+            </div>
+          </div>
+
+          <div class="rule">
+            <div class="toggle on" onclick="toggleRule(this)"></div>
+            <div>
+              <div class="rule-name">
+                Negative EV Gate
+                <span class="rule-tier tier-derived">DERIVED</span>
+                <span class="source-label">hard_gates/NegativeEVGate</span>
+              </div>
+              <div class="rule-desc">FAIL candidates where expected value computation is ≤ threshold. Universal across strategies.</div>
+            </div>
+            <div class="rule-params">
+              <div class="rp">
+                <div class="rp-label">Threshold</div>
+                <input class="rp-input" value="0" type="number" step="0.01">
+              </div>
+            </div>
+          </div>
+
+          <div class="rule">
+            <div class="toggle on" onclick="toggleRule(this)"></div>
+            <div>
+              <div class="rule-name">
+                Credit % of Width Min
+                <span class="rule-tier tier-derived">DERIVED</span>
+                <span class="source-label">strategy_definitions.py</span>
+              </div>
+              <div class="rule-desc">Credit received ÷ spread width must be ≥ threshold. Credit-spread quality floor.</div>
+            </div>
+            <div class="rule-params">
+              <div class="rp">
+                <div class="rp-label">Min %</div>
+                <input class="rp-input" value="30" type="number">
+              </div>
+            </div>
+          </div>
+
+          <div class="rule inactive">
+            <div class="toggle" onclick="toggleRule(this)"></div>
+            <div>
+              <div class="rule-name">
+                Long-leg Liquidity
+                <span class="rule-tier tier-new">NEW</span>
+                <span class="source-label">not implemented</span>
+              </div>
+              <div class="rule-desc">Long leg must have open interest ≥ N <em>and</em> bid-ask spread ≤ X% of mid. Prevents the GS 1000P "long-leg trap" — strike has no exit when needed.</div>
+            </div>
+            <div class="rule-params">
+              <div class="rp">
+                <div class="rp-label">Min OI</div>
+                <input class="rp-input" value="100" type="number">
+              </div>
+              <div class="rp">
+                <div class="rp-label">Max B/A %</div>
+                <input class="rp-input" value="15" type="number">
+              </div>
+            </div>
+          </div>
+
+          <div class="rule inactive">
+            <div class="toggle" onclick="toggleRule(this)"></div>
+            <div>
+              <div class="rule-name">
+                Bid/Ask Tightness (Short Leg)
+                <span class="rule-tier tier-new">NEW</span>
+                <span class="source-label">not implemented</span>
+              </div>
+              <div class="rule-desc">Short-leg bid-ask spread must be ≤ X% of mid. Indicates active two-sided market.</div>
+            </div>
+            <div class="rule-params">
+              <div class="rp">
+                <div class="rp-label">Max %</div>
+                <input class="rp-input" value="10" type="number">
+              </div>
+            </div>
+          </div>
+
+          <div class="add-rule" onclick="openDrawer('gates')">+ Add hard gate from catalog</div>
+        </div>
+      </div>
+
+      <!-- ===== NEW: POST-SCORING ADJUSTMENTS ===== -->
+      <div class="section-header">
+        <div class="section-title">Post-Scoring Adjustments · penalties &amp; bonuses</div>
+        <div class="section-actions">
+          <span style="font-size: 10px; color: var(--text-dim);">applied after weighted score</span>
+        </div>
+      </div>
+
+      <div class="rule-group">
+        <div class="rule-group-header" onclick="toggleGroup(this)">
+          <div class="rule-group-title">Modifiers applied to the final weighted score <span class="chev">▼</span></div>
+          <div class="rule-group-meta">
+            <span class="active-count">0 active</span> · 4 in catalog
+          </div>
+        </div>
+        <div class="rule-group-body">
+
+          <div class="rule inactive">
+            <div class="toggle" onclick="toggleRule(this)"></div>
+            <div>
+              <div class="rule-name">
+                Trend Pressure Penalty
+                <span class="rule-tier tier-new">NEW</span>
+                <span class="source-label">not implemented</span>
+              </div>
+              <div class="rule-desc">Deduct N points when SMA structure pressures the short strike (e.g., bear call sold into uptrend). Caught GS 1005C calibration failure.</div>
+            </div>
+            <div class="rule-params">
+              <div class="rp">
+                <div class="rp-label">Penalty</div>
+                <input class="rp-input" value="15" type="number">
+              </div>
+            </div>
+          </div>
+
+          <div class="rule inactive">
+            <div class="toggle" onclick="toggleRule(this)"></div>
+            <div>
+              <div class="rule-name">
+                Liquidity Trap Penalty
+                <span class="rule-tier tier-new">NEW</span>
+                <span class="source-label">not implemented</span>
+              </div>
+              <div class="rule-desc">Deduct N points when long leg fails liquidity floor but short leg is acceptable. Soft-version of the hard gate.</div>
+            </div>
+            <div class="rule-params">
+              <div class="rp">
+                <div class="rp-label">Penalty</div>
+                <input class="rp-input" value="20" type="number">
+              </div>
+            </div>
+          </div>
+
+          <div class="rule inactive">
+            <div class="toggle" onclick="toggleRule(this)"></div>
+            <div>
+              <div class="rule-name">
+                Multi-Strategy Fit Bonus
+                <span class="rule-tier tier-derived">DERIVED</span>
+                <span class="source-label">best_fit logic — verify</span>
+              </div>
+              <div class="rule-desc">Add N points when candidate qualifies for ≥ 2 strategies in its structural family.</div>
+            </div>
+            <div class="rule-params">
+              <div class="rp">
+                <div class="rp-label">Bonus</div>
+                <input class="rp-input" value="5" type="number">
+              </div>
+            </div>
+          </div>
+
+          <div class="add-rule" onclick="openDrawer('adjustments')">+ Add adjustment from catalog</div>
+        </div>
+      </div>
+
+      <!-- ===== NEW: VERDICT BANDS ===== -->
+      <div class="section-header">
+        <div class="section-title">Verdict Bands · final score → grade</div>
+      </div>
+
+      <div class="rule-group">
+        <div class="verdict-bands">
+          <div class="verdict-band A">
+            <div class="grade">A</div>
+            <div class="range"><input value="85"> – 100</div>
+            <div class="verb">Execute</div>
+          </div>
+          <div class="verdict-band B">
+            <div class="grade">B</div>
+            <div class="range"><input value="70"> – 84.99</div>
+            <div class="verb">Strong fit</div>
+          </div>
+          <div class="verdict-band C">
+            <div class="grade">C</div>
+            <div class="range"><input value="55"> – 69.99</div>
+            <div class="verb">Acceptable</div>
+          </div>
+          <div class="verdict-band D">
+            <div class="grade">D</div>
+            <div class="range"><input value="40"> – 54.99</div>
+            <div class="verb">Wait</div>
+          </div>
+          <div class="verdict-band F">
+            <div class="grade">F</div>
+            <div class="range">0 – 39.99</div>
+            <div class="verb">Pass</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== POSITIONS (EXISTING) ===== -->
+      <div class="positions-block">
+        <div class="section-header" style="margin-bottom: 0;">
+          <div class="section-title">Steady Paycheck Positions</div>
+        </div>
+        <div class="positions-controls">
+          <span class="label">Status</span>
+          <select><option>Active</option></select>
+          <span class="label">Type</span>
+          <select><option>All</option></select>
+          <span style="color: var(--text-muted);">2 positions · refreshed 05-20-2026 21:49</span>
+          <span class="refresh">↻ Refresh all</span>
+        </div>
+        <table class="positions-table">
+          <thead>
+            <tr>
+              <th>Score</th>
+              <th>Symbol</th>
+              <th>Type</th>
+              <th>Strike / Spread</th>
+              <th>Expiration</th>
+              <th>Premium</th>
+              <th>Current</th>
+              <th>P&amp;L</th>
+              <th>DTE</th>
+              <th>Health</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="color: var(--text-dim);">▸ —</td>
+              <td>VUG</td>
+              <td><span class="pill">Paper</span></td>
+              <td>87.5/88.33</td>
+              <td>06-18-2026</td>
+              <td>0.38</td>
+              <td>0.38</td>
+              <td style="color: var(--text-dim);">—</td>
+              <td>29d</td>
+              <td><span class="health-A">A</span></td>
+            </tr>
+            <tr>
+              <td style="color: var(--text-dim);">▸ —</td>
+              <td>ASML</td>
+              <td><span class="pill">Paper</span></td>
+              <td>1450/1440</td>
+              <td>06-18-2026</td>
+              <td>3.80</td>
+              <td>3.80</td>
+              <td style="color: var(--text-dim);">—</td>
+              <td>29d</td>
+              <td><span class="health-A">A</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+    </div>
+
+    <div class="status-footer">
+      <div>
+        <span class="schwab-status">Schwab Connected</span>
+      </div>
+      <div>Rules schema: <code style="color: var(--text);">Scoring Parameters.xlsx v0.1</code> · last loaded 2026-05-20 21:49</div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Rule catalog drawer ===== -->
+<div class="drawer-backdrop" id="drawer-backdrop" onclick="closeDrawer()"></div>
+<div class="drawer" id="drawer">
+  <div class="drawer-header">
+    <div>
+      <div class="drawer-title">Rule Catalog</div>
+      <div class="drawer-subtitle">From <code>Scoring Parameters.xlsx</code></div>
+    </div>
+    <button class="drawer-close" onclick="closeDrawer()">×</button>
+  </div>
+  <div class="drawer-tabs">
+    <div class="drawer-tab" data-tab="gates">Hard Gates</div>
+    <div class="drawer-tab active" data-tab="scoring">Scoring</div>
+    <div class="drawer-tab" data-tab="adjustments">Adjustments</div>
+  </div>
+  <div class="drawer-body" id="drawer-body"></div>
+</div>
+
+<!-- Structure dropdown -->
+<div class="struct-dropdown" id="struct-dropdown" style="display:none;"></div>
+
+<script>
+  const catalog = {
+    gates: [
+      { name: 'Strategy-Structure Compatibility', desc: 'Universal — enforced at pipeline entry', added: true },
+      { name: 'Earnings in Window', desc: 'FAIL if earnings within N days of expiration', added: true },
+      { name: 'Negative EV Gate', desc: 'FAIL if expected value ≤ 0', added: true },
+      { name: 'DTE Range', desc: 'Configured via Parameters section', added: true },
+      { name: 'Short Delta Max', desc: 'Configured via Parameters section', added: true },
+      { name: 'IV Rank Minimum', desc: 'Configured via Parameters section', added: true },
+      { name: 'Credit % of Width Min', desc: 'Credit / width ≥ threshold (credit spreads)', added: true },
+      { name: 'Debit % of Width Max', desc: 'Debit / width ≤ threshold (debit spreads, e.g. TR)', added: false },
+      { name: 'Long-leg Liquidity', desc: 'OI ≥ N and B/A ≤ X% (prevents 1000P-style traps)', added: true, tag: 'NEW' },
+      { name: 'Bid/Ask Tightness (Short)', desc: 'Short-leg B/A spread ≤ X% of mid', added: true, tag: 'NEW' },
+      { name: 'Open Interest Min (Short)', desc: 'Short-leg OI ≥ threshold', added: false, tag: 'NEW' },
+      { name: 'Underlying Trend Filter', desc: 'Pass only candidates aligned with current trend', added: false },
+      { name: 'Days Since Last Trade', desc: 'Min days between same-strategy trades on same ticker', added: false },
+    ],
+    scoring: [
+      { name: 'Theta Margin Ratio', desc: 'Daily theta / max loss', added: true },
+      { name: 'Probability of Profit', desc: 'Long-leg delta-based PoP', added: true },
+      { name: 'Expected Value', desc: 'PoP-weighted profit minus loss', added: true },
+      { name: 'Reward / Risk', desc: 'Max profit ÷ max loss', added: true },
+      { name: 'IV Rank Score', desc: 'Mapped 0–100 from IV rank', added: true },
+      { name: 'Delta OTM Score', desc: 'Distance from money vs expected move', added: false, tag: 'NEW' },
+      { name: 'Liquidity Score', desc: 'Combined OI + volume score', added: false, tag: 'NEW' },
+      { name: 'Bid/Ask Tightness Score', desc: 'Both legs B/A as soft factor', added: false, tag: 'NEW' },
+      { name: 'Open Interest Score', desc: 'OI graded 0–100', added: false, tag: 'NEW' },
+    ],
+    adjustments: [
+      { name: 'Trend Pressure Penalty', desc: 'Deduct points when SMA pressures short strike', added: true, tag: 'NEW' },
+      { name: 'Liquidity Trap Penalty', desc: 'Deduct when long leg fails liquidity', added: true, tag: 'NEW' },
+      { name: 'Multi-Strategy Fit Bonus', desc: 'Add points for cross-strategy qualification', added: true },
+      { name: 'Earnings Proximity Penalty', desc: 'Soft version of earnings hard gate', added: false },
+    ]
+  };
+
+  const availableStructures = [
+    'Bull Put Credit', 'Bear Call Credit',
+    'Bull Call Debit', 'Bear Put Debit',
+    'Single Long Call', 'Single Long Put',
+  ];
+
+  function openDrawer(tab) {
+    document.getElementById('drawer-backdrop').classList.add('show');
+    document.getElementById('drawer').classList.add('show');
+    selectTab(tab);
+  }
+  function closeDrawer() {
+    document.getElementById('drawer-backdrop').classList.remove('show');
+    document.getElementById('drawer').classList.remove('show');
+  }
+  function selectTab(tab) {
+    document.querySelectorAll('.drawer-tab').forEach(t => {
+      t.classList.toggle('active', t.dataset.tab === tab);
+    });
+    renderCatalog(tab);
+  }
+  document.querySelectorAll('.drawer-tab').forEach(t => {
+    t.addEventListener('click', () => selectTab(t.dataset.tab));
+  });
+  function renderCatalog(tab) {
+    const body = document.getElementById('drawer-body');
+    body.innerHTML = catalog[tab].map(r => `
+      <div class="catalog-rule ${r.added ? 'added' : ''}">
+        <div class="name">
+          ${r.name}
+          ${r.tag ? `<span class="rule-tier tier-new">${r.tag}</span>` : ''}
+          ${r.added ? `<span class="added-tag">(in active set)</span>` : ''}
+        </div>
+        <div class="desc">${r.desc}</div>
+      </div>
+    `).join('');
+  }
+
+  function toggleGroup(header) {
+    const body = header.nextElementSibling;
+    body.classList.toggle('collapsed');
+    const chev = header.querySelector('.chev');
+    if (chev) chev.textContent = body.classList.contains('collapsed') ? '▶' : '▼';
+  }
+
+  function toggleRule(toggleEl) {
+    const rule = toggleEl.closest('.rule');
+    toggleEl.classList.toggle('on');
+    rule.classList.toggle('inactive');
+    document.getElementById('unsaved').classList.add('show');
+  }
+
+  function adjustBar(barEl, event) {
+    const rect = barEl.getBoundingClientRect();
+    const pct = Math.round(((event.clientX - rect.left) / rect.width) * 100);
+    const clamped = Math.max(0, Math.min(100, pct));
+    barEl.querySelector('.fill').style.width = clamped + '%';
+    const row = barEl.parentElement;
+    row.querySelector('.pct').textContent = clamped + '%';
+    document.getElementById('unsaved').classList.add('show');
+    recalcWeights();
+  }
+
+  function removeWeight(el) {
+    el.closest('.weight-row').remove();
+    document.getElementById('unsaved').classList.add('show');
+    recalcWeights();
+  }
+
+  function recalcWeights() {
+    let total = 0;
+    document.querySelectorAll('#weights-block .weight-row .fill').forEach(f => {
+      total += parseInt(f.style.width) || 0;
+    });
+    const el = document.getElementById('weight-total');
+    el.textContent = total + '%';
+    el.classList.toggle('bad', total !== 100);
+  }
+
+  // DTE sync between header and Parameters
+  function syncDteFromHeader() {
+    document.getElementById('param-min-dte').value = document.getElementById('hdr-dte-min').value;
+    document.getElementById('param-max-dte').value = document.getElementById('hdr-dte-max').value;
+    document.getElementById('unsaved').classList.add('show');
+  }
+  function syncDteFromParams() {
+    document.getElementById('hdr-dte-min').value = document.getElementById('param-min-dte').value;
+    document.getElementById('hdr-dte-max').value = document.getElementById('param-max-dte').value;
+    document.getElementById('unsaved').classList.add('show');
+  }
+
+  // Structure chips
+  function removeStruct(xEl, name) {
+    xEl.closest('.chip').remove();
+    updateRequirement();
+    document.getElementById('unsaved').classList.add('show');
+  }
+  function openStructDropdown(event) {
+    event.stopPropagation();
+    const dropdown = document.getElementById('struct-dropdown');
+    const current = Array.from(document.querySelectorAll('#struct-chips .chip'))
+      .map(c => c.firstChild.textContent.trim());
+    dropdown.innerHTML = availableStructures.map(s => {
+      const disabled = current.includes(s);
+      return `<div class="opt ${disabled ? 'disabled' : ''}" onclick="${disabled ? '' : `addStruct('${s}')`}">${s}${disabled ? ' (added)' : ''}</div>`;
+    }).join('');
+    const rect = event.target.getBoundingClientRect();
+    dropdown.style.left = rect.left + 'px';
+    dropdown.style.top = (rect.bottom + 4) + 'px';
+    dropdown.style.display = 'block';
+    setTimeout(() => {
+      document.addEventListener('click', closeStructDropdown, { once: true });
+    }, 0);
+  }
+  function closeStructDropdown() {
+    document.getElementById('struct-dropdown').style.display = 'none';
+  }
+  function addStruct(name) {
+    const chips = document.getElementById('struct-chips');
+    const addBtn = chips.querySelector('.chip-add');
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    chip.innerHTML = `${name} <span class="x" onclick="removeStruct(this, '${name}')">×</span>`;
+    chips.insertBefore(chip, addBtn);
+    closeStructDropdown();
+    updateRequirement();
+    document.getElementById('unsaved').classList.add('show');
+  }
+  function updateRequirement() {
+    const structs = Array.from(document.querySelectorAll('#struct-chips .chip'))
+      .map(c => c.firstChild.textContent.trim());
+    const allCredit = structs.length && structs.every(s => s.includes('Credit'));
+    const allDebit = structs.length && structs.every(s => s.includes('Debit'));
+    const allLong = structs.length && structs.every(s => s.startsWith('Single Long'));
+    let derived = 'mixed structure';
+    if (allCredit) derived = 'credit spread structure';
+    else if (allDebit) derived = 'debit spread structure';
+    else if (allLong) derived = 'long single-option structure';
+    document.querySelector('.req-derived').innerHTML = `Auto-derived from structures: <em>${derived}</em>`;
+  }
+
+  selectTab('scoring');
+</script>
+
+</body>
+</html>

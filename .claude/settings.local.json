@@ -160,6 +160,10 @@
       "Bash(cd \"C:\\\\Users\\\\DonMishory\\\\OneDrive - jmholistic.com\\\\VS Code Projects\\\\Options Analyzer\\\\options-analyzer\" && source venv/Scripts/activate && python -c \"from app.models.session import engine; print\\('Engine created OK'\\)\")",
       "Bash(cd \"C:\\\\Users\\\\DonMishory\\\\OneDrive - jmholistic.com\\\\VS Code Projects\\\\Options Analyzer\\\\options-analyzer\" && source venv/Scripts/activate && python -c \"from app.api.service_routes import router; print\\('Import OK'\\)\")",
       "Bash(az staticwebapp:*)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\DonMishory\\OneDrive - jmholistic.com\\VS Code Projects\\CRT Patient Analytics\\crt-patient-analytics",
+      "C:\\Users\\DonMishory\\OneDrive - jmholistic.com\\VS Code Projects\\Excel Options Chain Import"
     ]
   }
 }

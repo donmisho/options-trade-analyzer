@@ -20,6 +20,9 @@ build/
 *.swp
 *.swo
 
+# Claude Code worktree scratch (nested git worktrees — never commit)
+.claude/worktrees/
+
 # OS
 .DS_Store
 Thumbs.db
