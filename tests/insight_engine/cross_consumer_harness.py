@@ -25,17 +25,18 @@ real DERIVED/COMPUTED helpers over hand-built RAW candidates. This keeps the
 **evaluation path** — engine + rule libraries + seeded config — entirely real and
 unmocked, which is what the suite proves.
 
-Seed↔adapter reconciliation status (OTA-847):
+Seed↔adapter reconciliation status (OTA-847 / OTA-850):
   * OTA-847 #2/#3/#4 fixed three of the four seed↔adapter gaps in the seed itself:
     the cushion_vs_atr gate now reads the adapter's ``cushion_vs_atr`` (was the
     phantom ``cushion_vs_atr_ratio``); ``cushion_of_price`` bounds are now percent
     (was fraction); and the ``earnings_days_past_expiry`` gate is disabled (no
     producer — tracked in OTA-849). The screening passing fixture no longer needs
     those workarounds.
-  * Mismatch #1 is carved to a follow-up: the seeded gates still reference ``delta``
-    (the adapter emits long_delta/short_delta for spreads), so a faithful spread
-    halts at ``data_completeness_delta``. Until #1 lands, the passing fixture
-    supplies ``delta`` directly (flagged inline).
+  * Mismatch #1 is CLOSED by OTA-850: the delta-completeness gate is now
+    structure-keyed — steady-paycheck (credit spread) gates on ``short_delta`` and
+    trend-rider (debit spread) on ``long_delta``, both emitted by the adapter — so a
+    faithful spread flows through data-completeness on its real leg deltas with no
+    ``delta`` workaround. See ``test_delta_completeness_regression``.
 """
 
 from __future__ import annotations
@@ -194,15 +195,15 @@ def screening_passing_candidate() -> Candidate:
     })
     _screening_post_context_derived([candidate])
 
-    # Seed↔adapter gap: the carved-out OTA-847 #1 data_completeness_delta gate
-    # references `delta` (the adapter emits long_delta/short_delta for spreads), so
-    # the fixture supplies it directly until #1 lands. OTA-847 #2/#3/#4 fixed the
-    # other three gaps in the seed itself, so their former workarounds are gone:
+    # OTA-850 closed seed↔adapter mismatch #1: steady-paycheck's delta-completeness
+    # gate now reads `short_delta` (the credit spread's assignment-risk leg, emitted
+    # by the adapter above), so this credit spread flows through data-completeness on
+    # its real leg delta — no `delta` workaround. OTA-847 #2/#3/#4 similarly fixed the
+    # other three gaps in the seed itself:
     #   #2 cushion_vs_atr gate now reads the adapter's real `cushion_vs_atr`
     #      (computed above from cushion_pct/atr_14) — no `cushion_vs_atr_ratio`;
     #   #3 cushion_of_price bounds are now percent — the OTM cushion above clears them;
     #   #4 earnings_buffer_past_expiry is disabled — no `earnings_days_past_expiry`.
-    nv["delta"] = -0.20  # carved OTA-847 #1: data_completeness_delta (adapter: long/short_delta)
     return candidate
 
 

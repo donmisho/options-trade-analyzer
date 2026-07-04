@@ -1105,6 +1105,10 @@ _SCORING_FORMULA_DEFINITIONS = {
         "parameter_schema": {
             "delta_center": {"type": "number", "description": "Peak delta target"},
             "delta_half_range": {"type": "number", "description": "Half-width of gaussian peak"},
+            # OTA-850: the leg delta source is config-driven so pure-spread
+            # strategies read their leg delta (e.g. long_delta) instead of the
+            # never-emitted 'delta'. Default 'delta' preserves naked behaviour.
+            "delta_source": {"type": "string", "description": "Named value to read leg delta from (default 'delta'; 'long_delta'/'short_delta' for spreads)"},
         },
     },
     "payout_ratio": {
@@ -2266,6 +2270,199 @@ def descope_earnings_buffer_gate(rules, junctions):
     return rules, junctions
 
 
+# ── OTA-850: structure-aware delta-completeness ───────────────────────────
+#
+# OTA-847 mismatch #1, carved to this follow-up. The shared
+# data_completeness_delta gate (IS NOT NULL over `delta`, stop_if_fail, RAW,
+# FAIL_CLOSED) halts every SP/TR spread candidate before scoring: the
+# options-chain adapter emits long_delta/short_delta for spreads and NEVER
+# `delta`, and IS NOT NULL is key-presence only (expressions.py::_eval_null,
+# excluded from catalog-SKIP at pipeline.py::_null_lhs_semantics). Rebind the
+# gate structure-aware, keyed entirely off compatible_structures — NO strategy-id
+# branch:
+#   * pure-spread credit (SP) → short_delta sibling (short leg = assignment risk)
+#   * pure-spread debit  (TR) → long_delta  sibling (long leg = directional bet)
+#   * mixed              (WG) → drop (no single fixed leg-name valid across it)
+#   * naked-bearing      (LT) → keep `delta` (adapter emits delta for naked legs)
+# SP leg = short_delta confirmed by Don (OTA-850 Phase 0-D). The credit-vs-debit
+# leg choice is itself derived from compatible_structures (*_credit vs *_debit),
+# so the whole rebind is structure-keyed.
+#
+# The delta_quality scoring formula (TR-only, on the spread path — OTA-850
+# Phase 0-C) hardcoded get("delta")→0; it now reads params['delta_source'] so TR
+# sources long_delta from config (scoring_formulas.py::delta_quality).
+
+_CREDIT_SPREAD_STRUCTURES = frozenset({"bull_put_credit", "bear_call_credit"})
+_DEBIT_SPREAD_STRUCTURES = frozenset({"bull_call_debit", "bear_put_debit"})
+_VERTICAL_SPREAD_STRUCTURES = _CREDIT_SPREAD_STRUCTURES | _DEBIT_SPREAD_STRUCTURES
+_NAKED_STRUCTURES = frozenset({"long_call", "long_put"})
+
+_DELTA_COMPLETENESS_RULE = "data_completeness_delta"
+_DELTA_COMPLETENESS_SIBLINGS = {
+    "long_delta": "data_completeness_long_delta",
+    "short_delta": "data_completeness_short_delta",
+}
+# The only delta-reading scoring formula on a spread path (OTA-850 Phase 0-C).
+# expected_value's delta read is the long-option (ev_raw-null) branch only —
+# spreads carry ev_raw and never reach it; delta_otm_score / payout_ratio are
+# LT-naked (emit real `delta`). So only delta_quality needs a config source.
+_DELTA_READING_SPREAD_SCORING = frozenset({"delta_quality"})
+
+
+def _delta_completeness_plan(compatible_structures):
+    """Structure-keyed delta-completeness plan for a screening strategy.
+
+    Returns ``(kind, leg)`` where ``kind`` ∈ {"pure_spread", "mixed", "naked"}
+    and ``leg`` is the delta named value the strategy should read:
+    ``"short_delta"``/``"long_delta"`` for pure spreads (credit → short leg,
+    debit → long leg), ``"delta"`` for naked-bearing, ``None`` when the gate is
+    dropped (mixed). Derived solely from compatible_structures — no strategy-id
+    branch (insight_engine.md §2.2).
+    """
+    structures = set(compatible_structures or [])
+    has_vertical = bool(structures & _VERTICAL_SPREAD_STRUCTURES)
+    has_naked = bool(structures & _NAKED_STRUCTURES)
+    if has_vertical and has_naked:
+        return ("mixed", None)
+    if has_vertical:
+        has_credit = bool(structures & _CREDIT_SPREAD_STRUCTURES)
+        has_debit = bool(structures & _DEBIT_SPREAD_STRUCTURES)
+        if has_credit and not has_debit:
+            return ("pure_spread", "short_delta")
+        if has_debit and not has_credit:
+            return ("pure_spread", "long_delta")
+        return ("pure_spread", "long_delta")  # mixed credit+debit (none today)
+    return ("naked", "delta")
+
+
+def _ota850_disabled_rationale(existing, kind):
+    if existing and "OTA-850" in existing:
+        return existing
+    note = (
+        "OTA-850: delta-completeness disabled for this "
+        + kind
+        + " strategy — "
+        + ("re-bound to a leg-delta sibling."
+           if kind == "pure_spread"
+           else "dropped (mixed structures have no single fixed leg-name).")
+    )
+    return f"{existing} | {note}" if existing else note
+
+
+def restructure_delta_completeness(rules, strategies, junctions):
+    """OTA-850: rebind the delta-completeness gate structure-aware.
+
+    Runs AFTER set_gate_mechanics/canonicalize so each delta junction already
+    carries a unique per-(strategy, gate) evaluation_order — the pure-spread
+    sibling inherits that exact slot while the original delta junction is
+    disabled. The disabled delta junction is KEPT as an audit row (§3.4 enabled
+    flag) so the idempotent upsert flips the live DB row off (upsert never
+    deletes). Only the enabled sibling occupies the order slot, so the §6.6
+    EVAL_ORDER_DUPLICATE check (enabled-only) never trips. LT is untouched.
+    """
+    compat_by_key = {
+        s["strategy_key"]: s.get("compatible_structures") for s in strategies
+    }
+    base = next(
+        (r for r in rules if r["rule_key"] == _DELTA_COMPLETENESS_RULE), None
+    )
+    if base is None:
+        raise RuntimeError(
+            "OTA-850: data_completeness_delta rule not found in seed"
+        )
+
+    needed_legs = set()
+    added_junctions = []
+    disabled = 0
+    for j in junctions:
+        if j["rule_key"] != _DELTA_COMPLETENESS_RULE:
+            continue
+        kind, leg = _delta_completeness_plan(compat_by_key.get(j["strategy_key"]))
+        if kind == "naked":
+            continue  # LT — keep the delta gate exactly as-is
+        # SP/TR/WG: disable the delta binding (audit row; upsert flips DB off).
+        j["enabled"] = False
+        j["rationale"] = _ota850_disabled_rationale(j.get("rationale"), kind)
+        disabled += 1
+        if kind == "mixed":
+            continue  # WG — dropped, no sibling
+        # pure-spread: clone the disabled binding onto the leg sibling, enabled,
+        # inheriting the same evaluation_order slot.
+        needed_legs.add(leg)
+        sib = dict(j)
+        sib["rule_key"] = _DELTA_COMPLETENESS_SIBLINGS[leg]
+        sib["enabled"] = True
+        sib["rationale"] = (
+            f"OTA-850: {leg}-completeness for pure-spread strategy "
+            f"'{j['strategy_key']}' (compatible_structures-keyed)."
+        )
+        added_junctions.append(sib)
+
+    new_rules = []
+    for leg in sorted(needed_legs):
+        rule_key = _DELTA_COMPLETENESS_SIBLINGS[leg]
+        new_rules.append({
+            "owner_app_id": base["owner_app_id"],
+            "rule_key": rule_key,
+            "phase": "gate",
+            "tier": base["tier"],
+            "intent": (
+                f"Data completeness: {leg} must be present (fail-closed). OTA-850 "
+                f"sibling of data_completeness_delta bound to pure-spread "
+                f"strategies — the options-chain adapter emits {leg} (not delta) "
+                f"for spread structures."
+            ),
+            "condition_expression": "IS NOT NULL",
+            "formula_ref": None,
+            "referenced_named_values": [leg],
+            "parameter_schema": None,
+            "null_semantics": base["null_semantics"],
+            "enabled": True,
+        })
+
+    rules.extend(new_rules)
+    junctions.extend(added_junctions)
+    log.info(
+        f"OTA-850: delta-completeness restructured — {disabled} delta binding(s) "
+        f"disabled, {len(added_junctions)} sibling binding(s) added, "
+        f"{len(new_rules)} sibling rule(s): "
+        f"{sorted(_DELTA_COMPLETENESS_SIBLINGS[l] for l in needed_legs)}"
+    )
+    return rules, junctions
+
+
+def parameterize_delta_source(junctions, strategies):
+    """OTA-850: set delta_source on delta_quality junctions (structure-keyed).
+
+    delta_quality is the sole delta-reading scoring formula on a spread path
+    (Phase 0-C). Pure-spread strategies point it at their leg delta; naked/mixed
+    keep the "delta" default. The formula reads params['delta_source']
+    (scoring_formulas.py::delta_quality). Set on EVERY delta_quality binding so
+    the now-schema-declared param is always supplied (§6.6 JUNCTION_PARAM_MISSING).
+    """
+    compat_by_key = {
+        s["strategy_key"]: s.get("compatible_structures") for s in strategies
+    }
+    patched = 0
+    for j in junctions:
+        if j["rule_key"] not in _DELTA_READING_SPREAD_SCORING:
+            continue
+        if j.get("weight") is None:
+            continue  # scoring binding only
+        kind, leg = _delta_completeness_plan(compat_by_key.get(j["strategy_key"]))
+        source = leg if kind == "pure_spread" else "delta"
+        params = j.get("parameters") or {}
+        params["delta_source"] = source
+        j["parameters"] = params
+        patched += 1
+        log.info(
+            f"  OTA-850: delta_source={source} on "
+            f"{j['strategy_key']}×{j['rule_key']}"
+        )
+    log.info(f"OTA-850: parameterized delta_source on {patched} scoring junction(s)")
+    return junctions
+
+
 # ── OTA-836: build-to-testable carve-out resolution ──────────────────────
 #
 # Phase A of OTA-836: unblock load_config so the SCREENING surface validates
@@ -3355,6 +3552,16 @@ def build_all_rows(xlsx_path: Path):
     log.info("Reconciling screening seed to adapter catalog (OTA-847 #3/#4)...")
     junctions = rescale_cushion_of_price_units(junctions)
     rules, junctions = descope_earnings_buffer_gate(rules, junctions)
+
+    # OTA-850: structure-aware delta-completeness (OTA-847 mismatch #1). Runs
+    # after set_gate_mechanics (delta junctions carry unique per-(strategy,gate)
+    # orders the siblings inherit) and after the OTA-847 catalog reconciliation.
+    # Closes the SP/TR half of the "Trades returns no recommendations" regression
+    # (SP→short_delta, TR→long_delta siblings; WG delta dep dropped; LT unchanged),
+    # plus config-sources delta_quality's leg delta (TR→long_delta).
+    log.info("Restructuring delta-completeness bindings (OTA-850)...")
+    rules, junctions = restructure_delta_completeness(rules, strategies, junctions)
+    junctions = parameterize_delta_source(junctions, strategies)
 
     # OTA-836: wire the SMA-alignment formula + park unresolved carve-outs
     # (BEFORE build_formula_registry so the new formula_ref is scanned in).

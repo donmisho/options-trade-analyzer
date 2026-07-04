@@ -203,8 +203,18 @@ def delta_quality(named_values: dict, params: dict) -> float:
 
     Formula: max(0, 1 - |delta - center| / (half_range + smoothing)) * 100
     Legacy: strategy_scorer.py:389-392
+
+    OTA-850: the leg delta is sourced from the ``delta_source`` param (default
+    ``"delta"``) rather than a hardcoded key, so a pure-spread strategy can point
+    it at its leg delta (``long_delta`` for debit spreads such as Trend Rider)
+    while naked-bearing strategies keep ``delta``. Spread candidates never carry a
+    ``delta`` named value — the options-chain adapter emits ``long_delta`` /
+    ``short_delta`` — so without this the read collapsed to 0 and silently
+    mis-scored every spread. The source name is config-driven (junction param),
+    never a strategy-id branch.
     """
-    delta = named_values.get("delta", 0)
+    delta_source = params.get("delta_source", "delta")
+    delta = named_values.get(delta_source, 0) or 0
     center = params.get("delta_center", 0.35)
     half_range = params.get("delta_half_range", 0.15)
     smoothing = params.get("smoothing", 0.05)
