@@ -2112,10 +2112,14 @@ _CANONICAL_EXPRESSIONS = {
     # ── Group B: token over a NEW derived named value ───────────────────
     # cushion_of_price: ratio abs(spot - short_strike)/spot → derived cushion_pct.
     "cushion_of_price": {"expr": "BETWEEN", "ref": ["cushion_pct"]},
-    # cushion_vs_atr GATE: ratio abs(spot - short_strike)/ATR_14 → derived
-    # cushion_vs_atr_ratio. Deliberately NOT named cushion_vs_atr (the existing
-    # adjustment-rule named value) — the two stay distinct (OTA-832 note from Don).
-    "cushion_vs_atr": {"expr": "BETWEEN", "ref": ["cushion_vs_atr_ratio"]},
+    # cushion_vs_atr GATE: ratio abs(spot - short_strike)/ATR_14. OTA-847 #2: the
+    # options-chain adapter emits exactly ONE cushion-to-ATR named value,
+    # `cushion_vs_atr` (adapter._compute_post_context_derived). The OTA-832
+    # `cushion_vs_atr_ratio` distinction was a phantom — no producer ever emitted
+    # it, so this gate's LHS was always null and dropped every live candidate.
+    # Collapse it onto the adapter's real name so the gate reads a value that
+    # exists. (Same named value the adj_cushion_vs_atr_* adjustment rules read.)
+    "cushion_vs_atr": {"expr": "BETWEEN", "ref": ["cushion_vs_atr"]},
     # adj_cushion_penalty_severe is already "<"/[cushion_pct] in the decomposer;
     # restate here so the canonical contract lives in one place (idempotent).
     "adj_cushion_penalty_severe": {"expr": "<", "ref": ["cushion_pct"]},
@@ -2172,6 +2176,93 @@ def canonicalize_expressions(rules, junctions):
 
     log.info(f"OTA-832 canonicalization: {rewritten} rules rewritten, "
              f"{patched} junction parameter sets pinned")
+    return rules, junctions
+
+
+# ── OTA-847: screening seed ↔ options-chain adapter reconciliation ────────
+#
+# Three seed-only fixes so live candidates stop dropping on named-value/unit
+# mismatches against the options-chain adapter catalog (the sole source of truth
+# for screening named-value names + units; the seed conforms to it). Mismatch #1
+# (data_completeness_delta / delta_quality) is carved to a follow-up — it cannot
+# be fixed seed-only (the shared delta gate halts every spread, and the scoring
+# formula hardcodes the `delta` key). See OTA-847 Phase 0.5 report.
+
+# #3 — cushion_pct units (fraction → percent).
+# The adapter emits cushion_pct in PERCENT (×100 in
+# OptionsChainAdapter._compute_spread_derived), but the workbook seeds the
+# cushion_of_price BETWEEN gate bounds as fractions (SP 0.01/1.0, WG 0.015/1.0).
+# Left unscaled the gate compares a percent LHS against fractional bounds and
+# drops live credit spreads. Rescale the EXISTING junction bounds ×100 (do NOT
+# hand-type new bounds) so units match the adapter. The graduated cushion-penalty
+# twin (adj_cushion_penalty_severe/_moderate) is already in percent (1.0%/2.0%) —
+# confirmed OTA-847 Phase 0.5-B — so it is deliberately left untouched.
+_CUSHION_PCT_GATE_RULE = "cushion_of_price"
+
+
+def rescale_cushion_of_price_units(junctions):
+    """OTA-847 #3: ×100 the cushion_of_price gate bounds (fraction → percent)."""
+    patched = 0
+    for j in junctions:
+        if j["rule_key"] != _CUSHION_PCT_GATE_RULE:
+            continue
+        params = j.get("parameters")
+        if not params:
+            continue
+        for bound in ("low", "high"):
+            if isinstance(params.get(bound), (int, float)) and not isinstance(params[bound], bool):
+                params[bound] = params[bound] * 100
+        patched += 1
+        log.info(
+            f"  OTA-847 #3: rescaled cushion_of_price bounds for "
+            f"{j['strategy_key']} → {params}"
+        )
+    log.info(f"OTA-847 #3: rescaled {patched} cushion_of_price junction(s) (×100, fraction→percent)")
+    return junctions
+
+
+# #4 — earnings_days_past_expiry has no adapter producer (DESCOPE).
+# The earnings_buffer_past_expiry gate (BETWEEN over earnings_days_past_expiry)
+# references a named value the options-chain adapter never emits, so it fails
+# closed (order 60, stop_if_fail) and drops every screening candidate before
+# scoring. Re-pointing to dte_after_earnings is WRONG (sign-inverted against LT's
+# load-bearing 7-day earnings buffer) and is tracked in OTA-849. Until a real
+# producer exists, disable the gate (rule + its junctions) so it stops dropping
+# candidates. Reversible: re-enable when OTA-849 lands.
+_EARNINGS_BUFFER_GATE_RULE = "earnings_buffer_past_expiry"
+_OTA849_DESCOPE_RATIONALE = (
+    "OTA-847 #4: DISABLED — references earnings_days_past_expiry, which has no "
+    "options-chain adapter producer, so it dropped every screening candidate. A "
+    "real producer / re-point is tracked in OTA-849 (do NOT use dte_after_earnings "
+    "— sign-inverted vs LT's 7-day buffer). Re-enable when OTA-849 lands."
+)
+
+
+def descope_earnings_buffer_gate(rules, junctions):
+    """OTA-847 #4: disable the earnings_buffer_past_expiry gate + its junctions."""
+    disabled_rules = 0
+    for r in rules:
+        if r["rule_key"] != _EARNINGS_BUFFER_GATE_RULE:
+            continue
+        r["enabled"] = False
+        intent = r.get("intent") or ""
+        if "OTA-847" not in intent:
+            r["intent"] = f"{intent} | {_OTA849_DESCOPE_RATIONALE}" if intent else _OTA849_DESCOPE_RATIONALE
+        disabled_rules += 1
+    disabled_junctions = 0
+    for j in junctions:
+        if j["rule_key"] != _EARNINGS_BUFFER_GATE_RULE:
+            continue
+        j["enabled"] = False
+        rationale = j.get("rationale") or ""
+        if "OTA-847" not in rationale:
+            j["rationale"] = f"{rationale} | {_OTA849_DESCOPE_RATIONALE}" if rationale else _OTA849_DESCOPE_RATIONALE
+        disabled_junctions += 1
+    log.info(
+        f"OTA-847 #4: descoped {_EARNINGS_BUFFER_GATE_RULE} "
+        f"({disabled_rules} rule, {disabled_junctions} junction(s) disabled; "
+        f"earnings_days_past_expiry has no producer — see OTA-849)"
+    )
     return rules, junctions
 
 
@@ -3255,6 +3346,15 @@ def build_all_rows(xlsx_path: Path):
     # OTA-832: Canonicalize condition_expression to §6.3 closed-set tokens
     log.info("Canonicalizing condition_expression to §6.3 tokens (OTA-832)...")
     rules, junctions = canonicalize_expressions(rules, junctions)
+
+    # OTA-847: reconcile screening seed to the options-chain adapter catalog
+    # (#3 cushion_pct fraction→percent, #4 descope earnings_days_past_expiry).
+    # #2 (cushion_vs_atr gate ref) is applied inside canonicalize_expressions
+    # above via _CANONICAL_EXPRESSIONS. Runs after canonicalization so the
+    # cushion_of_price params (kept by BETWEEN) and the earnings gate exist.
+    log.info("Reconciling screening seed to adapter catalog (OTA-847 #3/#4)...")
+    junctions = rescale_cushion_of_price_units(junctions)
+    rules, junctions = descope_earnings_buffer_gate(rules, junctions)
 
     # OTA-836: wire the SMA-alignment formula + park unresolved carve-outs
     # (BEFORE build_formula_registry so the new formula_ref is scanned in).

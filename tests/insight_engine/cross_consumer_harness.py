@@ -25,16 +25,17 @@ real DERIVED/COMPUTED helpers over hand-built RAW candidates. This keeps the
 **evaluation path** — engine + rule libraries + seeded config — entirely real and
 unmocked, which is what the suite proves.
 
-Known seed↔adapter gaps the screening passing fixture works around (reported under
-OTA-795 Phase 0, NOT fixed here — this is a test-only story):
-  * The seeded screening gates reference ``delta`` (the adapter emits long_delta /
-    short_delta for spreads), ``cushion_vs_atr_ratio`` (adapter emits
-    ``cushion_vs_atr``), and ``earnings_days_past_expiry`` (not emitted at all).
-    A faithful spread candidate built only from adapter-produced names therefore
-    halts at ``data_completeness_delta`` — so the passing fixture supplies those
-    gate-referenced names directly (each flagged inline). The cushion gate also
-    treats ``cushion_pct`` as a fraction in ``[0.01, 1.0]`` while the adapter emits
-    it as a percentage, so the passing fixture is intentionally near-ATM.
+Seed↔adapter reconciliation status (OTA-847):
+  * OTA-847 #2/#3/#4 fixed three of the four seed↔adapter gaps in the seed itself:
+    the cushion_vs_atr gate now reads the adapter's ``cushion_vs_atr`` (was the
+    phantom ``cushion_vs_atr_ratio``); ``cushion_of_price`` bounds are now percent
+    (was fraction); and the ``earnings_days_past_expiry`` gate is disabled (no
+    producer — tracked in OTA-849). The screening passing fixture no longer needs
+    those workarounds.
+  * Mismatch #1 is carved to a follow-up: the seeded gates still reference ``delta``
+    (the adapter emits long_delta/short_delta for spreads), so a faithful spread
+    halts at ``data_completeness_delta``. Until #1 lands, the passing fixture
+    supplies ``delta`` directly (flagged inline).
 """
 
 from __future__ import annotations
@@ -148,9 +149,10 @@ SCREENING_STRATEGY = "steady-paycheck"
 def screening_passing_candidate() -> Candidate:
     """A credit spread that flows through every steady-paycheck gate to a verdict.
 
-    Near-ATM bull_put so the seeded ``cushion_of_price`` gate (which bounds
-    ``cushion_pct`` in ``[0.01, 1.0]``) is satisfied, with tight per-leg bid/ask
-    (≤ 0.15) and DTE inside the 21–45 window. RAW + DERIVED come from the real
+    Slightly-OTM bull_put so the seeded ``cushion_of_price`` gate (percent bounds
+    after OTA-847 #3) and the ``cushion_vs_atr`` gate (OTA-847 #2) are both
+    satisfied by the adapter-computed cushion, with tight per-leg bid/ask (≤ 0.15)
+    and DTE inside the 21–45 window. RAW + DERIVED come from the real
     ``_compute_derived``; market-context values mirror what
     ``_fetch_market_context`` would stamp.
     """
@@ -161,8 +163,8 @@ def screening_passing_candidate() -> Candidate:
         "option_type": "put",
         "expiration": exp,
         "long_strike": 170.0,
-        "short_strike": 200.0,   # ATM short → breakeven within 1% of spot
-        "spread_width": 30.0,
+        "short_strike": 195.0,   # OTA-847: small OTM cushion clears the seeded percent floor
+        "spread_width": 25.0,
         "long_bid": 0.20, "long_ask": 0.25,
         "short_bid": 1.00, "short_ask": 1.05,
         "long_delta": -0.05, "short_delta": -0.20,
@@ -192,12 +194,15 @@ def screening_passing_candidate() -> Candidate:
     })
     _screening_post_context_derived([candidate])
 
-    # Seed↔adapter gap (see module docstring): these gate-referenced names are not
-    # emitted by the options_chain adapter for spreads, so the fixture supplies
-    # representative values directly. Reported under OTA-795 Phase 0; not fixed here.
-    nv["delta"] = -0.20                  # gate data_completeness_delta (adapter: long/short_delta)
-    nv["cushion_vs_atr_ratio"] = 2.0     # gate cushion_vs_atr (adapter emits cushion_vs_atr)
-    nv["earnings_days_past_expiry"] = 30  # earnings_buffer gate (not adapter-produced)
+    # Seed↔adapter gap: the carved-out OTA-847 #1 data_completeness_delta gate
+    # references `delta` (the adapter emits long_delta/short_delta for spreads), so
+    # the fixture supplies it directly until #1 lands. OTA-847 #2/#3/#4 fixed the
+    # other three gaps in the seed itself, so their former workarounds are gone:
+    #   #2 cushion_vs_atr gate now reads the adapter's real `cushion_vs_atr`
+    #      (computed above from cushion_pct/atr_14) — no `cushion_vs_atr_ratio`;
+    #   #3 cushion_of_price bounds are now percent — the OTM cushion above clears them;
+    #   #4 earnings_buffer_past_expiry is disabled — no `earnings_days_past_expiry`.
+    nv["delta"] = -0.20  # carved OTA-847 #1: data_completeness_delta (adapter: long/short_delta)
     return candidate
 
 
