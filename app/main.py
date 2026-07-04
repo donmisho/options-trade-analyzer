@@ -259,6 +259,13 @@ async def lifespan(app: FastAPI):
     init_named_watchlist_routes(provider_factory)
     init_export_routes(provider_factory)
     init_mcp_provider(provider_factory)
+    # OTA-adapter engine path (options_chain / directional / position_health)
+    # resolves the live market-data provider via _shared.schwab_client, which
+    # holds its OWN registry handle. Without this wiring the engine-backed
+    # screening routes (/analyze/scorecard, /analyze/verticals, /analyze/directional)
+    # raise "ProviderRegistry not initialised — call init_registry() at startup".
+    from app.ota_adapters._shared.schwab_client import init_registry as init_ota_adapter_registry
+    init_ota_adapter_registry(provider_factory)
     if settings.app_env != "production":
         _init_test_routes(provider_factory)
 
