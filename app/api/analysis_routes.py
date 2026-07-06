@@ -854,7 +854,7 @@ async def analyze_verticals(
     # composite_score = engine final_score; verdict additive. The request's
     # weight/filter overrides are no longer applied — gates and weights are the
     # engine config's (insight_engine.md §2.1, tables are the source of truth).
-    best = _screen_candidates_through_engine(runtime, adapter, candidates)
+    best = await asyncio.to_thread(_screen_candidates_through_engine, runtime, adapter, candidates)
     spreads = _build_engine_rows(candidates, best, _vertical_engine_row)
 
     result = {
@@ -1010,7 +1010,7 @@ async def analyze_long_calls(
     chain_data = adapter.chain_data
 
     # Per-candidate engine evaluation → best (verdict tier, score) per option.
-    best = _screen_candidates_through_engine(runtime, adapter, candidates)
+    best = await asyncio.to_thread(_screen_candidates_through_engine, runtime, adapter, candidates)
     options = _build_engine_rows(candidates, best, _long_option_engine_row)
     if req.max_results:
         options = options[:req.max_results]
@@ -1379,7 +1379,13 @@ async def get_strategy_scorecard(
         sma_signal = compute_sma_signal(candles, price_for_sma)
 
     # Per-strategy best candidate via the shared screening grid (single engine path).
-    grid = _evaluate_screening_grid(runtime, adapter, candidates)
+    # OTA-854: run the CPU-bound engine grid off the event loop. Each scorecard
+    # evaluates every structure × 4 strategies (synchronous Python); on the
+    # single-worker instance that would block the loop and starve health/login/
+    # other requests during a Security Strategies scan (5 concurrent). to_thread
+    # keeps the loop responsive. The bronze sink schedules its writes via
+    # run_coroutine_threadsafe(loop), which is the canonical thread→loop path.
+    grid = await asyncio.to_thread(_evaluate_screening_grid, runtime, adapter, candidates)
     best_by_strategy = _scorecard_best_by_strategy(grid)
 
     # OTA-649: Return all four strategies in canonical order (SP, WG, TR, LT). A
