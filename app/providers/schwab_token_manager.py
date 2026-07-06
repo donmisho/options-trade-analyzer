@@ -24,6 +24,7 @@ STORAGE STRATEGY:
   - Token data stored as JSON string with metadata (expiry times)
 """
 
+import asyncio
 import json
 import base64
 import logging
@@ -68,6 +69,14 @@ class SchwabTokenManager:
         self._refresh_token: Optional[str] = None
         self._access_token_expires_at: Optional[datetime] = None
         self._refresh_token_expires_at: Optional[datetime] = None
+
+        # Single-flight refresh lock. Schwab ROTATES the refresh token on every
+        # refresh, so concurrent refreshes (e.g. a scan firing many market calls
+        # at once against an expired access token) race: one rotates the token
+        # and invalidates it for the others, which then 400 and can leave a
+        # stored token that is no longer Schwab's current one → forced re-auth.
+        # The lock makes exactly one refresh happen; the rest await it.
+        self._refresh_lock = asyncio.Lock()
 
         # Load any existing tokens from storage on init
         self._load_tokens_from_storage()
@@ -194,8 +203,18 @@ class SchwabTokenManager:
                         "Please reconnect your Schwab account."
                     )
 
-            logger.info("SchwabTokenManager: Access token expired, refreshing...")
-            await self._refresh_access_token()
+            # Single-flight: only one coroutine refreshes at a time. Concurrent
+            # callers await the lock, then re-check — the winner's refresh has
+            # already populated a valid access token, so they reuse it instead
+            # of firing a second (racing) refresh that would rotate/invalidate
+            # the refresh token.
+            async with self._refresh_lock:
+                if self._access_token and self._access_token_expires_at:
+                    buffer = timedelta(seconds=60)
+                    if datetime.now(timezone.utc) < (self._access_token_expires_at - buffer):
+                        return self._access_token
+                logger.info("SchwabTokenManager: Access token expired, refreshing...")
+                await self._refresh_access_token()
             return self._access_token
 
         # No tokens at all
