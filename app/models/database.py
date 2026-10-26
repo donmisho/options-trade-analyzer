@@ -14,7 +14,7 @@ authenticated user's ID.
 import uuid
 from datetime import datetime, timezone
 from sqlalchemy import (
-    Column, Integer, String, Float, Boolean, DateTime, Date, Text, Numeric,
+    Column, Integer, BigInteger, String, Float, Boolean, DateTime, Date, Text, Numeric,
     ForeignKey, JSON, Index, UniqueConstraint
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
@@ -956,3 +956,201 @@ class TradeCandidate(Base):
         Index("ix_trade_candidates_user_scanned", "user_id", "scanned_at"),
         Index("ix_trade_candidates_symbol_user", "symbol", "user_id"),
     )
+
+
+# ─── Broker account activity (OTA-855) ───────────────────────────────────────
+#
+# The brokerage's own record of what happened in the account, pulled by the
+# account activity poller every 15 minutes in market hours. Statement rows
+# (transactions, orders) keep the raw API JSON next to the normalized columns
+# so nothing from the statement is lost; the fill context is captured at poll
+# time and kept apart so a re-capture never touches a statement row. Every
+# table carries user_id (Data Isolation Invariant).
+
+
+class BrokerAccount(Base):
+    """One brokerage account the poller reads. The hash is the Trader API's handle for it."""
+    __tablename__ = "broker_accounts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False)
+    provider = Column(String(20), nullable=False, default="schwab")
+    account_hash = Column(String(64), nullable=False)
+    account_last4 = Column(String(4), nullable=False)     # never the full number
+    label = Column(String(40), nullable=False)             # Options | IRA | …1234
+    is_active = Column(Boolean, nullable=False, default=True)
+    last_synced_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "provider", "account_hash", name="uq_broker_accounts_user_hash"),
+    )
+
+
+class BrokerTransaction(Base):
+    """
+    One brokerage transaction (a fill, with its fees) as the Trader API reports it.
+
+    A multi-leg fill (a vertical) is one transaction with one row; its legs are in
+    legs_json and the primary columns describe the spread the way the statement
+    export does (strikes "580/585", structure "Vertical", price per spread).
+    """
+    __tablename__ = "broker_transactions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False)
+    account_id = Column(Integer, ForeignKey("broker_accounts.id"), nullable=False)
+    provider = Column(String(20), nullable=False, default="schwab")
+    activity_id = Column(BigInteger, nullable=False)
+    order_id = Column(BigInteger, nullable=True)
+    position_id = Column(BigInteger, nullable=True)
+    activity_type = Column(String(30), nullable=True)      # EXECUTION | ORDER_ACTION | …
+    transaction_type = Column(String(30), nullable=False)  # TRADE | RECEIVE_AND_DELIVER | …
+    status = Column(String(20), nullable=True)             # VALID | …
+    sub_account = Column(String(20), nullable=True)        # CASH | MARGIN
+    time = Column(DateTime, nullable=False)                # UTC
+    trade_date = Column(Date, nullable=False)
+    settlement_date = Column(Date, nullable=True)
+    description = Column(String(400), nullable=True)
+    asset_type = Column(String(20), nullable=True)         # OPTION | EQUITY | MULTI
+    structure = Column(String(20), nullable=True)          # Single | Vertical | Multi | Equity
+    side = Column(String(4), nullable=True)                # Buy | Sell
+    position_effect = Column(String(10), nullable=True)    # OPENING | CLOSING | MIXED
+    underlying_symbol = Column(String(20), nullable=True)
+    option_symbol = Column(String(30), nullable=True)      # primary leg, OCC layout
+    put_call = Column(String(4), nullable=True)
+    strike_price = Column(Numeric(12, 4), nullable=True)   # primary leg
+    strikes_text = Column(String(60), nullable=True)       # "580" or "580/585", long leg first
+    expiration_date = Column(Date, nullable=True)
+    quantity = Column(Numeric(12, 4), nullable=True)       # contracts or shares, positive
+    price = Column(Numeric(14, 4), nullable=True)          # per contract (per spread for multi-leg)
+    leg_cost = Column(Numeric(14, 4), nullable=True)       # cash effect of the legs, fees excluded
+    commissions = Column(Numeric(14, 4), nullable=True)    # negative
+    fees = Column(Numeric(14, 4), nullable=True)           # other fees, negative
+    net_amount = Column(Numeric(14, 4), nullable=True)     # the API's netAmount
+    leg_count = Column(Integer, nullable=False, default=0)
+    legs_json = Column(Text, nullable=True)
+    raw_json = Column(Text, nullable=False)
+    captured_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        UniqueConstraint("account_id", "activity_id", name="uq_broker_transactions_activity"),
+        Index("ix_broker_transactions_user_time", "user_id", "time"),
+        Index("ix_broker_transactions_order", "order_id"),
+    )
+
+
+class BrokerOrder(Base):
+    """
+    One order (or one child of an OCO / trigger strategy) with its latest known state.
+
+    Re-polled while it is within the window, so a stop that fired or a target
+    that was cancelled updates in place; raw_json always holds the last payload.
+    """
+    __tablename__ = "broker_orders"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False)
+    account_id = Column(Integer, ForeignKey("broker_accounts.id"), nullable=False)
+    provider = Column(String(20), nullable=False, default="schwab")
+    order_id = Column(BigInteger, nullable=False)
+    parent_order_id = Column(BigInteger, nullable=True)
+    order_strategy_type = Column(String(20), nullable=True)  # SINGLE | OCO | TRIGGER
+    order_type = Column(String(20), nullable=True)           # LIMIT | STOP | STOP_LIMIT | TRAILING_STOP | MARKET
+    status = Column(String(30), nullable=True)
+    status_description = Column(String(400), nullable=True)
+    session = Column(String(20), nullable=True)
+    duration = Column(String(30), nullable=True)
+    price = Column(Numeric(14, 4), nullable=True)
+    stop_price = Column(Numeric(14, 4), nullable=True)
+    stop_price_link_basis = Column(String(20), nullable=True)
+    stop_price_link_type = Column(String(20), nullable=True)
+    stop_price_offset = Column(Numeric(14, 4), nullable=True)
+    stop_type = Column(String(20), nullable=True)
+    entered_time = Column(DateTime, nullable=True)           # UTC
+    close_time = Column(DateTime, nullable=True)             # UTC
+    quantity = Column(Numeric(12, 4), nullable=True)
+    filled_quantity = Column(Numeric(12, 4), nullable=True)
+    remaining_quantity = Column(Numeric(12, 4), nullable=True)
+    instruction = Column(String(20), nullable=True)          # BUY_TO_OPEN | SELL_TO_CLOSE | …
+    position_effect = Column(String(10), nullable=True)
+    structure = Column(String(20), nullable=True)
+    underlying_symbol = Column(String(20), nullable=True)
+    option_symbol = Column(String(30), nullable=True)
+    put_call = Column(String(4), nullable=True)
+    strike_price = Column(Numeric(12, 4), nullable=True)
+    strikes_text = Column(String(60), nullable=True)
+    expiration_date = Column(Date, nullable=True)
+    leg_count = Column(Integer, nullable=False, default=0)
+    legs_json = Column(Text, nullable=True)
+    raw_json = Column(Text, nullable=False)
+    captured_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc),
+                        onupdate=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        UniqueConstraint("account_id", "order_id", name="uq_broker_orders_order"),
+        Index("ix_broker_orders_user_entered", "user_id", "entered_time"),
+        Index("ix_broker_orders_parent", "parent_order_id"),
+    )
+
+
+class BrokerFillContext(Base):
+    """
+    The market around an option fill, read at the poll after the fill (within 15 minutes
+    in market hours). ATR used is |underlying net change| ÷ daily ATR14 (Wilder, from the
+    daily candles before the trade date); the option spread is ask − bid at capture.
+    """
+    __tablename__ = "broker_fill_context"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False)
+    transaction_id = Column(Integer, ForeignKey("broker_transactions.id"), nullable=False, unique=True)
+    captured_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    kind = Column(String(12), nullable=False, default="live")  # live (quotes at the poll) | daily (from the day's candle)
+    lag_seconds = Column(Integer, nullable=True)             # capture time minus fill time
+    underlying_symbol = Column(String(20), nullable=True)
+    underlying_last = Column(Numeric(14, 4), nullable=True)
+    underlying_net_change = Column(Numeric(14, 4), nullable=True)
+    underlying_prev_close = Column(Numeric(14, 4), nullable=True)
+    atr14 = Column(Numeric(14, 4), nullable=True)
+    atr_as_of = Column(Date, nullable=True)                  # last candle the ATR used
+    atr_used = Column(Float, nullable=True)
+    option_symbol = Column(String(30), nullable=True)
+    option_bid = Column(Numeric(14, 4), nullable=True)
+    option_ask = Column(Numeric(14, 4), nullable=True)
+    option_mark = Column(Numeric(14, 4), nullable=True)
+    option_last = Column(Numeric(14, 4), nullable=True)
+    spread = Column(Numeric(14, 4), nullable=True)
+    spread_pct_mid = Column(Float, nullable=True)
+    open_interest = Column(Integer, nullable=True)
+    option_volume = Column(Integer, nullable=True)
+    raw_json = Column(Text, nullable=True)                   # the quote payloads used
+
+    __table_args__ = (
+        Index("ix_broker_fill_context_user", "user_id"),
+    )
+
+
+class BrokerSyncRun(Base):
+    """One poller run: what window it read, what it added, and how it ended."""
+    __tablename__ = "broker_sync_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=True)
+    started_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    finished_at = Column(DateTime, nullable=True)
+    status = Column(String(20), nullable=False, default="running")  # running | ok | skipped | error
+    trigger = Column(String(20), nullable=False, default="schedule")  # schedule | manual
+    window_start = Column(DateTime, nullable=True)
+    window_end = Column(DateTime, nullable=True)
+    accounts = Column(Integer, nullable=False, default=0)
+    transactions_new = Column(Integer, nullable=False, default=0)
+    orders_upserted = Column(Integer, nullable=False, default=0)
+    contexts_captured = Column(Integer, nullable=False, default=0)
+    message = Column(String(1000), nullable=True)
+
+    __table_args__ = (
+        Index("ix_broker_sync_runs_started", "started_at"),
+    )
+

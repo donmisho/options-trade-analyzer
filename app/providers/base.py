@@ -139,3 +139,47 @@ class MarketDataProvider(ABC):
         ...
 
 
+
+
+class AccountActivityProvider(ABC):
+    """
+    A brokerage's record of what happened in the account: transactions (fills,
+    fees), orders (including the stop and target brackets around a fill), and
+    the market reads the fill-context capture needs (OTA-855).
+
+    Today: Schwab (SchwabAccountActivity). The poller and its routes talk to
+    this interface only, so a second brokerage is one new adapter.
+    """
+
+    @abstractmethod
+    async def get_account_numbers(self) -> list[dict]:
+        """[{accountNumber, hashValue}] for every account the credential can see."""
+        ...
+
+    @abstractmethod
+    async def get_transactions(
+        self, account_hash: str, start: datetime, end: datetime, types: str = "TRADE", symbol: Optional[str] = None,
+    ) -> list[dict]:
+        """Raw transactions in [start, end]; the adapter clamps start to the API's lookback limit."""
+        ...
+
+    @abstractmethod
+    async def get_orders(
+        self, account_hash: str, start: datetime, end: datetime, max_results: int = 3000, status: Optional[str] = None,
+    ) -> list[dict]:
+        """Raw orders entered in [start, end]."""
+        ...
+
+    @abstractmethod
+    async def get_quotes(self, symbols: list[str]) -> dict:
+        """{symbol: {quote: {...}}} for underlying and option symbols."""
+        ...
+
+    @abstractmethod
+    async def get_daily_candles(self, symbol: str, months: int = 3) -> list[dict]:
+        """Daily OHLC candles oldest first: [{open, high, low, close, volume, datetime}]."""
+        ...
+
+    @abstractmethod
+    async def health_check(self) -> bool:
+        ...

@@ -869,3 +869,65 @@ async def get_earnings_date(ticker: str) -> dict:
             "error_code": "EARNINGS_DATA_UNAVAILABLE",
             "message": str(e),
         }
+
+
+# ---------------------------------------------------------------------------
+# MCP Tool — OTA-855 trade fills (the dashboard's live data source)
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+async def get_trade_fills(
+    start_date: str | None = None,
+    end_date: str | None = None,
+    account: str | None = None,
+    limit: int = 5000,
+) -> dict:
+    """Get the account's option fills with each fill's market context.
+
+    Rows come from the broker activity tables the account activity poller fills
+    every 15 minutes in market hours from the Schwab Trader API, in the shape of
+    the thinkorswim statement's Trades sheet (trade_datetime, symbol, strike,
+    contract_count, contract_price, net_profit_loss, account, type, structure and
+    the rest) plus the context captured at the poll after the fill: atr_used
+    (|underlying net change| / daily ATR14), atr14, underlying_net_change,
+    option_bid, option_ask, spread, spread_pct_mid, context_kind
+    ("live" from quotes at the poll, "daily" from the day's candle for older
+    fills), context_captured_at and context_lag_seconds.
+
+    Args:
+        start_date: First trade date to include, YYYY-MM-DD. Omit for all stored fills.
+        end_date: Last trade date to include, YYYY-MM-DD.
+        account: Account label to keep, e.g. "Options" or "IRA". Omit for every account.
+        limit: Most rows to return (default 5000, at most 20000).
+
+    Returns:
+        {"columns": [...], "rows": [{...}], "count": n, "as_of": iso-time,
+        "display_tz": zone of trade_datetime, "source": "broker_transactions"},
+        oldest fill first. Returns an error object with error_code if the caller
+        is not provisioned or the dates are malformed.
+    """
+    from app.services.trade_fills import list_fill_rows, parse_day
+
+    t0 = time.monotonic()
+    user_id = _get_mcp_user_id()
+    if not user_id:
+        return {"error": True, "error_code": "UNAUTHENTICATED", "message": "No provisioned user for this token."}
+    try:
+        async with async_session() as db:
+            result = await list_fill_rows(db, user_id, parse_day(start_date), parse_day(end_date), account, limit)
+            latency_ms = int((time.monotonic() - t0) * 1000)
+            await mcp_tool_observability("get_trade_fills", ticker=None, user_id=user_id,
+                                         latency_ms=latency_ms, success=True, db=db)
+        return result
+    except ValueError as e:
+        return {"error": True, "error_code": "BAD_DATE", "message": str(e)}
+    except Exception as e:
+        latency_ms = int((time.monotonic() - t0) * 1000)
+        try:
+            async with async_session() as db:
+                await mcp_tool_observability("get_trade_fills", ticker=None, user_id=user_id,
+                                             latency_ms=latency_ms, success=False, error_code="DB_UNAVAILABLE", db=db)
+        except Exception:
+            pass
+        return {"error": True, "error_code": "DB_UNAVAILABLE", "message": str(e)}

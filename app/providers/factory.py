@@ -19,7 +19,7 @@ LIFECYCLE STATES (see architecture-plan.md § Provider Lifecycle State Machine):
 import logging
 from typing import Optional
 
-from app.providers.base import MarketDataProvider, ContextSource
+from app.providers.base import MarketDataProvider, ContextSource, AccountActivityProvider
 from app.providers.schwab import SchwabMarketData
 from app.providers.finnhub_earnings import FinnhubEarningsSource
 from app.core.secrets import SecretsManager
@@ -41,8 +41,9 @@ CONTEXT_SOURCE_REGISTRY: dict[str, ContextSource] = {
 PROVIDER_REGISTRY = {
     "schwab": {
         "state": "active",
-        "capabilities": ["market_data"],
+        "capabilities": ["market_data", "account_activity"],
         "market_data": None,  # Set at runtime by init — needs token_manager
+        "account_activity": None,  # Set at runtime by init — needs token_manager (OTA-855)
     },
 }
 
@@ -83,6 +84,11 @@ class ProviderRegistry:
                 lambda secrets, user_id, env: SchwabMarketData(token_manager)
             )
             logger.info("ProviderRegistry: Schwab market data adapter registered")
+            from app.providers.schwab_account import SchwabAccountActivity
+            PROVIDER_REGISTRY["schwab"]["account_activity"] = (
+                lambda secrets, user_id, env: SchwabAccountActivity(token_manager)
+            )
+            logger.info("ProviderRegistry: Schwab account activity adapter registered")
 
     def _check_provider_state(self, provider_name: str, registry: dict) -> None:
         """
@@ -143,6 +149,39 @@ class ProviderRegistry:
         factory_fn = registry.get("market_data")
         if not factory_fn:
             raise ValueError(f"Provider {provider_name} market_data adapter not implemented")
+
+        instance = factory_fn(self.secrets, user_id, environment)
+        self._cache[cache_key] = instance
+        return instance
+
+    def get_account_activity(
+        self,
+        provider_name: str,
+        user_id: Optional[str] = None,
+        environment: Optional[str] = None,
+    ) -> AccountActivityProvider:
+        """
+        Get an AccountActivityProvider instance (OTA-855).
+
+        Same lifecycle checks and per-(provider, user) caching as get_market_data,
+        so the account poller never builds a second HTTP client per run.
+        """
+        cache_key = f"account_activity:{provider_name}:{user_id}"
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+
+        registry = PROVIDER_REGISTRY.get(provider_name)
+        if not registry:
+            raise ValueError(f"Unknown provider: {provider_name}")
+
+        self._check_provider_state(provider_name, registry)
+
+        if "account_activity" not in registry.get("capabilities", []):
+            raise ValueError(f"Provider {provider_name} does not support account activity")
+
+        factory_fn = registry.get("account_activity")
+        if not factory_fn:
+            raise ValueError(f"Provider {provider_name} account_activity adapter not implemented")
 
         instance = factory_fn(self.secrets, user_id, environment)
         self._cache[cache_key] = instance

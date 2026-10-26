@@ -58,6 +58,7 @@ from app.api.service_routes import router as service_router, init_service_routes
 from app.ai import AnthropicAdapter, FoundryEvalAdapter
 from app.api.changelog_routes import router as changelog_router, init_changelog_routes
 from app.api.export_routes import router as export_router, init_export_routes
+from app.api.account_activity_routes import router as account_activity_router, init_account_activity_routes
 from app.middleware.csrf import CSRFMiddleware
 from app.api.mcp_routes import get_mcp_app, init_mcp_routes, init_mcp_provider, start_mcp_session_manager
 
@@ -277,6 +278,19 @@ async def lifespan(app: FastAPI):
     token_refresh_task = asyncio.create_task(schwab_token_manager.start_background_refresh())
     logger.info("Schwab OAuth token manager initialized (background refresh started)")
 
+    # 5b. Account activity poller (OTA-855) — Trader API transactions, orders and fill
+    #     context into the broker_* tables. Scheduled below with the position monitor.
+    account_activity_sync = None
+    if settings.broker_activity_poll_enabled:
+        try:
+            from app.agents.account_activity_sync import AccountActivitySync
+            account_activity_sync = AccountActivitySync(
+                provider_factory.get_account_activity(settings.default_market_data_provider)
+            )
+            logger.info("Account activity poller ready")
+        except Exception as e:
+            logger.warning(f"Account activity poller disabled: {e}")
+
     logger.info(f"Provider registry initialized. Available: {provider_factory.list_providers()}")
     _log_startup_timing("providers_initialized", _app_startup_start)
 
@@ -349,14 +363,15 @@ async def lifespan(app: FastAPI):
     appinsights_cs = secrets_manager.get("applicationinsights-connection-string")
     init_agent_telemetry(appinsights_cs)
 
-    # 8. Initialize Position Monitor Agent + APScheduler
-    scheduler = None
+    # 8. APScheduler: the Position Monitor Agent (4:15pm ET) and the account activity
+    #    poller (every 15 minutes in market hours) share one scheduler.
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+    from apscheduler.triggers.cron import CronTrigger
+    scheduler = AsyncIOScheduler()
     _eval_adapter_for_monitor = ai_adapter if (foundry_endpoint and foundry_api_key) else None
     if _eval_adapter_for_monitor is not None:
         from app.agents.position_monitor import PositionMonitorAgent
         from app.providers.schwab_context_source import SchwabPriceContextSource
-        from apscheduler.schedulers.asyncio import AsyncIOScheduler
-        from apscheduler.triggers.cron import CronTrigger
 
         # Build context source list — grows as new sources are added
         schwab_provider = provider_factory.get_market_data(
@@ -384,7 +399,6 @@ async def lifespan(app: FastAPI):
                 except Exception as e:
                     logger.error(f"Scheduled position monitor failed: {e}")
 
-        scheduler = AsyncIOScheduler()
         trigger = CronTrigger(
             day_of_week="mon-fri",
             hour=16,
@@ -392,9 +406,46 @@ async def lifespan(app: FastAPI):
             timezone="America/New_York",
         )
         scheduler.add_job(_scheduled_monitor_run, trigger, id="position_monitor")
-        scheduler.start()
+    else:
+        logger.warning(
+            "Position Monitor Agent: no eval adapter configured — "
+            "agent disabled (set FOUNDRY_ENDPOINT + foundry-api-key)"
+        )
 
-        # Expose next fire time to the status endpoint
+    if account_activity_sync is not None:
+        # Fires every 15 minutes from 09:00 to 16:45 ET; the run itself stands down
+        # before 09:30, so the first pull is at the open and the last at 16:45.
+        async def _scheduled_activity_run():
+            from app.models.session import async_session
+            async with async_session() as db:
+                try:
+                    result = await account_activity_sync.run(db=db, trigger="schedule")
+                    if result.status != "skipped":
+                        logger.info(
+                            f"Scheduled account activity sync: {result.status}, "
+                            f"{result.transactions_new} new fills, {result.orders_upserted} orders, "
+                            f"{result.contexts_captured} contexts"
+                        )
+                except Exception as e:
+                    logger.error(f"Scheduled account activity sync failed: {e}")
+                job = scheduler.get_job("account_activity")
+                _refresh_activity_next_run(job.next_run_time if job else None)
+
+        scheduler.add_job(
+            _scheduled_activity_run,
+            CronTrigger(day_of_week="mon-fri", hour="9-16", minute="*/15", timezone="America/New_York"),
+            id="account_activity",
+            max_instances=1,
+            coalesce=True,
+        )
+
+    if scheduler.get_jobs():
+        scheduler.start()
+    else:
+        scheduler = None
+
+    # Expose next fire times to the status endpoints
+    if _eval_adapter_for_monitor is not None and scheduler is not None:
         job = scheduler.get_job("position_monitor")
         next_run = job.next_run_time if job else None
         init_agents_routes(position_monitor, next_run_at=next_run)
@@ -403,11 +454,18 @@ async def lifespan(app: FastAPI):
             f"Next scheduled run: {next_run}"
         )
     else:
-        logger.warning(
-            "Position Monitor Agent: no eval adapter configured — "
-            "agent disabled (set FOUNDRY_ENDPOINT + foundry-api-key)"
-        )
         init_agents_routes(None)
+
+    def _refresh_activity_next_run(next_at):
+        from app.api.account_activity_routes import init_account_activity_routes as _init
+        _init(account_activity_sync, next_run_at=next_at)
+
+    if account_activity_sync is not None and scheduler is not None:
+        job = scheduler.get_job("account_activity")
+        _refresh_activity_next_run(job.next_run_time if job else None)
+        logger.info(f"Account activity poller scheduled. Next run: {job.next_run_time if job else None}")
+    else:
+        init_account_activity_routes(None)
 
     # 9. Wire health routes — inject startup time + token manager for uptime/Schwab checks
     init_health_routes(_app_startup_start, schwab_token_manager)
@@ -521,6 +579,7 @@ app.include_router(service_router, prefix="/api/v1")
 app.include_router(health_router, prefix="/api/v1")
 app.include_router(changelog_router, prefix="/api/v1")
 app.include_router(export_router, prefix="/api/v1")
+app.include_router(account_activity_router, prefix="/api/v1")
 if settings.app_env != "production":
     app.include_router(test_router, prefix="/api/v1/test")
 

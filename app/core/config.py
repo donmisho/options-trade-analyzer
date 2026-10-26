@@ -53,6 +53,17 @@ class Settings(BaseSettings):
     # App key and secret come from Key Vault ("schwab-app-key", "schwab-app-secret")
     schwab_callback_url: str = "https://127.0.0.1:8000/api/v1/auth/schwab/callback"
 
+    # --- Account activity poller (OTA-855) ---
+    # Pulls Schwab transactions and orders into Azure SQL every 15 minutes in market hours
+    # and captures the fill context (ATR used, option spread) of each new option fill.
+    broker_activity_poll_enabled: bool = True
+    # The user the pulled rows belong to (Entra OID = users.id). Empty: the single admin user.
+    broker_activity_user_id: Optional[str] = None
+    # Labels by the last four digits of the account number, e.g. "7892=Options,1234=IRA".
+    broker_account_labels: str = ""
+    # Wall-clock zone for the fill rows served to the dashboard (the statement exports use it).
+    broker_activity_display_tz: str = "America/Chicago"
+
     # --- SSL for local HTTPS (Schwab OAuth requires it) ---
     ssl_certfile: Optional[str] = None
     ssl_keyfile: Optional[str] = None
