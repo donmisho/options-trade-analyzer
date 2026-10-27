@@ -387,3 +387,43 @@ def test_fill_row_handles_missing_context():
     row = fill_row(txn, None, "IRA", "America/Chicago")
     assert row["reference_number"] == "" and row["atr_used"] is None and row["context_kind"] == ""
     assert row["contract_count"] == -3 and row["net_profit_loss"] == 147.95 and row["sell_amount"] == 150.0
+
+
+
+# ── MCP status tool ──────────────────────────────────────────────────────────
+
+
+class _TokenManager:
+    def __init__(self, connected):
+        self.connected = connected
+
+    def get_status(self):
+        return {"connected": self.connected, "needs_reauth": not self.connected, "access_token_valid": self.connected,
+                "refresh_token_expires_in_seconds": 300000 if self.connected else None}
+
+
+class _Factory:
+    def __init__(self, connected):
+        self._schwab_token_manager = _TokenManager(connected)
+
+
+@pytest.mark.asyncio
+async def test_get_schwab_status_reports_login_and_last_pull(monkeypatch):
+    from app.api import mcp_routes
+    monkeypatch.setattr(mcp_routes, "_provider_factory", _Factory(True))
+    monkeypatch.setattr(mcp_routes, "async_session", _sessions)
+    monkeypatch.setattr(mcp_routes.settings, "app_env", "production")
+    async with _sessions() as db:
+        await AccountActivitySync(FakeProvider(), now=lambda: NOW).run(db)
+    status = await mcp_routes.get_schwab_status()
+    assert status["connected"] is True and status["needs_reauth"] is False
+    assert status["app_url"] == "https://oa.tmtctech.ai/"
+    assert status["refresh_token_expires_at"] is not None
+    assert status["last_sync"]["status"] == "ok" and status["last_sync"]["transactions_new"] == 2
+
+    monkeypatch.setattr(mcp_routes, "_provider_factory", _Factory(False))
+    status = await mcp_routes.get_schwab_status()
+    assert status["connected"] is False and status["needs_reauth"] is True and status["refresh_token_expires_at"] is None
+
+    monkeypatch.setattr(mcp_routes, "_provider_factory", None)
+    assert (await mcp_routes.get_schwab_status())["error_code"] == "SCHWAB_UNAVAILABLE"

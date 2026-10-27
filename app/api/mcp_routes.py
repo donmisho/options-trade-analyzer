@@ -931,3 +931,76 @@ async def get_trade_fills(
         except Exception:
             pass
         return {"error": True, "error_code": "DB_UNAVAILABLE", "message": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# MCP Tool — OTA-855 Schwab connection status (the dashboard's sign-in indicator)
+# ---------------------------------------------------------------------------
+
+
+def _app_url() -> str:
+    """The analyzer's web address for this environment, where Schwab is signed in to."""
+    return _get_resource_server_url()[: -len("mcp")]
+
+
+@mcp.tool()
+async def get_schwab_status() -> dict:
+    """Get whether the analyzer is signed in to Schwab, and when the account activity poller last ran.
+
+    The Schwab session belongs to the analyzer app, not to the caller: one login
+    serves market data, the account activity poller and every MCP tool. Schwab
+    caps a login at seven days, after which the app needs a fresh sign-in at the
+    analyzer's web address.
+
+    Returns:
+        {"connected": bool, "needs_reauth": bool, "access_token_valid": bool,
+        "refresh_token_expires_in_seconds": int|null, "refresh_token_expires_at": iso|null,
+        "app_url": the analyzer's web address (sign in there, then Connect Schwab),
+        "last_sync": {"status", "started_at", "finished_at", "transactions_new",
+        "orders_upserted", "contexts_captured", "message"} or null,
+        "checked_at": iso-time}. Returns an error object with error_code when the
+        token manager is not initialised.
+    """
+    from datetime import timedelta
+    from app.models.database import BrokerSyncRun
+
+    t0 = time.monotonic()
+    user_id = _get_mcp_user_id()
+    token_manager = getattr(_provider_factory, "_schwab_token_manager", None) if _provider_factory else None
+    if token_manager is None:
+        return {"error": True, "error_code": "SCHWAB_UNAVAILABLE", "message": "Schwab token manager not initialised."}
+    try:
+        status = token_manager.get_status()
+        now = datetime.now(timezone.utc)
+        expires_in = status.get("refresh_token_expires_in_seconds")
+        last_sync = None
+        async with async_session() as db:
+            row = (await db.execute(
+                select(BrokerSyncRun).where(BrokerSyncRun.status != "skipped")
+                .order_by(BrokerSyncRun.started_at.desc()).limit(1)
+            )).scalar_one_or_none()
+            if row is not None:
+                last_sync = {
+                    "status": row.status,
+                    "started_at": row.started_at.replace(tzinfo=timezone.utc).isoformat() if row.started_at else None,
+                    "finished_at": row.finished_at.replace(tzinfo=timezone.utc).isoformat() if row.finished_at else None,
+                    "transactions_new": row.transactions_new,
+                    "orders_upserted": row.orders_upserted,
+                    "contexts_captured": row.contexts_captured,
+                    "message": row.message,
+                }
+            latency_ms = int((time.monotonic() - t0) * 1000)
+            await mcp_tool_observability("get_schwab_status", ticker=None, user_id=user_id,
+                                         latency_ms=latency_ms, success=True, db=db)
+        return {
+            "connected": bool(status.get("connected")),
+            "needs_reauth": bool(status.get("needs_reauth")),
+            "access_token_valid": bool(status.get("access_token_valid")),
+            "refresh_token_expires_in_seconds": expires_in,
+            "refresh_token_expires_at": (now + timedelta(seconds=expires_in)).isoformat() if expires_in else None,
+            "app_url": _app_url(),
+            "last_sync": last_sync,
+            "checked_at": now.isoformat(),
+        }
+    except Exception as e:
+        return {"error": True, "error_code": "SCHWAB_UNAVAILABLE", "message": str(e)}
