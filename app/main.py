@@ -590,6 +590,20 @@ if settings.app_env != "production":
 # Canonical URL: /mcp/ (with trailing slash). Starlette Mount strips the /mcp prefix
 # and passes / to the sub-app's internal route. Configure the claude.ai connector
 # with the trailing-slash URL: https://oa.tmtctech.ai/mcp/
+#
+# claude.ai's connector UI drops the trailing slash, so it calls the bare /mcp,
+# which would otherwise fall through to the SPA catch-all (200 HTML) and the MCP
+# OAuth handshake never starts. Redirect the bare path to the canonical /mcp/ for
+# every method the Streamable HTTP transport uses, with 307 so the method and body
+# are preserved. Registered before the mount so it wins the exact-path match.
+from fastapi.responses import RedirectResponse as _RedirectResponse
+
+
+@app.api_route("/mcp", methods=["GET", "POST", "DELETE", "OPTIONS"], include_in_schema=False)
+async def _mcp_trailing_slash_redirect():
+    return _RedirectResponse(url="/mcp/", status_code=307)
+
+
 app.mount("/mcp", get_mcp_app())
 
 
