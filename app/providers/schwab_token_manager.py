@@ -157,6 +157,12 @@ class SchwabTokenManager:
         token_data = resp.json()
         logger.info("SchwabTokenManager: Token exchange successful!")
 
+        # A fresh authorization grant starts a NEW 7-day refresh-token clock.
+        # Clear any stale expiry loaded from a previous (possibly expired) token
+        # so _store_tokens resets it to now + 7 days instead of preserving the
+        # old value — otherwise a re-login after expiry keeps the dead date and
+        # the account shows "disconnected" even though the login succeeded.
+        self._refresh_token_expires_at = None
         # Store the tokens
         self._store_tokens(token_data)
 
