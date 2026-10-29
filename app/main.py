@@ -593,17 +593,24 @@ if settings.app_env != "production":
 #
 # claude.ai's connector UI drops the trailing slash, so it calls the bare /mcp,
 # which would otherwise fall through to the SPA catch-all (200 HTML) and the MCP
-# OAuth handshake never starts. Redirect the bare path to the canonical /mcp/ for
-# every method the Streamable HTTP transport uses, with 307 so the method and body
-# are preserved. Registered before the mount so it wins the exact-path match.
-from fastapi.responses import RedirectResponse as _RedirectResponse
+# handshake never starts. Rewrite the bare path to the canonical /mcp/ at the ASGI
+# layer — NOT an HTTP redirect. A 307 would risk the client dropping the bearer
+# token on the hop (many HTTP clients strip Authorization across redirects), which
+# breaks the authenticated Streamable HTTP calls after OAuth completes. A pure ASGI
+# path rewrite keeps every header intact and does not buffer streaming responses.
+class _McpBarePathRewrite:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") == "http" and scope.get("path") == "/mcp":
+            scope = dict(scope)
+            scope["path"] = "/mcp/"
+            scope["raw_path"] = b"/mcp/"
+        await self.app(scope, receive, send)
 
 
-@app.api_route("/mcp", methods=["GET", "POST", "DELETE", "OPTIONS"], include_in_schema=False)
-async def _mcp_trailing_slash_redirect():
-    return _RedirectResponse(url="/mcp/", status_code=307)
-
-
+app.add_middleware(_McpBarePathRewrite)
 app.mount("/mcp", get_mcp_app())
 
 
