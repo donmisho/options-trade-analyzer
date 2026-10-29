@@ -53,6 +53,41 @@ _mcp_user_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 
 
 # ---------------------------------------------------------------------------
+# Resource identity — the MCP server URL as claude.ai sees it
+# ---------------------------------------------------------------------------
+# This value is (1) the `resource` field of the RFC 9728 protected resource
+# metadata, which claude.ai requires to equal the connector URL exactly,
+# (2) the RFC 8707 `resource` claude.ai sends to Entra, and therefore (3) the
+# Application ID URI that must be registered on the ota-mcp-server app
+# registration and the `aud` of the v1.0 access tokens Entra issues for it.
+# No trailing slash: claude.ai canonicalizes the URL without one.
+
+
+def _get_resource_server_url() -> str:
+    """Derive the MCP resource server URL from the environment."""
+    if settings.app_env == "production":
+        return "https://oa.tmtctech.ai/mcp"
+    elif settings.app_env != "development" or settings.azure_keyvault_url:
+        # Deployed dev/staging environment
+        return "https://oa-dev.tmtctech.ai/mcp"
+    return "https://127.0.0.1:8000/mcp"
+
+
+MCP_RESOURCE_URL: str = _get_resource_server_url()
+
+
+def _dedupe_non_empty(values: list[str]) -> list[str]:
+    """Drop empty strings and duplicates, preserving order."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for v in values:
+        if v and v not in seen:
+            seen.add(v)
+            out.append(v)
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Entra JWT Token Verifier (implements MCP SDK TokenVerifier protocol)
 # ---------------------------------------------------------------------------
 
@@ -80,7 +115,17 @@ class EntraTokenVerifier:
             f"https://login.microsoftonline.com/{tenant}/v2.0",
             f"https://sts.windows.net/{tenant}/",
         ]
+        # Accept every audience Entra can stamp on a token for this API:
+        #   - the MCP server URL, which claude.ai sends as the RFC 8707 `resource`
+        #     and which must be registered as an Application ID URI (v1.0 aud)
+        #   - the legacy api://<client-id> Application ID URI (v1.0 aud)
+        #   - the bare client id GUID (v2.0 aud, requestedAccessTokenVersion=2)
         self._audience = settings.entra_mcp_application_id_uri
+        self._audiences = _dedupe_non_empty([
+            MCP_RESOURCE_URL,
+            settings.entra_mcp_application_id_uri,
+            settings.entra_mcp_client_id,
+        ])
         self._required_scope = settings.entra_mcp_required_scope
         self._jwks_client = PyJWKClient(self._jwks_url, cache_keys=True)
 
@@ -92,7 +137,7 @@ class EntraTokenVerifier:
                 token,
                 signing_key.key,
                 algorithms=["RS256"],
-                audience=self._audience,
+                audience=self._audiences,
                 issuer=self._valid_issuers,
                 options={"verify_exp": True},
             )
@@ -136,13 +181,15 @@ class EntraTokenVerifier:
         # Store resolved user_id in contextvar for tool handlers
         _mcp_user_id_var.set(str(user.id))
 
-        # Include both short ("mcp.invoke") and fully qualified
-        # ("api://<client-id>/mcp.invoke") scope forms. Entra JWT uses
-        # short form; SDK middleware checks against AuthSettings.required_scopes
-        # which uses the fully qualified form.
-        scopes_full = scopes_short + [
-            f"{self._audience}/{s}" for s in scopes_short
-        ]
+        # Include the short ("mcp.invoke") and every fully qualified form
+        # ("https://oa.tmtctech.ai/mcp/mcp.invoke", "api://<client-id>/mcp.invoke").
+        # Entra JWT uses the short form; the SDK middleware checks against
+        # AuthSettings.required_scopes, which uses the MCP-URL-qualified form.
+        scopes_full = _dedupe_non_empty(
+            scopes_short
+            + [f"{MCP_RESOURCE_URL}/{s}" for s in scopes_short]
+            + ([f"{self._audience}/{s}" for s in scopes_short] if self._audience else [])
+        )
 
         return AccessToken(
             token=token,
@@ -156,16 +203,6 @@ class EntraTokenVerifier:
 # FastMCP server instance — Stories 2–4 import this to register @mcp.tool()
 # ---------------------------------------------------------------------------
 
-def _get_resource_server_url() -> str:
-    """Derive the MCP resource server URL from the environment."""
-    if settings.app_env == "production":
-        return "https://oa.tmtctech.ai/mcp"
-    elif settings.app_env != "development" or settings.azure_keyvault_url:
-        # Deployed dev/staging environment
-        return "https://oa-dev.tmtctech.ai/mcp"
-    return "https://127.0.0.1:8000/mcp"
-
-
 _token_verifier = EntraTokenVerifier()
 
 mcp = FastMCP(
@@ -173,8 +210,15 @@ mcp = FastMCP(
     token_verifier=_token_verifier,
     auth=AuthSettings(
         issuer_url=f"https://login.microsoftonline.com/{settings.entra_tenant_id}/v2.0",
-        resource_server_url=_get_resource_server_url(),
-        required_scopes=[f"{settings.entra_mcp_application_id_uri}/{settings.entra_mcp_required_scope}"],
+        resource_server_url=MCP_RESOURCE_URL,
+        # claude.ai requests the scope exactly as advertised in the protected
+        # resource metadata, together with resource=<MCP URL>. Entra only issues
+        # the token when the scope's prefix equals that resource, so the
+        # qualified scope must be built from the MCP URL, not api://<client-id>.
+        required_scopes=[f"{MCP_RESOURCE_URL}/{settings.entra_mcp_required_scope}"],
+        # EntraTokenVerifier checks `aud` itself; the SDK's own resource check
+        # would reject every token because AccessToken.resource is not set.
+        validate_token_resource=False,
     ),
     streamable_http_path="/",
     stateless_http=True,

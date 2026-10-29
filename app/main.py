@@ -28,6 +28,7 @@ from datetime import datetime, timezone
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.core.secrets import SecretsManager
@@ -60,7 +61,7 @@ from app.api.changelog_routes import router as changelog_router, init_changelog_
 from app.api.export_routes import router as export_router, init_export_routes
 from app.api.account_activity_routes import router as account_activity_router, init_account_activity_routes
 from app.middleware.csrf import CSRFMiddleware
-from app.api.mcp_routes import get_mcp_app, init_mcp_routes, init_mcp_provider, start_mcp_session_manager
+from app.api.mcp_routes import MCP_RESOURCE_URL, get_mcp_app, init_mcp_routes, init_mcp_provider, start_mcp_session_manager
 
 # Dev-only test routes — imported and registered only outside production
 if settings.app_env != "production":
@@ -617,19 +618,53 @@ app.mount("/mcp", get_mcp_app())
 # --- OAuth Protected Resource Metadata (RFC 9728) ---
 # Discovery endpoint for MCP auth — reachable without auth so clients can
 # discover the authorization server before obtaining a token.
-@app.get("/.well-known/oauth-protected-resource/mcp")
-async def oauth_protected_resource_metadata():
-    """RFC 9728 OAuth Protected Resource Metadata for the MCP server."""
+#
+# claude.ai requires `resource` to equal the connector URL exactly (including
+# the /mcp path, no trailing slash). When it does not, claude.ai treats
+# discovery as failed and falls back to <origin>/authorize — which the SPA
+# catch-all below answers with index.html, so the user lands on the OTA login
+# page instead of Entra. The scope is advertised with the same URL prefix
+# because Entra rejects a `resource`/`scope` pair whose prefixes differ
+# (AADSTS9010010); the MCP URL must therefore also be an Application ID URI on
+# the ota-mcp-server app registration.
+_PRM_HEADERS = {"Cache-Control": "no-store", "Pragma": "no-cache"}
+
+
+def _protected_resource_metadata() -> dict:
     return {
-        "resource": settings.entra_mcp_application_id_uri,
+        "resource": MCP_RESOURCE_URL,
         "authorization_servers": [
             f"https://login.microsoftonline.com/{settings.entra_tenant_id}/v2.0"
         ],
         "scopes_supported": [
-            f"{settings.entra_mcp_application_id_uri}/{settings.entra_mcp_required_scope}"
+            f"{MCP_RESOURCE_URL}/{settings.entra_mcp_required_scope}"
         ],
         "bearer_methods_supported": ["header"],
+        "resource_name": "OTA market data (ota-market-data)",
     }
+
+
+@app.get("/.well-known/oauth-protected-resource/mcp")
+async def oauth_protected_resource_metadata():
+    """RFC 9728 OAuth Protected Resource Metadata for the MCP server."""
+    return JSONResponse(_protected_resource_metadata(), headers=_PRM_HEADERS)
+
+
+@app.get("/.well-known/oauth-protected-resource")
+async def oauth_protected_resource_metadata_root():
+    """Root-path fallback claude.ai probes when the path-specific document fails."""
+    return JSONResponse(_protected_resource_metadata(), headers=_PRM_HEADERS)
+
+
+@app.get("/.well-known/{path:path}")
+async def well_known_not_found(path: str):
+    """Every other /.well-known/* probe is a real 404, never SPA HTML.
+
+    OTA is not an authorization server: it has no /.well-known/oauth-authorization-server
+    or /.well-known/openid-configuration. A 200 text/html from the SPA catch-all
+    makes OAuth clients believe discovery succeeded and then fail on parsing.
+    """
+    return JSONResponse({"detail": "Not Found"}, status_code=404, headers=_PRM_HEADERS)
 
 
 # --- Health Check ---
