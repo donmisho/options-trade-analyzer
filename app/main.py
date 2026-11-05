@@ -440,6 +440,23 @@ async def lifespan(app: FastAPI):
             coalesce=True,
         )
 
+    # OTA-857: daily pre-open check that warns before the Schwab refresh-token
+    # 7-day cliff (the reactive first-auth_error alert lives in the poller).
+    # Runs every day — the cliff does not respect market days — and only alerts
+    # inside settings.schwab_expiry_warn_seconds of expiry.
+    async def _scheduled_schwab_expiry_check():
+        try:
+            from app.agents.schwab_expiry_alert import check_expiry_and_alert
+            check_expiry_and_alert(schwab_token_manager, settings.schwab_expiry_warn_seconds)
+        except Exception as e:
+            logger.error(f"Scheduled Schwab expiry check failed: {e}")
+
+    scheduler.add_job(
+        _scheduled_schwab_expiry_check,
+        CronTrigger(hour=8, minute=30, timezone="America/New_York"),
+        id="schwab_expiry_check",
+    )
+
     if scheduler.get_jobs():
         scheduler.start()
     else:

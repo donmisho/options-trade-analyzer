@@ -32,6 +32,7 @@ from app.core.config import settings
 from app.models.database import (
     BrokerAccount, BrokerFillContext, BrokerOrder, BrokerSyncRun, BrokerTransaction, User,
 )
+from app.agents.schwab_expiry_alert import is_auth_error, notify_auth_error
 from app.providers.base import AccountActivityProvider
 from app.services.broker_activity import (
     daily_context_from_candles, fill_context_values, in_market_hours, normalize_order,
@@ -111,6 +112,9 @@ class AccountActivitySync:
         self._now = now or (lambda: datetime.now(timezone.utc))
         self._last_run: Optional[SyncResult] = None
         self._running = False
+        # OTA-857: fire the refresh-token auth-error alert once per outage, not on
+        # every 15-minute poll. Reset to False by the first successful run.
+        self._auth_error_alerted = False
 
     @property
     def last_run(self) -> Optional[SyncResult]:
@@ -183,6 +187,15 @@ class AccountActivitySync:
             f"orders_upserted={result.orders_upserted} contexts={result.contexts_captured}"
             + (f" ({message})" if message else "")
         )
+        # OTA-857: a poll that fails on the expired refresh token means the feed is
+        # now stale. Alert on the first such failure of an outage; a later clean run
+        # re-arms it so a future outage alerts again.
+        if status == "error" and is_auth_error(message):
+            if not self._auth_error_alerted:
+                notify_auth_error(message)
+                self._auth_error_alerted = True
+        elif status == "ok":
+            self._auth_error_alerted = False
         return result
 
     # ------------------------------------------------------------------

@@ -63,6 +63,9 @@ class Settings(BaseSettings):
     broker_account_labels: str = ""
     # Wall-clock zone for the fill rows served to the dashboard (the statement exports use it).
     broker_activity_display_tz: str = "America/Chicago"
+    # Warn this many seconds before the Schwab refresh-token 7-day cliff (OTA-857).
+    # Default 2 days: the daily expiry check and the get_schwab_status pill both use it.
+    schwab_expiry_warn_seconds: int = 172800
 
     # --- SSL for local HTTPS (Schwab OAuth requires it) ---
     ssl_certfile: Optional[str] = None

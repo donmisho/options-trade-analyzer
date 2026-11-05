@@ -37,7 +37,7 @@ from mcp.server.auth.middleware.auth_context import get_access_token
 from app.core.config import settings
 from app.services.symbol_cache import to_api_symbol_cached
 from app.core.secrets import SecretsManager
-from app.models.database import AgentRunLog, User
+from app.models.database import AgentRunLog, BrokerSyncRun, User
 from app.models.session import async_session
 from app.providers.factory import CONTEXT_SOURCE_REGISTRY
 
@@ -975,3 +975,132 @@ async def get_trade_fills(
         except Exception:
             pass
         return {"error": True, "error_code": "DB_UNAVAILABLE", "message": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# MCP Tool — Schwab connection + poller status (dashboard header pill)
+# ---------------------------------------------------------------------------
+
+POLL_INTERVAL_MINUTES = 15  # matches CronTrigger(minute="*/15") in main.py
+
+
+def _display_iso(dt: Optional[datetime]) -> Optional[str]:
+    """Render a datetime as ISO 8601 in the broker display timezone, with offset.
+
+    Poller DB rows are stored naive-UTC; token-manager datetimes are tz-aware
+    UTC. Either way we normalize to UTC, convert to the configured display tz
+    (default America/Chicago, the feed's zone), and emit an offset so the
+    dashboard's JS `new Date()` parses it reliably.
+    """
+    if dt is None:
+        return None
+    from zoneinfo import ZoneInfo
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    try:
+        tz = ZoneInfo(settings.broker_activity_display_tz)
+    except Exception:
+        tz = timezone.utc
+    return dt.astimezone(tz).isoformat()
+
+
+@mcp.tool()
+async def get_schwab_status() -> dict:
+    """Get the Schwab connection and account-activity poller status.
+
+    Powers the dashboard's header pill. Reports whether the Schwab refresh token
+    is still valid and for how long, when the poller last ran and what it wrote,
+    and where to re-login. The Schwab refresh token expires 7 days after the
+    interactive browser login, is pinned to that login, and cannot be renewed
+    programmatically — so the pill is the early warning before that cliff.
+
+    Returns:
+        A dict: connected (bool), refresh_token_expires_in_seconds (number),
+        refresh_token_expires_at (iso), last_sync {started_at, status
+        ("ok"|"auth_error"|"error"), fills_written, message}, poller {running,
+        interval_minutes}, app_url, as_of. On failure returns
+        {"error": true, "error_code": ..., "message": ...} — the shape the pill
+        also renders — rather than raising.
+    """
+    t0 = time.monotonic()
+    user_id = _get_mcp_user_id()
+    if not user_id:
+        return {"error": True, "error_code": "UNAUTHENTICATED",
+                "message": "No provisioned user for this token."}
+
+    # Resource URL is https://oa.tmtctech.ai/mcp → app root is https://oa.tmtctech.ai/
+    app_url = MCP_RESOURCE_URL.rsplit("/mcp", 1)[0].rstrip("/") + "/"
+
+    try:
+        token_mgr = getattr(_provider_factory, "_schwab_token_manager", None)
+        if token_mgr is None:
+            return {"error": True, "error_code": "TOKEN_MANAGER_UNAVAILABLE",
+                    "message": "Schwab token manager not initialized.", "app_url": app_url}
+
+        status = token_mgr.get_status()
+        refresh_expires_at = getattr(token_mgr, "_refresh_token_expires_at", None)
+
+        # Last run that actually pulled (ok|error). Skip 'running'/'skipped' so a
+        # quiet-market skip or an in-flight run never blanks the pill's last sync.
+        last_sync = None
+        async with async_session() as db:
+            row = (await db.execute(
+                select(BrokerSyncRun)
+                .where(BrokerSyncRun.status.in_(("ok", "error")))
+                .order_by(BrokerSyncRun.started_at.desc())
+                .limit(1)
+            )).scalar_one_or_none()
+            if row is not None:
+                msg = row.message or ""
+                if row.status == "error":
+                    low = msg.lower()
+                    sync_status = "auth_error" if (
+                        "refresh token" in low or "reconnect" in low
+                        or "re-authenticate" in low or "reauth" in low
+                    ) else "error"
+                else:
+                    sync_status = "ok"
+                last_sync = {
+                    "started_at": _display_iso(row.started_at),
+                    "status": sync_status,
+                    "fills_written": row.transactions_new,
+                    "message": msg or None,
+                }
+
+            latency_ms = int((time.monotonic() - t0) * 1000)
+            await mcp_tool_observability(
+                "get_schwab_status", ticker=None, user_id=user_id,
+                latency_ms=latency_ms, success=True, db=db,
+            )
+
+        expires_in = status.get("refresh_token_expires_in_seconds") or 0
+
+        return {
+            "connected": bool(status.get("connected")),
+            "refresh_token_expires_in_seconds": expires_in,
+            "refresh_token_expires_at": _display_iso(refresh_expires_at),
+            # OTA-857: true inside the warn window so the pill can go amber before
+            # the 7-day cliff. Same threshold the daily expiry check uses.
+            "expiry_warning": bool(status.get("connected")) and expires_in <= settings.schwab_expiry_warn_seconds,
+            "last_sync": last_sync,
+            "poller": {
+                "running": bool(settings.broker_activity_poll_enabled),
+                "interval_minutes": POLL_INTERVAL_MINUTES,
+            },
+            "app_url": app_url,
+            "as_of": _display_iso(datetime.now(timezone.utc)),
+        }
+
+    except Exception as e:
+        latency_ms = int((time.monotonic() - t0) * 1000)
+        try:
+            async with async_session() as db:
+                await mcp_tool_observability(
+                    "get_schwab_status", ticker=None, user_id=user_id,
+                    latency_ms=latency_ms, success=False,
+                    error_code="STATUS_UNAVAILABLE", db=db,
+                )
+        except Exception:
+            pass
+        return {"error": True, "error_code": "STATUS_UNAVAILABLE",
+                "message": str(e), "app_url": app_url}
