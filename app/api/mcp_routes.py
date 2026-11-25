@@ -379,10 +379,11 @@ async def get_quote(ticker: str) -> dict:
         ticker: Stock or ETF symbol (e.g. "QQQ", "AAPL", "SPY").
 
     Returns:
-        A dict with ticker, price, volume, prev_close, change_pct,
-        52-week high/low, volume_ratio, and timestamp. Returns an error
-        object with error_code if the ticker is not found or the upstream
-        provider is unavailable.
+        A dict with ticker, price, volume, prev_close, change (net change
+        from the prior close), change_pct, day_high, day_low and timestamp.
+        day_high and day_low are null when the quote carries none. Returns
+        an error object with error_code if the ticker is not found or the
+        upstream provider is unavailable.
     """
     t0 = time.monotonic()
     user_id = _get_mcp_user_id()
@@ -402,7 +403,12 @@ async def get_quote(ticker: str) -> dict:
             "ask": None,
             "volume": result["volume"],
             "prev_close": result.get("previous_close"),
+            "change": result.get("change"),
             "change_pct": result.get("change_pct"),
+            # OTA-858: range used and room need the day's range. The adapter
+            # defaults a missing high or low to 0; pass null instead of a fake 0.
+            "day_high": result.get("day_high") or None,
+            "day_low": result.get("day_low") or None,
             "timestamp": result["timestamp"].isoformat() if hasattr(result.get("timestamp", ""), "isoformat") else str(result.get("timestamp", "")),
             "market_state": None,  # Not in adapter; omitted per Phase 1 decision
         }

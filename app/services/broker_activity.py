@@ -343,12 +343,11 @@ def candle_date(candle: dict) -> Optional[date]:
     return moment.astimezone(zone(MARKET_TZ)).date()
 
 
-def wilder_atr(candles: Iterable[dict], period: int = 14, before: Optional[date] = None) -> tuple[Optional[float], Optional[date]]:
+def _daily_true_ranges(candles: Iterable[dict], before: Optional[date]) -> tuple[list[float], Optional[date]]:
     """
-    ATR with Wilder's smoothing over daily candles, as thinkorswim's ATR study computes it
-    (average type Wilder's). Only candles dated before `before` count, so the value is the
-    ATR a trader could read at the open of that day. Needs period + 1 candles.
-    Returns (atr, date of the last candle used).
+    True ranges of the daily candles dated before `before`, oldest first, and the date of
+    the last candle used. Each is max(high, prior close) − min(low, prior close), the same
+    as max(high − low, |high − prior close|, |low − prior close|).
     """
     rows = []
     for c in candles:
@@ -358,17 +357,42 @@ def wilder_atr(candles: Iterable[dict], period: int = 14, before: Optional[date]
         rows.append((d, to_float(c.get("high")), to_float(c.get("low")), to_float(c.get("close"))))
     rows = [r for r in rows if None not in r[1:]]
     rows.sort(key=lambda r: r[0])
-    if len(rows) < period + 1:
-        return None, None
     true_ranges = []
     for prev, cur in zip(rows, rows[1:]):
         _, high, low, _ = cur
         prev_close = prev[3]
         true_ranges.append(max(high - low, abs(high - prev_close), abs(low - prev_close)))
+    return true_ranges, (rows[-1][0] if rows else None)
+
+
+def wilder_atr(candles: Iterable[dict], period: int = 14, before: Optional[date] = None) -> tuple[Optional[float], Optional[date]]:
+    """
+    ATR with Wilder's smoothing over daily candles, as thinkorswim's ATR study computes it
+    (average type Wilder's). Only candles dated before `before` count, so the value is the
+    ATR a trader could read at the open of that day. Needs period + 1 candles.
+    Returns (atr, date of the last candle used).
+    """
+    true_ranges, last = _daily_true_ranges(candles, before)
+    if len(true_ranges) < period:
+        return None, None
     atr = sum(true_ranges[:period]) / period
     for tr in true_ranges[period:]:
         atr = (atr * (period - 1) + tr) / period
-    return round(atr, 4), rows[-1][0]
+    return round(atr, 4), last
+
+
+def simple_atr(candles: Iterable[dict], period: int = 14, before: Optional[date] = None) -> tuple[Optional[float], Optional[date]]:
+    """
+    D ATR (OTA-858, decided 11/25): the simple average of the true range of the last
+    `period` completed sessions before `before`. Today is never in it, so it holds one
+    value all day. Same number as the DM_RoomGate label and the ThinkorSwim watchlist
+    columns (ATR average type SIMPLE, [1]). Needs period + 1 candles and depends on no
+    earlier history, unlike wilder_atr. Returns (atr, date of the last candle used).
+    """
+    true_ranges, last = _daily_true_ranges(candles, before)
+    if len(true_ranges) < period:
+        return None, None
+    return round(sum(true_ranges[-period:]) / period, 4), last
 
 
 def quote_block(quotes: dict, symbol: Optional[str]) -> dict:
