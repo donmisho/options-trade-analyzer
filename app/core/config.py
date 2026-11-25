@@ -67,6 +67,14 @@ class Settings(BaseSettings):
     # Default 2 days: the daily expiry check and the get_schwab_status pill both use it.
     schwab_expiry_warn_seconds: int = 172800
 
+    # --- Underlying price bars (OTA-859) ---
+    # Default symbols for /market/bars/pull, plus every underlying the caller has traded.
+    price_bars_symbols: str = "IWM,SPY,QQQ,GLD,SLV,TLT,META,NVDA,TSLA"
+    # Pace for /pricehistory calls. Schwab's working figure is about 120 a minute per app.
+    price_bars_calls_per_minute: int = 60
+    # NYSE 1:00 p.m. ET closes (session tagging). Add dates from nyse.com as they are published.
+    price_bars_early_closes: str = "2026-11-27,2026-12-24"
+
     # --- SSL for local HTTPS (Schwab OAuth requires it) ---
     ssl_certfile: Optional[str] = None
     ssl_keyfile: Optional[str] = None

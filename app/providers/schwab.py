@@ -427,6 +427,71 @@ class SchwabMarketData(MarketDataProvider):
             logger.warning(f"get_candles failed for {symbol} range={range_days}: {e}")
             return []
 
+    _BAR_PARAMS = {
+        "1m": {"periodType": "day", "frequencyType": "minute", "frequency": "1"},
+        "5m": {"periodType": "day", "frequencyType": "minute", "frequency": "5"},
+        "1d": {"periodType": "year", "frequencyType": "daily", "frequency": "1"},
+    }
+
+    async def get_bars(
+        self,
+        symbol: str,
+        frequency: str,
+        start: datetime,
+        end: datetime,
+        extended: bool = True,
+    ) -> list[dict]:
+        """
+        GET /marketdata/v1/pricehistory between two moments (OTA-859).
+
+        frequency: "1m", "5m" or "1d". start and end are aware datetimes, sent as
+        startDate / endDate in epoch milliseconds. Expects the api_symbol form
+        (callers translate with ``to_api_symbol_cached(symbol, "schwab")``).
+
+        Returns [{datetime, open, high, low, close, volume}] oldest first, datetime
+        exactly as Schwab gives it (epoch ms, bar start). Rows missing a price or a
+        time are dropped, as are duplicate times.
+
+        Unlike get_candles, this RAISES on HTTP and auth errors: a failed pull must
+        never look like an empty one. [] means Schwab answered with no candles.
+        """
+        params = self._BAR_PARAMS.get(frequency)
+        if params is None:
+            raise ValueError(f"get_bars: frequency must be one of {sorted(self._BAR_PARAMS)}")
+        query = {
+            "symbol": symbol.upper(),
+            **params,
+            "startDate": str(int(start.timestamp() * 1000)),
+            "endDate": str(int(end.timestamp() * 1000)),
+        }
+        if frequency != "1d":
+            query["needExtendedHoursData"] = "true" if extended else "false"
+
+        headers = await self._get_headers()
+        resp = await self._client.get("/pricehistory", headers=headers, params=query)
+        resp.raise_for_status()
+        data = resp.json() or {}
+
+        bars, seen = [], set()
+        for c in data.get("candles") or []:
+            stamp = c.get("datetime")
+            if stamp is None or any(c.get(k) is None for k in ("open", "high", "low", "close")):
+                continue
+            stamp = int(stamp)
+            if stamp in seen:
+                continue
+            seen.add(stamp)
+            bars.append({
+                "datetime": stamp,
+                "open": c["open"],
+                "high": c["high"],
+                "low": c["low"],
+                "close": c["close"],
+                "volume": c.get("volume") or 0,
+            })
+        bars.sort(key=lambda b: b["datetime"])
+        return bars
+
     async def health_check(self) -> bool:
         """
         Test if the Schwab connection is working.
