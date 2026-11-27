@@ -75,6 +75,14 @@ class Settings(BaseSettings):
     # NYSE 1:00 p.m. ET closes (session tagging). Add dates from nyse.com as they are published.
     price_bars_early_closes: str = "2026-11-27,2026-12-24"
 
+    # --- Entry signal monitor (one-minute loop over the watchlist) ---
+    # Off until switched on per environment: it calls Schwab every minute in market hours.
+    signal_monitor_enabled: bool = False
+    # Comma list of underlyings to watch. Empty: price_bars_symbols.
+    signal_monitor_symbols: str = ""
+    # Schwab calls in flight at once during a run.
+    signal_monitor_concurrency: int = 4
+
     # --- SSL for local HTTPS (Schwab OAuth requires it) ---
     ssl_certfile: Optional[str] = None
     ssl_keyfile: Optional[str] = None

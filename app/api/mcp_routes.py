@@ -240,6 +240,15 @@ def init_mcp_routes(secrets_manager: SecretsManager) -> None:
     _secrets_manager = secrets_manager
 
 
+_signal_monitor = None
+
+
+def init_mcp_signal_monitor(monitor) -> None:
+    """The entry signal monitor built in main.py's lifespan, or None when it is switched off."""
+    global _signal_monitor
+    _signal_monitor = monitor
+
+
 def init_mcp_provider(provider_factory) -> None:
     """Called from main.py lifespan after ProviderRegistry is ready."""
     global _provider_factory
@@ -978,6 +987,299 @@ async def get_trade_fills(
             async with async_session() as db:
                 await mcp_tool_observability("get_trade_fills", ticker=None, user_id=user_id,
                                              latency_ms=latency_ms, success=False, error_code="DB_UNAVAILABLE", db=db)
+        except Exception:
+            pass
+        return {"error": True, "error_code": "DB_UNAVAILABLE", "message": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# MCP Tool — underlying price bars (Schwab /pricehistory through get_bars)
+# ---------------------------------------------------------------------------
+
+# Most calendar days one call may span: one Schwab request each.
+_PRICE_HISTORY_MAX_DAYS = {"1m": 10, "5m": 90, "15m": 90, "1d": 730}
+_PRICE_HISTORY_SOURCE = {"1m": "1m", "5m": "5m", "15m": "5m", "1d": "1d"}
+_PRICE_HISTORY_COLUMNS = ["bar_start", "bar_start_utc", "session_date", "session",
+                          "open", "high", "low", "close", "volume", "complete"]
+
+
+@mcp.tool()
+async def get_price_history(
+    ticker: str,
+    frequency: str = "1m",
+    start_date: str | None = None,
+    end_date: str | None = None,
+    extended: bool = False,
+    include_forming: bool = False,
+    limit: int = 2000,
+) -> dict:
+    """Get intraday or daily price bars for a stock or ETF.
+
+    Bars come straight from Schwab's price history (nothing is stored), oldest
+    first. Use 1m or 5m bars to read intraday momentum, VWAP and volume; use 1d
+    bars for ATR and trend.
+
+    Args:
+        ticker: Stock or ETF symbol (e.g. "IWM", "NVDA").
+        frequency: "1m", "5m", "15m" or "1d" (default "1m"). 15m bars are built
+            from 5m bars, aligned to the 09:30 New York open.
+        start_date: First New York date, YYYY-MM-DD. Omit for the latest session
+            with bars (1m, 5m, 15m) or the last 60 days (1d).
+        end_date: Last New York date, YYYY-MM-DD. Omit for today.
+        extended: Include pre- and post-market bars (intraday only). Default false.
+        include_forming: Include the bar still forming, marked complete=false.
+            Default false, so every bar returned is final.
+        limit: Most bars to return (default 2000, at most 5000). The newest are kept.
+
+    Returns:
+        {"ticker", "frequency", "columns": [...], "rows": [{bar_start (display
+        zone), bar_start_utc, session_date, session ("pre", "reg" or "post"),
+        open, high, low, close, volume, complete}], "count", "truncated",
+        "first_bar", "last_bar", "as_of", "display_tz", "source"}. A span over
+        10 days of 1m bars, 90 days of 5m or 15m bars or 730 days of 1d bars
+        returns error_code BAD_RANGE. Returns an error object with error_code
+        on any failure; an empty rows list means Schwab had no bars.
+    """
+    from datetime import timedelta
+
+    from app.services.broker_activity import zone
+    from app.services.price_bars import (
+        aggregate, bar_session, bar_windows, complete, early_close_dates, iso_utc, ny_date, to_utc,
+    )
+    from app.services.trade_fills import parse_day
+
+    t0 = time.monotonic()
+    user_id = _get_mcp_user_id()
+
+    async def observe(success: bool, error_code: str | None = None):
+        try:
+            async with async_session() as db:
+                await mcp_tool_observability(
+                    "get_price_history", ticker=ticker, user_id=user_id,
+                    latency_ms=int((time.monotonic() - t0) * 1000), success=success,
+                    error_code=error_code, db=db,
+                )
+        except Exception:
+            pass
+
+    def fail(error_code: str, message: str) -> dict:
+        return {"error": True, "error_code": error_code, "message": message}
+
+    if frequency not in _PRICE_HISTORY_MAX_DAYS:
+        return fail("BAD_FREQUENCY", f"frequency must be one of {list(_PRICE_HISTORY_MAX_DAYS)}")
+    try:
+        first, last = parse_day(start_date), parse_day(end_date)
+    except ValueError as e:
+        return fail("BAD_DATE", str(e))
+
+    now = datetime.now(timezone.utc)
+    today = ny_date(now)
+    last = last or today
+    latest_session_only = first is None and frequency != "1d"
+    if first is None:
+        # No start: look back far enough to cross a long weekend, then keep the newest session.
+        first = last - timedelta(days=60 if frequency == "1d" else 5)
+    if first > last:
+        return fail("BAD_RANGE", "start_date must be on or before end_date")
+    max_days = _PRICE_HISTORY_MAX_DAYS[frequency]
+    if (last - first).days + 1 > max_days:
+        return fail("BAD_RANGE", f"{frequency} bars span at most {max_days} days per call")
+    limit = max(1, min(int(limit or 2000), 5000))
+
+    try:
+        provider = _get_provider()
+        if not hasattr(provider, "get_bars"):
+            return fail("NOT_SUPPORTED", "Price bars are not supported by this provider")
+        api_ticker = to_api_symbol_cached(ticker, "schwab")
+        source = _PRICE_HISTORY_SOURCE[frequency]
+        early = early_close_dates(settings.price_bars_early_closes)
+
+        bars: list[dict] = []
+        for w_start, w_end in bar_windows(source, first, last):
+            bars.extend(await provider.get_bars(api_ticker, source, w_start, w_end, extended))
+        if frequency == "15m":
+            bars = aggregate(bars, minutes=15)
+
+        display = zone(settings.broker_activity_display_tz)
+        rows, seen = [], set()
+        for b in sorted(bars, key=lambda x: int(x["datetime"])):
+            stamp = int(b["datetime"])
+            if stamp in seen:
+                continue
+            seen.add(stamp)
+            bar_start = to_utc(stamp)
+            if frequency == "1d":
+                session_date, session = ny_date(bar_start), "reg"
+                done = complete(bar_start, "1d", now, early)
+            else:
+                session_date, session = bar_session(bar_start, early)
+                done = bar_start + timedelta(minutes=int(frequency[:-1])) <= now
+            if session_date < first or session_date > last:
+                continue
+            if not done and not include_forming:
+                continue
+            rows.append({
+                "bar_start": bar_start.astimezone(display).isoformat(timespec="seconds"),
+                "bar_start_utc": iso_utc(bar_start),
+                "session_date": session_date.isoformat(),
+                "session": session,
+                "open": b["open"], "high": b["high"], "low": b["low"], "close": b["close"],
+                "volume": int(b.get("volume") or 0),
+                "complete": done,
+            })
+        if latest_session_only and rows:
+            newest = rows[-1]["session_date"]
+            rows = [r for r in rows if r["session_date"] == newest]
+        truncated = len(rows) > limit
+        if truncated:
+            rows = rows[-limit:]
+
+        await observe(True)
+        return {
+            "ticker": ticker.upper(),
+            "frequency": frequency,
+            "columns": _PRICE_HISTORY_COLUMNS,
+            "rows": rows,
+            "count": len(rows),
+            "truncated": truncated,
+            "first_bar": rows[0]["bar_start"] if rows else None,
+            "last_bar": rows[-1]["bar_start"] if rows else None,
+            "as_of": now.astimezone(display).isoformat(timespec="seconds"),
+            "display_tz": settings.broker_activity_display_tz,
+            "source": "schwab_pricehistory",
+        }
+    except Exception as e:
+        err_str = str(e).lower()
+        if any(m in err_str for m in ("re-authenticate", "reconnect your schwab", "no schwab tokens", "refresh token expired", "401")):
+            error_code = "SCHWAB_AUTH"
+        elif "not found" in err_str or "no data" in err_str:
+            error_code = "TICKER_NOT_FOUND"
+        else:
+            error_code = "SCHWAB_UNAVAILABLE"
+        await observe(False, error_code)
+        return fail(error_code, str(e))
+
+
+# ---------------------------------------------------------------------------
+# MCP Tool — entry signals (the signal monitor's current-state table)
+# ---------------------------------------------------------------------------
+
+SIGNAL_COLUMNS = [
+    "symbol", "status", "direction", "message", "evaluated_at", "age_seconds", "status_since",
+    "price", "vwap", "trend_15m", "push_bar_at", "push", "push_pct_atr", "push_strong", "volume_ratio",
+    "atr", "prev_close", "net_change", "atr_used_pct", "range_used_pct",
+    "gate_trend", "gate_push", "gate_volume", "gate_room", "gate_contract",
+    "option_symbol", "put_call", "expiration", "dte", "strike", "delta",
+    "option_bid", "option_ask", "option_mid", "spread_pct",
+]
+_SIGNAL_TIME_COLUMNS = ("evaluated_at", "status_since", "push_bar_at")
+_SIGNAL_STATUS_ORDER = {"signal": 0, "no_contract": 1, "watch": 2, "idle": 3, "no_data": 4, "error": 5}
+# Rows older than this were not rewritten by the last two runs of the one-minute loop.
+SIGNAL_FRESH_SECONDS = 150
+
+
+@mcp.tool()
+async def get_signals(symbols: str | None = None, status: str | None = None) -> dict:
+    """Get the current entry signals for short-dated long options.
+
+    One row per watched underlying, rewritten every minute in the regular session
+    by the server's signal monitor (plain arithmetic on Schwab 1-minute bars, no
+    AI). This is the current state only, not a history. Each row carries the
+    measures, one pass/fail flag per entry condition, and the contract picked
+    once every condition on the underlying passes.
+
+    status per row: "signal" (every gate passes and a contract fits),
+    "no_contract" (the underlying passes, no contract fits; see message), "watch"
+    (trend and ATR room pass, waiting for the 5-minute push), "idle", "no_data"
+    or "error" (see message). direction is "call" or "put".
+
+    Gates: gate_trend (price on the right side of the session VWAP and the
+    15-minute trend agrees), gate_push (the 5-minute bar at push_bar_at moved at
+    least rules.push_min_pct_atr of the daily ATR), gate_volume (that bar's volume
+    against the average of the 5-minute bars before it), gate_room (atr_used_pct,
+    the day's net move over the daily ATR, is under rules.atr_used_max_pct),
+    gate_contract (DTE, delta and spread_pct inside the rules). A null gate could
+    not be judged yet.
+
+    Args:
+        symbols: Comma list of underlyings to keep, e.g. "IWM,NVDA". Omit for all.
+        status: Comma list of statuses to keep, e.g. "signal,watch". Omit for all.
+
+    Returns:
+        {"columns": [...], "rows": [{...}], "count", "as_of", "fresh" (true when
+        the newest row is under 150 seconds old; when false the rows are the last
+        ones written, e.g. at the close, and age_seconds says how old),
+        "rules": the thresholds in force, "monitor": {enabled, last_run {status,
+        message, symbols, signals, errors, started_at}}, "display_tz", "source"}.
+        Times are in the display zone. Returns an error object with error_code if
+        the caller is not provisioned or the table cannot be read.
+    """
+    from app.models.database import EntrySignal
+    from app.services.broker_activity import zone
+    from app.services.entry_signals import EntryRules
+
+    t0 = time.monotonic()
+    user_id = _get_mcp_user_id()
+    if not user_id:
+        return {"error": True, "error_code": "UNAUTHENTICATED", "message": "No provisioned user for this token."}
+
+    display = zone(settings.broker_activity_display_tz)
+
+    def local_iso(moment: Optional[datetime]) -> Optional[str]:
+        if moment is None:
+            return None
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=timezone.utc)
+        return moment.astimezone(display).isoformat(timespec="seconds")
+
+    keep_symbols = {s.strip().upper() for s in (symbols or "").split(",") if s.strip()}
+    keep_status = {s.strip().lower() for s in (status or "").split(",") if s.strip()}
+    now = datetime.now(timezone.utc)
+    try:
+        async with async_session() as db:
+            found = (await db.execute(select(EntrySignal).where(EntrySignal.user_id == user_id))).scalars().all()
+            rows, newest = [], None
+            for r in found:
+                evaluated = r.evaluated_at.replace(tzinfo=timezone.utc) if r.evaluated_at else None
+                if evaluated and (newest is None or evaluated > newest):
+                    newest = evaluated
+                if (keep_symbols and r.symbol not in keep_symbols) or (keep_status and r.status not in keep_status):
+                    continue
+                row = {c: getattr(r, c, None) for c in SIGNAL_COLUMNS if c != "age_seconds"}
+                row["age_seconds"] = int((now - evaluated).total_seconds()) if evaluated else None
+                for c in _SIGNAL_TIME_COLUMNS:
+                    row[c] = local_iso(row[c])
+                rows.append({c: row[c] for c in SIGNAL_COLUMNS})
+            rows.sort(key=lambda x: (_SIGNAL_STATUS_ORDER.get(x["status"], 9), -(x["push_pct_atr"] or 0), x["symbol"]))
+            await mcp_tool_observability("get_signals", ticker=None, user_id=user_id,
+                                         latency_ms=int((time.monotonic() - t0) * 1000), success=True, db=db)
+
+        monitor = _signal_monitor
+        last = monitor.last_run if monitor is not None else None
+        return {
+            "columns": SIGNAL_COLUMNS,
+            "rows": rows,
+            "count": len(rows),
+            "as_of": local_iso(newest),
+            "fresh": newest is not None and (now - newest).total_seconds() < SIGNAL_FRESH_SECONDS,
+            "rules": (monitor.rules if monitor is not None else EntryRules()).as_dict(),
+            "monitor": {
+                "enabled": monitor is not None,
+                "interval_seconds": 60,
+                "last_run": None if last is None else {
+                    "status": last.status, "message": last.message, "symbols": last.symbols,
+                    "signals": last.signals, "errors": last.errors, "started_at": local_iso(last.started_at),
+                },
+            },
+            "display_tz": settings.broker_activity_display_tz,
+            "source": "entry_signals",
+        }
+    except Exception as e:
+        try:
+            async with async_session() as db:
+                await mcp_tool_observability("get_signals", ticker=None, user_id=user_id,
+                                             latency_ms=int((time.monotonic() - t0) * 1000), success=False,
+                                             error_code="DB_UNAVAILABLE", db=db)
         except Exception:
             pass
         return {"error": True, "error_code": "DB_UNAVAILABLE", "message": str(e)}

@@ -1154,3 +1154,53 @@ class BrokerSyncRun(Base):
         Index("ix_broker_sync_runs_started", "started_at"),
     )
 
+
+class EntrySignal(Base):
+    """
+    Current entry-signal state for one underlying, rewritten each minute by the
+    signal monitor (app/agents/signal_monitor.py). One row per user and symbol:
+    this is a state table, not a history.
+    """
+    __tablename__ = "entry_signals"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False)
+    symbol = Column(String(20), nullable=False)
+    status = Column(String(20), nullable=False)       # signal | no_contract | watch | idle | no_data | error
+    direction = Column(String(4), nullable=True)      # call | put
+    message = Column(String(400), nullable=True)
+    evaluated_at = Column(DateTime, nullable=False)   # UTC, when the monitor last judged this row
+    status_since = Column(DateTime, nullable=False)   # UTC, when status and direction last changed
+    last_bar_at = Column(DateTime, nullable=True)     # UTC start of the newest 1-minute bar read
+    push_bar_at = Column(DateTime, nullable=True)     # UTC start of the 5-minute bar judged
+    price = Column(Float, nullable=True)
+    vwap = Column(Float, nullable=True)
+    trend_15m = Column(String(5), nullable=True)      # up | down | flat
+    push = Column(Float, nullable=True)
+    push_pct_atr = Column(Float, nullable=True)
+    push_strong = Column(Boolean, nullable=True)
+    volume_ratio = Column(Float, nullable=True)
+    atr = Column(Float, nullable=True)
+    prev_close = Column(Float, nullable=True)
+    net_change = Column(Float, nullable=True)
+    atr_used_pct = Column(Float, nullable=True)
+    range_used_pct = Column(Float, nullable=True)
+    gate_trend = Column(Boolean, nullable=True)
+    gate_push = Column(Boolean, nullable=True)
+    gate_volume = Column(Boolean, nullable=True)
+    gate_room = Column(Boolean, nullable=True)
+    gate_contract = Column(Boolean, nullable=True)
+    option_symbol = Column(String(30), nullable=True)
+    put_call = Column(String(4), nullable=True)
+    expiration = Column(String(10), nullable=True)    # YYYY-MM-DD
+    dte = Column(Integer, nullable=True)
+    strike = Column(Float, nullable=True)
+    delta = Column(Float, nullable=True)
+    option_bid = Column(Float, nullable=True)
+    option_ask = Column(Float, nullable=True)
+    option_mid = Column(Float, nullable=True)
+    spread_pct = Column(Float, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "symbol", name="uq_entry_signals_user_symbol"),
+    )

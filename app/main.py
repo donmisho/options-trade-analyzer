@@ -293,6 +293,19 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"Account activity poller disabled: {e}")
 
+    # 5c. Entry signal monitor — the one-minute loop behind the get_signals MCP tool.
+    #     Scheduled below with the other jobs; off unless signal_monitor_enabled is set.
+    signal_monitor = None
+    if settings.signal_monitor_enabled:
+        try:
+            from app.agents.signal_monitor import SignalMonitor
+            signal_monitor = SignalMonitor(provider_factory.get_market_data(settings.default_market_data_provider))
+            logger.info("Entry signal monitor ready")
+        except Exception as e:
+            logger.warning(f"Entry signal monitor disabled: {e}")
+    from app.api.mcp_routes import init_mcp_signal_monitor
+    init_mcp_signal_monitor(signal_monitor)
+
     logger.info(f"Provider registry initialized. Available: {provider_factory.list_providers()}")
     _log_startup_timing("providers_initialized", _app_startup_start)
 
@@ -437,6 +450,26 @@ async def lifespan(app: FastAPI):
             _scheduled_activity_run,
             CronTrigger(day_of_week="mon-fri", hour="9-16", minute="*/15", timezone="America/New_York"),
             id="account_activity",
+            max_instances=1,
+            coalesce=True,
+        )
+
+    if signal_monitor is not None:
+        # Fires ten seconds into every minute from 09:00 to 15:59 ET, so the minute
+        # bar that just closed is published; the run itself stands down before 09:35
+        # and after an early close.
+        async def _scheduled_signal_run():
+            from app.models.session import async_session
+            async with async_session() as db:
+                try:
+                    await signal_monitor.run(db=db, trigger="schedule")
+                except Exception as e:
+                    logger.error(f"Scheduled signal monitor run failed: {e}")
+
+        scheduler.add_job(
+            _scheduled_signal_run,
+            CronTrigger(day_of_week="mon-fri", hour="9-15", minute="*", second=10, timezone="America/New_York"),
+            id="signal_monitor",
             max_instances=1,
             coalesce=True,
         )
